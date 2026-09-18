@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — Amply</title>
+<meta name="description" content="Amply collects nothing. No accounts, no analytics, no server that could hold your data.">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+<header>
+  <a class="mark" href="/">ampl<span>y</span></a>
+  <h1>Privacy</h1>
+  <p class="updated">Last updated 18 September 2026</p>
+</header>
+
+<p class="lead">Amply collects nothing about you. Not a reduced amount — nothing. There is
+no account to create, no analytics, and no server that could store anything if we wanted it to.</p>
+
+<p>That is a consequence of how Amply is built rather than a policy we chose to adopt. There
+is no backend holding a list of artists, no database of listeners, and no record anywhere of
+who listened to what.</p>
+
+<h2>This website</h2>
+
+<p>Static files. No cookies, no analytics, no tracking pixels, no fingerprinting. We do not
+know that you visited.</p>
+
+<h2>Setting up an artist node</h2>
+
+<p>When an artist connects their Cloudflare account, the authorisation happens between them
+and Cloudflare. We receive a short-lived access token, use it to create their storage and
+Worker, and discard it.</p>
+
+<div class="box">
+  <p><strong>We never receive a refresh token, and we never store a credential.</strong> Our
+  access to an artist's Cloudflare account exists for the seconds of one setup flow and then
+  is gone permanently. We cannot go back in later. If something needs changing, the artist
+  authorises us again.</p>
+</div>
+
+<p>We keep no record that the setup happened — no artist list, no email address, no node URL.
+The relay that carries those requests is stateless, has no storage attached to it, and logs
+nothing. <a href="https://github.com/besethda/amply-stream">Its source is public</a>; it is
+short enough to read in a minute.</p>
+
+<h2>The listener app</h2>
+
+<p>Everything stays on the device:</p>
+
+<ul>
+  <li><strong>Which artists you follow</strong> — stored locally, never transmitted to us.</li>
+  <li><strong>What you listen to, and for how long</strong> — measured on your device so that
+  artists can be paid. It never leaves it.</li>
+  <li><strong>Your wallet key</strong> — generated on your device and held in its secure
+  storage. We never see it, cannot recover it, and could not spend from it.</li>
+</ul>
+
+<p>There is no sync, no cloud backup, and no account. That has a real cost: lose the device
+without a backup and you lose the library and the balance. We would rather be honest about
+that than hold your data in order to avoid it.</p>
+
+<h2>What other people can see</h2>
+
+<p>We are not the only party involved, and it would be misleading to describe only our own
+part.</p>
+
+<ul>
+  <li><strong>The artist's node</strong> serves the audio, so it can see requests for it, the
+  same way any website can. It belongs to the artist, and it is their responsibility.</li>
+  <li><strong>Cloudflare</strong> operates that infrastructure, under the artist's own account
+  and Cloudflare's own privacy policy.</li>
+  <li><strong>The payment on-ramp</strong>, if you fund a wallet, is a separate company whose
+  terms and identity checks are their own.</li>
+  <li><strong>The blockchain.</strong> Payments to artists are recorded on a public ledger.
+  This is worth understanding clearly: those records are <strong>permanent, public, and
+  cannot be deleted</strong>. Anyone can see that an address paid an artist, when, and how
+  much. Addresses are not names, but they are not anonymous either — a wallet can be linked
+  to a person, particularly through the on-ramp that funded it.</li>
+</ul>
+
+<h2>Your rights</h2>
+
+<p>Data protection law gives you rights to access, correct and erase personal data held about
+you. We hold none, so there is nothing for us to produce or delete. If you believe otherwise,
+write to us and we will look into it.</p>
+
+<h2>Changes</h2>
+
+<p>If this page changes, the change is visible in
+<a href="https://github.com/besethda/amply-stream">the public repository's history</a>, with
+a date and a diff. We cannot quietly revise it.</p>
+
+<h2>Contact</h2>
+
+<p>Open an issue on <a href="https://github.com/besethda/amply-stream">the repository</a>.</p>
+
+<footer>
+  <a href="/">Amply</a> · <a href="/terms">Terms</a> ·
+  <a href="https://github.com/besethda/amply-stream">Source</a>
+</footer>
+</div>
+</body>
+</html>

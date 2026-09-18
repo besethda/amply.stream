@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up your music — Amply</title>
+<meta name="description" content="Put your music on hosting you own. About five minutes.">
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/style.css">
+<style>
+  body { padding-bottom: 120px; }
+  .proto {
+    position: sticky; top: 0; z-index: 20;
+    margin: 0 -20px 0; padding: 9px 20px;
+    background: var(--accent); color: #fff;
+    font-size: 13px; font-weight: 500; text-align: center;
+  }
+  .proto b { font-weight: 700; }
+
+  .steps { display: flex; gap: 8px; margin: 0 0 36px; padding: 0; list-style: none; }
+  .steps li {
+    flex: 1; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted); padding-top: 9px; border-top: 3px solid var(--rule);
+  }
+  .steps li[data-on] { color: var(--ink); border-top-color: var(--accent); }
+  .steps li[data-done] { color: var(--ink-2); border-top-color: var(--ink-2); }
+
+  .panel { display: none; }
+  .panel[data-active] { display: block; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    font: inherit; font-weight: 600; font-size: 15px;
+    background: var(--accent); color: #fff; border: 0;
+    padding: 13px 22px; border-radius: 7px; cursor: pointer;
+    text-decoration: none; transition: filter .12s;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; filter: none; }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--rule); }
+  .btn.small { font-size: 13.5px; padding: 9px 15px; font-weight: 500; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 26px; }
+  .back {
+    background: none; border: 0; font: inherit; font-size: 14px; color: var(--muted);
+    cursor: pointer; padding: 6px 0; text-decoration: underline; text-underline-offset: 3px;
+  }
+
+  .warn { border-left: 3px solid var(--accent); }
+  .warn h3 { margin: 0 0 8px; font-size: 15px; color: var(--ink); }
+
+  .task {
+    display: flex; gap: 14px; align-items: flex-start;
+    padding: 16px 0; border-bottom: 1px solid var(--rule);
+  }
+  .task:last-child { border-bottom: 0; }
+  .tick {
+    flex: none; width: 22px; height: 22px; margin-top: 2px; border-radius: 50%;
+    border: 2px solid var(--rule); display: grid; place-items: center;
+    font-size: 12px; font-weight: 700; color: #fff;
+  }
+  .task[data-done] .tick { background: var(--accent); border-color: var(--accent); }
+  .task[data-done] .tick::after { content: "✓"; }
+  .task-body { flex: 1; min-width: 0; }
+  .task-body h3 { margin: 0 0 4px; font-size: 15.5px; color: var(--ink); }
+  .task-body p { margin: 0 0 10px; font-size: 14px; }
+
+  .creates { list-style: none; padding: 0; margin: 0 0 20px; }
+  .creates li { padding: 11px 0; border-bottom: 1px solid var(--rule); font-size: 15px; color: var(--ink-2); }
+  .creates li:last-child { border-bottom: 0; }
+  .creates b { color: var(--ink); }
+  .scopes { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .scopes li { padding: 6px 0; border: 0; }
+
+  .log { list-style: none; padding: 0; margin: 0; font-size: 14.5px; }
+  .log li { display: flex; gap: 11px; padding: 9px 0; color: var(--muted); }
+  .log li[data-state="run"] { color: var(--ink); }
+  .log li[data-state="ok"] { color: var(--ink-2); }
+  .log .dot { flex: none; width: 18px; text-align: center; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .log li[data-state="run"] .dot::after {
+    content: "◜"; display: inline-block; animation: spin .7s linear infinite;
+  }
+  .log li[data-state="ok"] .dot::after { content: "✓"; color: var(--accent); }
+  .log li[data-state="wait"] .dot::after { content: "·"; }
+  .log li[data-state="skip"] { color: var(--muted); }
+  .log li[data-state="skip"] .dot::after { content: "–"; }
+  @media (prefers-reduced-motion: reduce) {
+    .log li[data-state="run"] .dot::after { animation: none; content: "▸"; }
+  }
+
+  .link-out {
+    background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
+    padding: 20px; margin: 0 0 20px; overflow-wrap: anywhere;
+  }
+  .link-out .url {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 17px; font-weight: 600; color: var(--ink); display: block; margin-bottom: 14px;
+  }
+
+  .devbar {
+    margin-top: 56px; padding-top: 18px; border-top: 1px dashed var(--rule);
+    font-size: 12.5px; color: var(--muted);
+  }
+  .devbar select, .devbar button {
+    font: inherit; font-size: 12.5px; padding: 5px 9px; border-radius: 5px;
+    border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
+  }
+  .devbar .row { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-top: 9px; }
+</style>
+</head>
+<body>
+<div class="proto"><b>Early access.</b> This really does create storage in your own Cloudflare account.</div>
+<div class="wrap">
+
+<header>
+  <a class="mark" href="/">ampl<span>y</span></a>
+</header>
+
+<ol class="steps" id="steps">
+  <li data-step="intro">Before you start</li>
+  <li data-step="cloudflare">Cloudflare</li>
+  <li data-step="connect">Connect</li>
+  <li data-step="done">Your link</li>
+</ol>
+
+<!-- ───────────────────────── 1 ───────────────────────── -->
+<section class="panel" data-panel="intro">
+  <h1>Your music, on hosting you own.</h1>
+  <p class="lead">Amply doesn't host your music — you do. It lives on your own Cloudflare
+  account, in your name, that you log into and control. We just set it up for you.</p>
+
+  <h2>Three steps, about five minutes</h2>
+  <ul>
+    <li>Create a free Cloudflare account</li>
+    <li>Switch on R2 storage — <strong>this asks for a card</strong></li>
+    <li>Come back here and we'll build everything</li>
+  </ul>
+
+  <div class="box warn">
+    <h3>About the card</h3>
+    <p>Cloudflare requires one before storage can be switched on. That's their rule, not ours.
+    <strong>Nothing will be charged.</strong> Their free tier covers roughly a thousand tracks,
+    and streaming to your listeners costs nothing at any volume — bandwidth is free, which is
+    the whole reason this works.</p>
+  </div>
+
+  <div class="box">
+    <p>When you sign up, <strong>use a personal email address you'll still have in ten
+    years</strong> — not a work or school one. Billing and account notices go there, and this
+    account is where your music lives. Turn on two-factor authentication while you're there.</p>
+  </div>
+
+  <div class="actions">
+    <button class="btn" data-go="cloudflare">Start<span aria-hidden="true">→</span></button>
+  </div>
+</section>
+
+<!-- ───────────────────────── 2 ───────────────────────── -->
+<section class="panel" data-panel="cloudflare">
+  <h1>Set up Cloudflare</h1>
+  <p class="lead">One link does all of it. It opens in a new tab — leave this one open and
+  come back when you're done.</p>
+
+  <div class="box">
+    <p><strong>What happens over there:</strong></p>
+    <ul style="margin-bottom:0">
+      <li>Create a Cloudflare account, or sign in if you already have one</li>
+      <li>You'll land on the storage page — switch on R2</li>
+      <li>It asks for a card. Nothing gets charged.</li>
+    </ul>
+  </div>
+
+  <div class="actions">
+    <a class="btn" href="https://dash.cloudflare.com/?to=/:account/r2/overview"
+       target="_blank" rel="noopener" data-mark="cf">Open Cloudflare ↗</a>
+  </div>
+
+  <div class="actions" style="margin-top:32px">
+    <button class="btn ghost" id="to-connect" data-go="connect">Finished at Cloudflare? Connect<span aria-hidden="true">→</span></button>
+  </div>
+  <div class="actions"><button class="back" data-go="intro">← Back</button></div>
+</section>
+
+<!-- ───────────────────────── 3 ───────────────────────── -->
+<section class="panel" data-panel="connect">
+  <h1>Connect your Cloudflare account</h1>
+  <p class="lead">We'll create three things in your account:</p>
+
+  <ul class="creates">
+    <li><b>An R2 bucket</b> — your audio files</li>
+    <li><b>A KV namespace</b> — your track list</li>
+    <li><b>A Worker</b> — serves your music to listeners</li>
+  </ul>
+
+  <h2>We're asking for</h2>
+  <ul class="creates scopes">
+    <li>account.read</li>
+    <li>workers-scripts.write</li>
+    <li>workers-kv-storage.write</li>
+    <li>workers-r2.write</li>
+    <li>access-org.write</li>
+    <li>access-idp.write</li>
+    <li>access-app.write</li>
+    <li>access-policy.write</li>
+  </ul>
+  <p style="font-size:13.5px;color:var(--muted)">The last four put your editor on your own
+  node behind a sign-in, so adding music never goes through us. They're used once, during
+  setup, and we keep no access afterwards.</p>
+
+  <div class="box warn">
+    <p><strong>We keep no access after this.</strong> No password, no stored permission,
+    nothing that lets us back in later. Our access lasts for the few seconds this takes, and
+    then it's gone. If you ever want to change something, you authorise us again.</p>
+  </div>
+
+  <div class="box">
+    <p><label for="artist-name"><strong>What should we call you?</strong></label></p>
+    <p style="font-size:14px;margin-bottom:10px">This names your files and your web address.
+    You can change how it's displayed later, but the address is harder to change — so pick
+    the name you release music under.</p>
+    <input id="artist-name" type="text" autocomplete="off" spellcheck="false"
+           placeholder="Hollow Coast"
+           style="width:100%;font:inherit;padding:11px 13px;border:1px solid var(--rule);
+                  border-radius:7px;background:var(--bg);color:var(--ink)">
+    <p style="font-size:13px;color:var(--muted);margin:10px 0 0" id="slug-preview"></p>
+  </div>
+
+  <div class="box">
+    <p><label for="artist-email"><strong>Your email address</strong></label></p>
+    <p style="font-size:14px;margin-bottom:10px">Used only to lock your editor to you.
+    Signing in later emails you a code — there's no password to lose, and we never store
+    the address anywhere.</p>
+    <input id="artist-email" type="email" autocomplete="email" spellcheck="false"
+           placeholder="you@example.com"
+           style="width:100%;font:inherit;padding:11px 13px;border:1px solid var(--rule);
+                  border-radius:7px;background:var(--bg);color:var(--ink)">
+  </div>
+
+  <div class="actions">
+    <button class="btn" id="connect-btn" disabled>Connect Cloudflare account<span aria-hidden="true">→</span></button>
+  </div>
+  <div class="actions"><button class="back" data-go="cloudflare">← Back</button></div>
+</section>
+
+<!-- ───────────────────────── 3b ───────────────────────── -->
+<section class="panel" data-panel="working">
+  <h1>Setting things up</h1>
+  <p class="lead">This takes a few seconds. You can leave this page open.</p>
+  <div class="box">
+    <ul class="log" id="log">
+      <li data-state="wait" data-task="account"><span class="dot"></span><span>Finding your account</span></li>
+      <li data-state="wait" data-task="bucket"><span class="dot"></span><span>Creating storage for your audio</span></li>
+      <li data-state="wait" data-task="kv"><span class="dot"></span><span>Creating your track list</span></li>
+      <li data-state="wait" data-task="worker"><span class="dot"></span><span>Deploying your player</span></li>
+      <li data-state="wait" data-task="subdomain"><span class="dot"></span><span>Giving it a web address</span></li>
+      <li data-state="wait" data-task="editor"><span class="dot"></span><span>Installing your editor</span></li>
+      <li data-state="wait" data-task="access"><span class="dot"></span><span>Locking the editor to you</span></li>
+      <li data-state="wait" data-task="manifest"><span class="dot"></span><span>Publishing your page</span></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ───────────────────────── account chooser ───────────────────────── -->
+<section class="panel" data-panel="choose">
+  <h1>Which account?</h1>
+  <p class="lead">You're a member of more than one Cloudflare account. Pick the one your
+  music should live in — this matters, so don't put it in an account that belongs to someone
+  else or to a job.</p>
+  <div id="account-list"></div>
+  <div class="actions"><button class="back" data-go="connect">← Back</button></div>
+</section>
+
+<!-- ───────────────────────── errors ───────────────────────── -->
+<section class="panel" data-panel="error">
+  <h1 id="err-title">Something went wrong</h1>
+  <p class="lead" id="err-body"></p>
+  <div class="actions" id="err-actions"></div>
+  <div class="actions"><button class="back" data-go="cloudflare">← Back to the Cloudflare step</button></div>
+</section>
+
+<!-- ───────────────────────── 4 ───────────────────────── -->
+<section class="panel" data-panel="done">
+  <h1>You're live.</h1>
+  <p class="lead">Your music now has a home that belongs to you. Here's its address:</p>
+
+  <div class="link-out">
+    <code class="url" id="node-url">https://hollow-coast.amply-node.workers.dev</code>
+    <div class="actions" style="margin-top:0">
+      <button class="btn small" id="copy">Copy link</button>
+      <button class="btn small ghost" id="share">Share</button>
+    </div>
+  </div>
+
+  <div class="box warn" id="skipped-note" hidden>
+    <h3 id="skipped-title">Your editor isn't ready yet</h3>
+    <p id="skipped-why"></p>
+    <p style="margin-bottom:0">Your node is live and your link works — you just can't add
+    music to it until this finishes. <strong>Run setup again</strong> and it'll pick up from
+    here; nothing gets duplicated.</p>
+  </div>
+
+  <div class="box warn">
+    <p><strong>This link is how people find you.</strong> There's no Amply directory, no
+    search, and no algorithm — on purpose. Nobody decides who gets seen. Put this wherever
+    your audience already is: your bio, your posts, your mailing list.</p>
+  </div>
+
+  <h2>Next</h2>
+  <ul>
+    <li>Upload your tracks and artwork</li>
+    <li>Set your price per minute, and where you want to be paid</li>
+    <li>Share your link</li>
+  </ul>
+
+  <div class="actions">
+    <a class="btn" id="edit-link" href="/start">Upload your music<span aria-hidden="true">→</span></a>
+  </div>
+  <p style="font-size:13px;color:var(--muted);margin-top:12px" id="edit-where"></p>
+</section>
+
+<!-- ───────────────────────── dev ───────────────────────── -->
+<div class="devbar">
+  For testing only — not part of what an artist sees.
+  <div class="row">
+    <button id="reset">Reset and start over</button>
+    <span>Clears saved progress. Does not delete anything already created in Cloudflare.</span>
+  </div>
+</div>
+
+<footer>
+  <a href="/">Amply</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a>
+</footer>
+</div>
+
+<script type="module">
+import { beginAuthorization, readCallback, completeAuthorization, revoke, ALL_SCOPES }
+  from "/js/pkce.js";
+import { provision, clearProgress, toSlug, ProvisionError, STEPS }
+  from "/js/provision.js";
+
+const CONFIG = {
+  // Public by design: with PKCE there is no client secret, and this ships in
+  // browser source. See .env.example.
+  clientId: "3c90043d38e9a202d4147d82740092d7",
+  relay: "https://amply-relay.sdarmistead.workers.dev",
+  redirectUri: window.location.origin + "/oauth/callback",
+};
+
+const KEY = "amply.onboarding.v1";
+const ORDER = ["intro", "cloudflare", "connect", "done"];
+
+let state = { step: "intro", opened: {}, url: "", artistName: "", email: "", editorUrl: null };
+try {
+  const saved = localStorage.getItem(KEY);
+  if (saved) state = Object.assign(state, JSON.parse(saved));
+} catch {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
+
+const panels = document.querySelectorAll("[data-panel]");
+const stepEls = document.querySelectorAll("#steps li");
+const $ = (sel) => document.querySelector(sel);
+
+function show(step) {
+  state.step = step; save();
+  panels.forEach((p) => p.toggleAttribute("data-active", p.dataset.panel === step));
+  let idx = ORDER.indexOf(step);
+  if (["working", "error", "choose"].includes(step)) idx = 2;
+  stepEls.forEach((li, i) => {
+    li.removeAttribute("data-on"); li.removeAttribute("data-done");
+    if (i < idx) li.setAttribute("data-done", "");
+    if (i === idx) li.setAttribute("data-on", "");
+  });
+  window.scrollTo({ top: 0, behavior: "instant" });
+}
+
+document.querySelectorAll("[data-go]").forEach((b) =>
+  b.addEventListener("click", () => show(b.dataset.go)));
+
+document.querySelectorAll("[data-mark]").forEach((a) =>
+  a.addEventListener("click", () => { state.opened[a.dataset.mark] = true; save(); paintTasks(); }));
+
+function paintTasks() {
+  const btn = $("#to-connect");
+  if (btn) btn.classList.toggle("ghost", !state.opened.cf);
+}
+
+// ── name → slug ────────────────────────────────────────────────────────────
+const nameInput = $("#artist-name");
+const emailInput = $("#artist-email");
+const connectBtn = $("#connect-btn");
+
+function refreshName() {
+  const name = nameInput.value.trim();
+  const slug = toSlug(name);
+  state.artistName = name; save();
+  state.email = emailInput.value.trim(); save();
+  connectBtn.disabled = name.length === 0;
+  $("#slug-preview").textContent = name
+    ? `Your address will be: ${slug}.<your-subdomain>.workers.dev`
+    : "";
+}
+nameInput.value = state.artistName || "";
+emailInput.value = state.email || "";
+nameInput.addEventListener("input", refreshName);
+emailInput.addEventListener("input", refreshName);
+refreshName();
+
+connectBtn.addEventListener("click", async () => {
+  connectBtn.disabled = true;
+  try {
+    await beginAuthorization({
+      clientId: CONFIG.clientId,
+      redirectUri: CONFIG.redirectUri,
+      scopes: ALL_SCOPES,
+    });
+  } catch (e) {
+    connectBtn.disabled = false;
+    fail("unexpected", e.message);
+  }
+});
+
+// ── failure copy ───────────────────────────────────────────────────────────
+// Every one keeps the artist where they are and names the fix.
+const ERRORS = {
+  r2_disabled: {
+    title: "R2 isn't switched on yet",
+    body: "Your account is connected, but storage hasn't been enabled. That's the step that " +
+          "asks for a card — nothing gets charged.",
+    action: { label: "Switch on R2 ↗", href: "https://dash.cloudflare.com/?to=/:account/r2/overview" },
+    retry: "Done — try again",
+  },
+  declined: {
+    title: "Permissions weren't granted",
+    body: "We can't create anything without them, and nothing in your account was changed. " +
+          "You can look again at what we're asking for before deciding.",
+    retry: "Review and try again", goto: "connect",
+  },
+  name_taken: {
+    title: "That name is already in use",
+    body: "Something in your account already has this name. Try a different one — it only " +
+          "affects the address, and you can put a custom domain on top later.",
+    retry: "Choose another name", goto: "connect",
+  },
+  no_subdomain: {
+    title: "Your account needs a workers.dev address",
+    body: "Cloudflare asks you to claim one, once, before anything can have a public URL. " +
+          "It takes a moment and it's free.",
+    action: { label: "Claim it ↗", href: "https://dash.cloudflare.com/?to=/:account/workers/subdomain" },
+    retry: "Done — try again",
+  },
+  no_account: {
+    title: "No Cloudflare account found",
+    body: "That login isn't attached to an account yet. Finish creating one and come back.",
+    action: { label: "Open Cloudflare ↗", href: "https://dash.cloudflare.com/?to=/:account/r2/overview" },
+    retry: "Try again",
+  },
+  auth: {
+    title: "Cloudflare refused the request",
+    body: "This usually means a permission was left out, or the sign-in expired. Nothing was " +
+          "changed in your account.",
+    retry: "Start again", goto: "connect",
+  },
+  network: {
+    title: "Connection lost",
+    body: "We lost contact partway through. Your progress was saved, so nothing needs redoing.",
+    retry: "Resume setup",
+  },
+  cloudflare: { title: "Cloudflare reported a problem", body: "", retry: "Try again" },
+  unexpected: { title: "Something went wrong", body: "", retry: "Try again" },
+};
+
+function fail(kind, detail) {
+  const e = ERRORS[kind] || ERRORS.unexpected;
+  $("#err-title").textContent = e.title;
+  $("#err-body").textContent = e.body || detail || "";
+  if (e.body && detail && detail !== e.body) {
+    const d = document.createElement("p");
+    d.style.cssText = "font-size:13px;color:var(--muted)";
+    d.textContent = detail;
+    $("#err-body").after(d);
+  }
+  const acts = $("#err-actions");
+  acts.innerHTML = "";
+  if (e.action) {
+    const a = document.createElement("a");
+    a.className = "btn ghost"; a.href = e.action.href;
+    a.target = "_blank"; a.rel = "noopener"; a.textContent = e.action.label;
+    acts.appendChild(a);
+  }
+  const r = document.createElement("button");
+  r.className = "btn"; r.textContent = e.retry;
+  r.addEventListener("click", () => {
+    if (e.goto) { show(e.goto); return; }
+    // Resume: progress is persisted, so completed steps are skipped.
+    if (session.token) runProvision(session.token);
+    else show("connect");
+  });
+  acts.appendChild(r);
+  show("error");
+}
+
+// ── provisioning ───────────────────────────────────────────────────────────
+const session = { token: null, withAccess: true };
+
+function markStep(id, s, detail) {
+  const li = document.querySelector(`#log li[data-task="${id}"]`);
+  if (!li) return;
+  li.setAttribute("data-state", s === "running" ? "run" : s === "skipped" ? "skip" : "ok");
+  if (s === "skipped") {
+    // Show the reason inline. A tooltip is useless for diagnosis — nobody
+    // hovers, and the reason is the only thing that explains what to do next.
+    const note = document.createElement("span");
+    note.style.cssText = "color:var(--muted);font-size:12.5px;display:block;margin-left:29px";
+    note.textContent = detail
+      ? `couldn't finish — ${detail}`
+      : "couldn't finish";
+    li.style.display = "block";
+    li.appendChild(note);
+  }
+}
+
+async function runProvision(token, chosenAccountId = null) {
+  show("working");
+  document.querySelectorAll("#log li").forEach((li) => li.setAttribute("data-state", "wait"));
+
+  try {
+    const { url, editorUrl, skipped } = await provision({
+      token,
+      relay: CONFIG.relay,
+      artistName: state.artistName || "Untitled",
+      slug: toSlug(state.artistName),
+      email: state.email || null,
+      withAccess: session.withAccess !== false,
+      chosenAccountId,
+      onStep: markStep,
+    });
+
+    state.url = url;
+    state.editorUrl = editorUrl;
+    save();
+    $("#node-url").textContent = url;
+    const edit = $("#edit-link");
+    edit.href = editorUrl || "/start";
+    $("#edit-where").textContent = editorUrl
+      ? "Your editor is on your own node. Sign in with the code emailed to you."
+      : "Setup didn't finish — run it again to get your editor.";
+
+    // The progress list disappears a moment after this screen appears, so any
+    // skip reason has to be restated here or it is lost.
+    const reasons = (skipped || []).map((x) => (typeof x === "string" ? x : x.why)).filter(Boolean);
+    if (reasons.length) {
+      $("#skipped-why").textContent = reasons.join(" · ");
+      $("#skipped-note").hidden = false;
+      console.warn("[amply] skipped steps:", skipped);
+    }
+
+    // The token has done its job. Kill it now rather than let it expire.
+    await revoke({ relay: CONFIG.relay, clientId: CONFIG.clientId, token });
+    session.token = null;
+    clearProgress();
+
+    setTimeout(() => show("done"), 400);
+  } catch (err) {
+    if (err instanceof ProvisionError && err.kind === "choose_account") {
+      renderAccountChooser(JSON.parse(err.detail), token);
+      return;
+    }
+    fail(err instanceof ProvisionError ? err.kind : "unexpected", err.message);
+  }
+}
+
+function renderAccountChooser(accounts, token) {
+  const list = $("#account-list");
+  list.innerHTML = "";
+  accounts.forEach((a) => {
+    const b = document.createElement("button");
+    b.className = "btn ghost";
+    b.style.cssText = "display:block;width:100%;text-align:left;margin-bottom:10px";
+    b.textContent = a.name;
+    b.addEventListener("click", () => runProvision(token, a.id));
+    list.appendChild(b);
+  });
+  show("choose");
+}
+
+// ── returning from Cloudflare ──────────────────────────────────────────────
+(async function handleCallback() {
+  const cb = readCallback();
+  if (!cb) { paintTasks(); show(["working", "error", "choose"].includes(state.step) ? "connect" : state.step); return; }
+
+  // Drop the code from the URL so a refresh cannot replay it.
+  history.replaceState({}, "", "/start");
+
+  if (!cb.ok) { fail(cb.declined ? "declined" : "auth", cb.description); return; }
+
+  show("working");
+  try {
+    const { token, hasAccessScopes } = await completeAuthorization({
+      clientId: CONFIG.clientId, relay: CONFIG.relay, code: cb.code, state: cb.state,
+    });
+    session.token = token;
+    session.withAccess = hasAccessScopes;
+    await runProvision(token);
+  } catch (e) {
+    fail("auth", e.message);
+  }
+})();
+
+// ── success screen ─────────────────────────────────────────────────────────
+$("#copy").addEventListener("click", (ev) => {
+  const btn = ev.currentTarget;
+  navigator.clipboard.writeText(state.url || $("#node-url").textContent)
+    .then(() => { btn.textContent = "Copied"; setTimeout(() => (btn.textContent = "Copy link"), 1600); })
+    .catch(() => { btn.textContent = "Press ⌘C"; });
+});
+
+$("#share").addEventListener("click", (ev) => {
+  const btn = ev.currentTarget;
+  const url = state.url || $("#node-url").textContent;
+  if (navigator.share) { navigator.share({ title: "My music on Amply", url }).catch(() => {}); return; }
+  navigator.clipboard.writeText(url)
+    .then(() => { btn.textContent = "Link copied"; setTimeout(() => (btn.textContent = "Share"), 1600); })
+    .catch(() => { btn.textContent = "Press ⌘C"; });
+});
+
+$("#reset").addEventListener("click", () => {
+  try { localStorage.removeItem(KEY); } catch {}
+  clearProgress();
+  state = { step: "intro", opened: {}, url: "", artistName: "" };
+  nameInput.value = ""; refreshName(); paintTasks(); show("intro");
+});
+</script>
+</body>
+</html>

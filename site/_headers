@@ -1,0 +1,20 @@
+# Cloudflare Pages caches static assets for four hours by default. For the
+# modules that drive provisioning that is actively dangerous, not merely
+# annoying: a browser holding a stale /js/*.js runs last deploy's logic against
+# this deploy's HTML, and a stale /node-worker.js would deploy an OUTDATED
+# WORKER into an artist's account — including, one day, one with a fixed bug
+# still in it.
+#
+# `no-cache` means revalidate every time, not "never store". With etags in play
+# a repeat visit is a cheap 304.
+
+/js/*
+  Cache-Control: no-cache
+
+/node-worker.js
+  Cache-Control: no-cache
+
+# Uploaded into artists' buckets. A stale copy means shipping an out-of-date
+# editor into an account we cannot reach afterwards — same hazard as the Worker.
+/node-manage
+  Cache-Control: no-cache

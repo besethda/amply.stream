@@ -1,0 +1,17 @@
+{
+  "name": "amply-manage",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The page an artist uses to put music on their node.",
+  "type": "module",
+  "scripts": {
+    "build:node": "esbuild src/main-node.jsx --bundle --format=esm --target=es2022 --jsx=automatic --jsx-import-source=preact --minify --outfile=../.build/node-manage.js",
+    "build": "npm run build:node && node bundle-node-editor.mjs"
+  },
+  "dependencies": {
+    "preact": "^10.24.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "amply-node",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": false },
+
+  // Audio and cover art. Zero egress cost — this is what makes self-hosting viable.
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "amply-media" }
+  ],
+
+  // The manifest, and nothing else.
+  "kv_namespaces": [
+    { "binding": "MANIFEST", "id": "amply-manifest" }
+  ]
+}

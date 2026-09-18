@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "amply-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+
+  // No logs. An artist's access token passes through this Worker; nothing
+  // about that should be written down anywhere.
+  "observability": { "enabled": false },
+
+  // Deliberately no bindings. No KV, no R2, no D1, no Durable Objects.
+  // Nothing to exfiltrate even if the code above is wrong. Do not add any.
+
+  "vars": {
+    "ALLOWED_ORIGINS": "https://amply.stream,http://localhost:8788"
+  }
+}

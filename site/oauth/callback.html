@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connecting — Amply</title>
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header><a class="mark" href="/">ampl<span>y</span></a></header>
+  <p class="lead" id="msg">Connecting your account…</p>
+  <p id="fallback" hidden>
+    <a class="btn" id="continue" href="/start">Continue →</a>
+  </p>
+  <noscript><p>JavaScript is required to finish. <a href="/start">Start again</a>.</p></noscript>
+</div>
+<script>
+/* Deliberately a plain inline script with NO imports and NO dependencies.
+ *
+ * This page holds a live, single-use authorization code. If it fails to run,
+ * the artist is stranded at a URL they cannot do anything with, and has to
+ * start over. An earlier version imported a module to read where to resume;
+ * one stale cached copy of that module broke exactly this way.
+ *
+ * So: read sessionStorage directly, validate, forward. Nothing to fail.
+ */
+(function () {
+  var fallback = "/start";
+  var to = fallback;
+
+  try {
+    var raw = sessionStorage.getItem("amply.pkce");
+    var saved = raw ? JSON.parse(raw) : null;
+    // Same-origin absolute paths only — never anything a caller could supply.
+    if (saved && typeof saved.returnTo === "string" && /^\/[A-Za-z0-9\/_-]*$/.test(saved.returnTo)) {
+      to = saved.returnTo;
+    }
+  } catch (e) {
+    /* private window, blocked storage — the fallback is still correct */
+  }
+
+  var target = to + location.search + location.hash;
+
+  // replace() rather than assign(): the back button must not land on a spent code.
+  try {
+    location.replace(target);
+  } catch (e) {
+    // Last resort: show a link rather than leave someone stuck holding a code.
+    document.getElementById("msg").textContent = "Almost there.";
+    document.getElementById("continue").href = target;
+    document.getElementById("fallback").hidden = false;
+  }
+})();
+</script>
+</body>
+</html>

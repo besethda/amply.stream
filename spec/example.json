@@ -1,0 +1,59 @@
+{
+  "amply": 1,
+  "updated": "2026-09-18T12:00:00Z",
+  "artist": {
+    "name": "Hollow Coast",
+    "bio": "Recorded in a converted lifeboat station on the Norfolk coast. Everything here is original and self-released.",
+    "image": "https://music.hollowcoast.com/art/avatar.jpg",
+    "links": [
+      { "label": "Bandcamp", "url": "https://hollowcoast.bandcamp.com" },
+      { "label": "Instagram", "url": "https://instagram.com/hollowcoast" }
+    ]
+  },
+  "content": { "explicit": false },
+  "payment": [
+    {
+      "type": "solana-usdc",
+      "address": "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
+      "ratePerMinute": 0.01,
+      "settleAt": 1.0
+    },
+    { "type": "link", "label": "Ko-fi", "url": "https://ko-fi.com/hollowcoast" }
+  ],
+  "releases": [
+    {
+      "id": "longwave",
+      "title": "Longwave",
+      "date": "2026-03-01",
+      "art": "https://music.hollowcoast.com/art/longwave.jpg",
+      "tracks": [
+        {
+          "id": "signal-fade",
+          "title": "Signal Fade",
+          "duration": 214,
+          "url": "https://music.hollowcoast.com/audio/signal-fade.m4a"
+        },
+        {
+          "id": "north-sea-static",
+          "title": "North Sea Static",
+          "duration": 331,
+          "url": "https://music.hollowcoast.com/audio/north-sea-static.m4a"
+        }
+      ]
+    },
+    {
+      "id": "tideline-ep",
+      "title": "Tideline EP",
+      "date": "2025-08-14",
+      "art": "https://music.hollowcoast.com/art/tideline.jpg",
+      "tracks": [
+        {
+          "id": "tideline",
+          "title": "Tideline",
+          "duration": 258,
+          "url": "https://music.hollowcoast.com/audio/tideline.m4a"
+        }
+      ]
+    }
+  ]
+}

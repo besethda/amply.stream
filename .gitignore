@@ -1,0 +1,21 @@
+node_modules/
+.wrangler/
+dist/
+.DS_Store
+*.log
+
+# Local config. Never commit — even values that aren't secret today.
+.env
+.env.*
+!.env.example
+.dev.vars
+
+# Local test deploys against a real account
+node/wrangler.local.jsonc
+
+manage/node_modules/
+
+.build/
+
+# Working notes — not published
+docs/

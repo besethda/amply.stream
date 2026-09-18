@@ -1,0 +1,16 @@
+{
+  "name": "amply",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Artists host their own music, set their own prices, and are paid directly.",
+  "type": "module",
+  "scripts": {
+    "build": "npm run build:node && npm run build:manage",
+    "build:node": "npm --prefix node run build:site",
+    "build:manage": "npm --prefix manage run build",
+    "check": "npm run build && node spec/validate.mjs spec/example.json && npm --prefix node run typecheck && npm --prefix relay run typecheck",
+    "deploy:site": "npm run build && ./node/node_modules/.bin/wrangler pages deploy site --project-name=amply",
+    "deploy:relay": "npm --prefix relay run deploy",
+    "test:node": "node/test-node.sh"
+  }
+}
