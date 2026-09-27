@@ -3,35 +3,148 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Amply</title>
-<meta name="description" content="Artists host their own music, set their own prices, and are paid directly by the people who listen.">
+<title>Amply - every play pays the artist</title>
+<meta name="description" content="Listen to artists on their own streaming services. Every play pays the artist, with no cut taken by anyone in between.">
+<meta property="og:title" content="Amply">
+<meta property="og:description" content="Every play pays the artist.">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="/style.css">
+<style>
+  /* The top bar's text link, beside its button. */
+  .topbar-link {
+    color: var(--ink2); text-decoration: none; font-weight: 600; font-size: 16px; padding: 10px 12px;
+  }
+  .topbar-link:hover { color: var(--ink); }
+  .topbar-actions .btn { white-space: nowrap; }
+  @media (max-width: 480px) {
+    .topbar-actions { gap: 4px; }
+    .topbar-link { font-size: 15px; padding: 8px; white-space: nowrap; }
+    .topbar-actions .btn.sm { font-size: 15px; padding: 11px 16px; }
+  }
+  .hero { position: relative; overflow: hidden; }
+  .hero-in > :first-child { position: relative; z-index: 1; }
+  .hero-in {
+    position: relative; display: grid; gap: clamp(36px, 5vw, 64px); align-items: center;
+    padding-block: clamp(48px, 6vw, 88px);
+  }
+  @media (min-width: 900px) { .hero-in { grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr); } }
+  .hero h1 { margin-bottom: clamp(22px, 3vw, 34px); }
+  .hero .lead { color: rgba(250, 247, 245, .7); margin-bottom: clamp(30px, 4vw, 44px); }
+
+  /* The phone, with the app playing in it, and the waveform running behind. */
+  .stage { position: relative; display: grid; place-items: center; }
+  .hero-wave {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 100vw; height: 300px; pointer-events: none;
+    /* Fading out towards the words, so it never runs under them. */
+    -webkit-mask-image: linear-gradient(90deg, transparent calc(50% - 360px), #000 calc(50% - 170px), #000 calc(50% + 170px), transparent calc(50% + 460px));
+            mask-image: linear-gradient(90deg, transparent calc(50% - 360px), #000 calc(50% - 170px), #000 calc(50% + 170px), transparent calc(50% + 460px));
+  }
+  @media (max-width: 899px) { .hero-wave { -webkit-mask-image: none; mask-image: none; } }
+  .phone {
+    position: relative; width: min(290px, 64vw); aspect-ratio: 780 / 1688; box-sizing: content-box;
+    border-radius: 46px; border: 9px solid #26221f; background: #0d0c0b; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, .55), 0 0 0 1px rgba(255, 255, 255, .06);
+  }
+  .phone video { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+  .claims { display: grid; gap: clamp(28px, 4vw, 48px); }
+  @media (min-width: 900px) { .claims { grid-template-columns: repeat(3, 1fr); } }
+  .claims h2 { font-size: clamp(30px, 3.2vw, 44px); line-height: 1.04; }
+
+  .makers { display: grid; gap: 28px; align-items: end; }
+  @media (min-width: 900px) { .makers { grid-template-columns: minmax(0, 1fr) auto; } }
+  .makers p { font-size: clamp(18px, 1.8vw, 23px); max-width: 30em; margin: 20px 0 0; }
+  /* The last section: a way into how it works. */
+  .how-link { background: var(--deep); padding-block: clamp(48px, 6vw, 84px); }
+  .how-link a {
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    color: var(--on-deep); text-decoration: none;
+  }
+  .how-link .eyebrow { color: rgba(250, 247, 245, .55); }
+  .how-link .eyebrow { margin-bottom: 12px; }
+  .how-link .arrow { font-size: clamp(36px, 5vw, 64px); color: var(--orange); transition: transform .15s ease; }
+  .how-link a:hover .arrow { transform: translateX(8px); }
+</style>
+<script src="/js/home.js" defer></script>
 </head>
 <body>
-<div class="wrap">
-<header>
-  <a class="mark" href="/">ampl<span>y</span></a>
-  <h1>Artists host their own music.</h1>
-  <p class="updated">In development</p>
-</header>
 
-<p class="lead">Set your own price. Get paid directly by the people who listen. Amply takes
-0% — not a reduced rate, but zero, because there is no mechanism by which it could take
-anything.</p>
+<div class="topbar">
+  <div class="topbar-in">
+    <a class="mark" href="/"><img src="/amply.svg" alt="" width="26" height="26">amply</a>
+    <div class="topbar-actions"><a class="topbar-link" href="/artists">For artists</a><a class="btn sm" href="/app/">Open the app</a></div>
+  </div>
+</div>
 
-<p>Your music lives on hosting you own and log into. There is no catalogue, no algorithm, and
-no company in the middle. Nothing here can be sold, acquired, or shut down out from under you.</p>
+<div class="hero panel-deep bleed">
+  <div class="col hero-in">
+    <div>
+      <h1>Every play<br>pays <span class="orange">the artist.</span></h1>
+      <p class="lead">Music streamed straight from each artist's own service. Nobody in between takes a cut.</p>
+      <div class="actions">
+        <a class="btn" href="/app/">Start listening</a>
+      </div>
+    </div>
+    <div class="stage">
+      <canvas class="hero-wave" aria-hidden="true"></canvas>
+      <div class="phone">
+        <video src="/media/app-demo.mp4" poster="/media/app-demo.jpg" autoplay muted loop playsinline preload="auto"
+          aria-label="The Amply app playing a song"></video>
+      </div>
+    </div>
+  </div>
+</div>
 
-<h2>Status</h2>
+<div class="panel-orange bleed">
+  <section>
+    <div class="col">
+      <div class="claims">
+        <h2>Straight to<br>the artist.</h2>
+        <h2>No cut taken.<br>None.</h2>
+        <h2>Songs you<br>can keep.</h2>
+      </div>
+    </div>
+  </section>
+</div>
 
-<p>Early, and not yet open for artists. The manifest specification and the node are written;
-onboarding, the management tools and the listener app are not.
-<a href="https://github.com/besethda/amply-stream">Follow along in the repository.</a></p>
+<section>
+  <div class="col makers">
+    <div>
+      <h2>Make music?</h2>
+      <p>Run your own streaming service. Your music, your price, paid straight to you.</p>
+    </div>
+    <div class="actions"><a class="btn" href="/artists">For artists</a></div>
+  </div>
+</section>
+
+<section class="how-link">
+  <div class="col">
+    <a href="/how">
+      <div>
+        <p class="eyebrow">Made by a musician</p>
+        <h2>How it works</h2>
+      </div>
+      <span class="arrow" aria-hidden="true">→</span>
+    </a>
+  </div>
+</section>
 
 <footer>
-  <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> ·
-  <a href="https://github.com/besethda/amply-stream">Source</a>
+  <div class="footer-in">
+    <span>amply</span>
+    <div class="footer-links">
+      <a href="/how">How it works</a>
+      <a href="/protect">Protecting your music</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+      <a href="https://github.com/besethda/amply.stream">Source</a>
+    </div>
+  </div>
 </footer>
-</div>
+
 </body>
 </html>

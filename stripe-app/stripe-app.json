@@ -1,0 +1,48 @@
+{
+  "$schema": "https://stripe.com/stripe-app.schema.json",
+  "id": "amply-key",
+  "name": "Amply for Artists",
+  "version": "0.0.4",
+  "icon": "./icon.png",
+  "ui_extension": {
+    "views": [
+      {
+        "viewport": "settings",
+        "component": "AppSettings"
+      }
+    ],
+    "content_security_policy": {
+      "purpose": ""
+    }
+  },
+  "extensions": null,
+  "permissions": [
+    {
+      "permission": "product_write",
+      "purpose": "Creates one product, named after you, in your own Stripe account, for your subscription plans to belong to."
+    },
+    {
+      "permission": "plan_write",
+      "purpose": "Creates a price for each plan you choose in your Amply editor: every 3, 6 or 12 months, at the amount you set."
+    },
+    {
+      "permission": "payment_links_write",
+      "purpose": "Makes a Stripe Payment Link for each plan, so fans pay on Stripe's own checkout page, and switches them off if you disconnect. Fans' card details never touch Amply."
+    },
+    {
+      "permission": "customer_portal_write",
+      "purpose": "Turns on Stripe's customer portal, so fans can cancel or change their card themselves on Stripe's page, without needing to contact you."
+    },
+    {
+      "permission": "subscription_read",
+      "purpose": "Checks whether each fan's subscription is still active, when it's due to renew and otherwise once a day, so a fan who cancels stops getting paid music. It can't change subscriptions."
+    },
+    {
+      "permission": "checkout_session_read",
+      "purpose": "Confirms that a checkout a fan has just finished really was paid, and which fan it was, before their subscription starts. It reads nothing else."
+    }
+  ],
+  "distribution_type": "public",
+  "stripe_api_access_type": "restricted_api_key",
+  "sandbox_install_compatible": true
+}

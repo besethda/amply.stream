@@ -5,12 +5,29 @@
   "description": "Artists host their own music, set their own prices, and are paid directly.",
   "type": "module",
   "scripts": {
-    "build": "npm run build:node && npm run build:manage",
+    "build": "npm run build:node && npm run build:manage && npm run build:licence && npm run build:app && npm run build:version",
     "build:node": "npm --prefix node run build:site",
     "build:manage": "npm --prefix manage run build",
-    "check": "npm run build && node spec/validate.mjs spec/example.json && npm --prefix node run typecheck && npm --prefix relay run typecheck",
+    "check": "npm run build && node spec/validate.mjs spec/example.json && npm run test:manage && npm run test:app && npm run test:csp && npm run test:store && npm run test:page && npm run test:stripe && npm run test:sales && npm run test:limits && npm run test:pricing && npm run test:provision && npm --prefix node run typecheck && npm --prefix relay run typecheck",
     "deploy:site": "npm run build && ./node/node_modules/.bin/wrangler pages deploy site --project-name=amply",
     "deploy:relay": "npm --prefix relay run deploy",
-    "test:node": "node/test-node.sh"
+    "test:node": "node/test-node.sh",
+    "publish": "./scripts/publish.sh",
+    "preview": "npm --prefix manage run build:preview",
+    "test:manage": "npm --prefix manage run test",
+    "prove:reconcile": "node manage/prove-reconcile.mjs",
+    "verify:live": "node scripts/verify-live.mjs",
+    "test:csp": "node --experimental-strip-types node/test-csp.mjs",
+    "test:store": "node --experimental-strip-types node/test-store.mjs",
+    "test:page": "node/node_modules/.bin/esbuild node/test-page.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/page.mjs --log-level=warning && node .build/test/page.mjs",
+    "test:stripe": "node/node_modules/.bin/esbuild node/test-stripe.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/stripe.mjs --log-level=warning && node .build/test/stripe.mjs",
+    "test:sales": "node/node_modules/.bin/esbuild node/test-sales.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/sales.mjs --log-level=warning --external:node:sqlite && node .build/test/sales.mjs",
+    "test:limits": "node --experimental-strip-types node/test-limits.mjs",
+    "test:pricing": "node spec/test-pricing.mjs && node spec/test-domain.mjs && node spec/test-waves.mjs && node spec/test-colors.mjs",
+    "build:licence": "node scripts/build-licence.mjs",
+    "test:provision": "node scripts/test-provision.mjs && node scripts/test-migrate.mjs && node scripts/test-access.mjs && node scripts/test-attach.mjs",
+    "build:app": "npm --prefix app run build",
+    "test:app": "npm --prefix app run test",
+    "build:version": "node scripts/node-version.mjs && cp spec/manifest-rules.mjs site/js/manifest-rules.mjs && node scripts/security-headers.mjs"
   }
 }

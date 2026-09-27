@@ -9,14 +9,13 @@ npm run deploy:relay # publish the CORS relay
 
 ## Why one command
 
-Three of the files in `site/` are **compiled from source elsewhere in this repo**, and
+Two of the files in `site/` are **compiled from source elsewhere in this repo**, and
 nothing about them looks generated:
 
 | Served file | Built from |
 |---|---|
 | `site/node-worker.js` | `node/src/` — the Worker uploaded into artists' accounts |
 | `site/node-manage.html` | `manage/src/` — the editor uploaded into artists' buckets |
-| `site/js/manage.js` | `manage/src/` — the hosted fallback editor |
 
 Deploying `site/` without rebuilding ships whatever was there last time. That already
 nearly happened once: the node Worker gained its entire `/manage` write surface, and the

@@ -7,34 +7,29 @@ to listeners. Amply never runs this, never has access to it, and cannot change i
 
 | Route | Returns |
 |---|---|
-| `GET /manifest.json` | The manifest, from KV. CORS open, cached 5 min. |
-| `GET /audio/<key>` | Audio from R2. Range requests supported (seeking). |
+| `GET /` | The artist's page, rendered from the manifest. `/privacy` is their privacy notice. |
+| `GET /manifest.json` | The manifest, from D1. CORS open, cached 5 min. |
+| `GET /audio/<key>` | Audio from R2. Range requests supported (seeking). Paid tracks need a listener's pass. |
 | `GET /art/<key>` | Images from R2. |
-| `GET /version` | `{ version, spec }` — lets a management page spot a stale node. |
-
-`HEAD` and `OPTIONS` are handled. Everything else is 404 or 405.
+| `GET /version` | `{ version, spec }` — lets the editor spot a stale service. |
+| `/listen/…` | What a listener signs for with their wallet: a pass, play counts, subscriptions, purchases, and seeing or erasing their own record. |
+| `/manage/…` | The artist's editor and its API, behind Cloudflare Access and verified again here (`src/access.ts`). |
 
 ## Bindings
 
 | Binding | Type | Holds |
 |---|---|---|
-| `MEDIA` | R2 bucket | audio under `audio/`, images under `art/` |
-| `MANIFEST` | KV namespace | one key, `manifest` |
+| `MEDIA` | R2 bucket | audio under `audio/`, images under `art/`, the editor under `manage/` |
+| `DB` | D1 database | the manifest, settings, listener tallies, subscriptions and sales (`src/store.ts`) |
+| `LIMIT_*` | rate limiters | request limits (`src/limits.ts`); optional |
 
-The IDs in `wrangler.jsonc` are **placeholders**. Real deployment substitutes actual IDs —
-the OAuth provisioning flow writes them, and the Deploy to Cloudflare button fills them in
-from its setup page. Keep every binding's default name distinct: identical defaults are a
-known cause of deploy failures.
+Setup at amply.stream (`site/js/provision.js`) creates these in the artist's account.
 
 ## Deliberately small
 
-Around 200 lines, and it should stay that way. Every line here is a line someone may have
-to update inside their own cloud account later, and Amply has no channel to do that for
-them — by design (`docs/legal.md` §4). Logic that might change belongs in the **client**,
-which ships through the app stores like any normal app.
-
-There is no auth, no session, no database, and no write path. The management UI writes to
-R2 and KV directly using the artist's own credentials; this Worker only reads.
+Every line here is a line someone may have to update inside their own cloud account later,
+and Amply has no channel to do that for them — by design (`docs/legal.md` §4). Logic that
+might change belongs in the **client**.
 
 ## Security notes
 

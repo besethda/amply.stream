@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rebuild your streaming service - Amply</title>
+<meta name="description" content="Update the software running your streaming service, without touching your music.">
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<style>
+  .panel { display: none; }
+  .panel[data-on] { display: block; }
+  .field { display: block; margin: 0 0 20px; max-width: 30em; }
+  .field span { display: block; font-size: 15px; font-weight: 600; margin-bottom: 7px; }
+  .field input {
+    width: 100%; font: inherit; font-size: 17px; padding: 15px 17px;
+    border: 1.5px solid var(--line); border-radius: var(--r); background: var(--bg2); color: var(--ink);
+  }
+  .field .hint { font-weight: 400; font-size: 14px; color: var(--ink3); margin: 7px 0 0; }
+  .field input:focus-visible, button:focus-visible { outline: 2.5px solid var(--orange); outline-offset: 1px; }
+  #log { list-style: none; padding: 0; margin: 0 0 26px; display: grid; gap: 10px; max-width: 34em; }
+  #log li {
+    display: flex; align-items: center; gap: 14px; padding: 15px 18px;
+    background: var(--bg2); border-radius: var(--r); font-size: 16.5px; color: var(--ink3);
+  }
+  #log li::before { content: "·"; width: 18px; text-align: center; font-weight: 700; }
+  #log li[data-state="run"] { color: var(--ink); }
+  #log li[data-state="run"]::before { content: "→"; color: var(--orange); }
+  #log li[data-state="ok"] { color: var(--ink); }
+  #log li[data-state="ok"]::before { content: "✓"; color: var(--orange); }
+  #log li[data-state="skip"]::before { content: "!"; color: var(--ink3); }
+  .checks { list-style: none; padding: 0; margin: 0 0 26px; display: grid; gap: 8px; max-width: 34em; }
+  .checks li { display: flex; gap: 12px; align-items: baseline; font-size: 16.5px; }
+  .checks .good { color: var(--orange); font-weight: 700; }
+  .checks .bad { color: #b03636; font-weight: 700; }
+  .checks .what { flex: 1; }
+  .checks .note { font-family: var(--mono); font-size: 13.5px; color: var(--ink3); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-in">
+    <a class="mark" href="/"><img src="/amply.svg" alt="" width="26" height="26">amply</a>
+    <div class="topbar-actions"><a class="btn sm" href="/start">Set up a new one</a></div>
+  </div>
+</div>
+
+<main>
+<section class="col narrow" style="padding-top:clamp(40px,6vw,72px);padding-bottom:110px">
+
+<!-- 1 ───────────────────────────────────────────────────────────── -->
+<div class="panel" data-panel="intro" data-on>
+  <h1 class="step">Rebuild your<br>streaming service.</h1>
+  <p class="lead">
+    Amply improves, and your streaming service doesn't, because it runs in your account
+    where we can't reach it. This puts the latest version there, and checks everything is
+    working while it's at it.
+  </p>
+
+  <ul class="rows stack" style="margin-bottom:30px">
+    <li><span class="n">01</span><span class="t">Your music, artwork, page and price are not touched.</span></li>
+    <li><span class="n">02</span><span class="t">Only the software is replaced.</span></li>
+    <li><span class="n">03</span><span class="t">Permission lasts for this rebuild and is cancelled when it finishes.</span></li>
+    <li><span class="n">04</span><span class="t">Takes about a minute.</span></li>
+  </ul>
+
+  <label class="field">
+    <span>Your streaming service's address</span>
+    <input id="addr" type="text" inputmode="url" placeholder="yourname.something.workers.dev" autocomplete="off">
+    <span class="hint">The address you send people. Find it in your editor, or in the email from setup.</span>
+  </label>
+
+  <label class="field">
+    <span>Your email</span>
+    <input id="email" type="email" placeholder="you@example.com" autocomplete="email">
+    <span class="hint">The one you sign in to your editor with. The rebuild checks that it can still get
+    in, and fixes the sign-in if it can't.</span>
+  </label>
+
+  <div class="actions">
+    <button class="btn" id="connect">Connect to Cloudflare</button>
+  </div>
+</div>
+
+<!-- 2 ───────────────────────────────────────────────────────────── -->
+<div class="panel" data-panel="working">
+  <h1 class="step">Rebuilding.</h1>
+  <p class="lead">Leave this open. It takes about a minute.</p>
+  <ul id="log"></ul>
+</div>
+
+<!-- 3 ───────────────────────────────────────────────────────────── -->
+<div class="panel" data-panel="done">
+  <h1 class="step">Done.<br><span class="orange">Here's how it looks.</span></h1>
+  <ul class="checks" id="checks"></ul>
+  <div class="actions">
+    <a class="btn" id="edit-link" href="/">Open my streaming service</a>
+  </div>
+</div>
+
+<!-- 4 ───────────────────────────────────────────────────────────── -->
+<div class="panel" data-panel="error">
+  <h1 class="step" id="err-title">Something went wrong.</h1>
+  <p class="lead" id="err-body"></p>
+  <p class="muted">Nothing was removed. Your music and your page are as they were.</p>
+  <div class="actions" id="err-actions"></div>
+</div>
+
+</section>
+</main>
+
+<footer><div class="footer-in"><span>amply</span><div class="footer-links">
+<a href="/">Home</a><a href="/protect">Protecting your music</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a>
+</div></div></footer>
+
+<script type="module">
+import { beginAuthorization, readCallback, completeAuthorization, revoke, ALL_SCOPES }
+  from "/js/pkce.js";
+import { provision, REPAIR_STEPS, ProvisionError, toSlug } from "/js/provision.js";
+import { validate } from "/js/manifest-rules.mjs";
+
+const CONFIG = {
+  clientId: "3c90043d38e9a202d4147d82740092d7",
+  relay: "https://amply-relay.sdarmistead.workers.dev",
+  redirectUri: window.location.origin + "/oauth/callback",
+};
+
+const $ = (s) => document.querySelector(s);
+const KEY = "amply.repair.v1";
+let state = { address: "", email: "" };
+try { Object.assign(state, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
+
+function show(name) {
+  document.querySelectorAll("[data-panel]").forEach((p) =>
+    p.toggleAttribute("data-on", p.dataset.panel === name));
+  window.scrollTo({ top: 0, behavior: "instant" });
+}
+
+function fail(title, body, retry) {
+  $("#err-title").textContent = title;
+  $("#err-body").textContent = body || "";
+  const acts = $("#err-actions");
+  acts.innerHTML = "";
+  const b = document.createElement("button");
+  b.className = "btn";
+  b.textContent = retry || "Try again";
+  b.addEventListener("click", () => show("intro"));
+  acts.appendChild(b);
+  show("error");
+}
+
+/** The address an artist has is the whole thing; the slug is its first label. */
+function slugFrom(address) {
+  const clean = String(address || "").trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const first = clean.split(".")[0] || "";
+  return toSlug(first);
+}
+
+$("#addr").value = state.address || "";
+$("#email").value = state.email || "";
+
+$("#connect").addEventListener("click", async () => {
+  state.address = $("#addr").value.trim();
+  state.email = $("#email").value.trim();
+  if (!slugFrom(state.address)) {
+    fail("That address doesn't look right", "It should look like yourname.something.workers.dev.");
+    return;
+  }
+  // Without one there is nothing to attach a sign-in rule to, and the rebuild
+  // finishes with an editor nobody can open — which reads, unhelpfully, as
+  // "this node has no editor configured".
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(state.email)) {
+    fail("Amply needs your email address",
+      "It is the address that will be allowed to open your editor, and the only way back in. Nothing is sent to it by Amply.");
+    return;
+  }
+  save();
+  $("#connect").disabled = true;
+  try {
+    await beginAuthorization({
+      clientId: CONFIG.clientId,
+      redirectUri: CONFIG.redirectUri,
+      scopes: ALL_SCOPES,
+      returnTo: "/repair",
+    });
+  } catch (e) {
+    $("#connect").disabled = false;
+    fail("Couldn't reach Cloudflare", e.message);
+  }
+});
+
+function paintSteps() {
+  const log = $("#log");
+  log.innerHTML = "";
+  for (const step of REPAIR_STEPS) {
+    const li = document.createElement("li");
+    li.dataset.task = step.id;
+    li.textContent = step.label;
+    log.appendChild(li);
+  }
+}
+
+function markStep(id, s) {
+  const li = document.querySelector(`#log li[data-task="${id}"]`);
+  if (li) li.setAttribute("data-state", s === "running" ? "run" : s === "skipped" ? "skip" : "ok");
+}
+
+/**
+ * Look at the rebuilt node the way a listener would.
+ *
+ * Every check is a plain HTTP request from this page, so it tests what someone
+ * else would actually get rather than what the rebuild believes it did.
+ */
+async function health(base) {
+  const checks = [];
+  const add = (ok, what, note = "") => checks.push({ ok, what, note });
+
+  // Keep asking for a bit before giving up. A Worker uploaded seconds ago
+  // can take a few seconds to answer, and its first request can simply fail.
+  // Reporting "isn't answering" for a rebuild that worked is the worst way to
+  // be wrong here, because the next thing the artist does is run it again.
+  let version = null;
+  for (let attempt = 0; attempt < 8 && !version; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 2000));
+    try {
+      const res = await fetch(`${base}/version`, { cache: "no-store" });
+      if (res.ok) version = await res.json();
+    } catch { /* still coming up */ }
+  }
+
+  if (!version) {
+    add(false, "Your streaming service isn't answering",
+      "It was rebuilt, but it is not responding after twenty seconds. Wait a minute and reload this page before running it again.");
+    return checks;
+  }
+  add(true, "Your streaming service is answering", `version ${version.version}`);
+
+  try {
+    const latest = await (await fetch("/node-version.json", { cache: "no-store" })).json();
+    add(version.version === latest.version, "Running the latest software",
+      version.version === latest.version ? `version ${latest.version}` : `yours ${version.version}, latest ${latest.version}`);
+  } catch { /* if we cannot say, do not claim */ }
+
+  try {
+    const res = await fetch(`${base}/manifest.json`, { cache: "no-store" });
+    if (res.status === 404) {
+      add(false, "No music on it",
+        "If this is new, add some in your editor. If it had music before today, it was stored the old way and this version cannot read it — set up a new one instead.");
+    } else {
+      const manifest = await res.json();
+      const { errors } = validate(manifest);
+      add(errors.length === 0, errors.length ? "Your page has a problem" : "Your page is valid",
+        errors[0] || `${(manifest.releases || []).reduce((n, r) => n + (r.tracks?.length || 0), 0)} tracks`);
+    }
+  } catch (e) {
+    add(false, "Couldn't read your page", e.message);
+  }
+
+  try {
+    const res = await fetch(base + "/", { cache: "no-store" });
+    add(res.ok, res.ok ? "Your public page loads" : "Your public page isn't loading", `status ${res.status}`);
+  } catch {
+    add(false, "Your public page isn't loading", "");
+  }
+
+  return checks;
+}
+
+function paintChecks(checks, editorUrl) {
+  const list = $("#checks");
+  list.innerHTML = "";
+  for (const c of checks) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="${c.ok ? "good" : "bad"}">${c.ok ? "✓" : "!"}</span>`
+      + `<span class="what"></span><span class="note"></span>`;
+    li.querySelector(".what").textContent = c.what;
+    li.querySelector(".note").textContent = c.note;
+    list.appendChild(li);
+  }
+  const edit = $("#edit-link");
+  edit.href = editorUrl || "/";
+  edit.textContent = editorUrl ? "Open my streaming service" : "Back to Amply";
+}
+
+/**
+ * Refuse to rebuild a node from before the database.
+ *
+ * Version 3 keeps the track list in D1; version 2 kept it in KV. Rebuilding a
+ * version 2 node would put a Worker that reads one on top of music stored in
+ * the other, and the artist would watch their page empty. Setting up again is
+ * the honest answer, and saying so beats a silent loss.
+ */
+async function tooOldToRebuild(base) {
+  // Asked more than once. A service that is merely slow to wake looks exactly
+  // like one that is not there, and the two lead to opposite decisions: one
+  // should be rebuilt, the other must not be. Getting it wrong rebuilds an old
+  // service into an empty one, its music sitting where the new version does
+  // not look.
+  let version = null;
+  for (let attempt = 0; attempt < 3 && version === null; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 1500));
+    try {
+      const res = await fetch(`${base}/version`, { cache: "no-store" });
+      if (res.ok) ({ version } = await res.json());
+    } catch { /* try again */ }
+  }
+
+  if (version === null) return "unknown";
+  const major = Number(String(version).split(".")[0]);
+  return Number.isFinite(major) && major < 3 ? version : null;
+}
+
+async function run(token) {
+  show("working");
+  paintSteps();
+  const slug = slugFrom(state.address);
+  const base = `https://${state.address.replace(/^https?:\/\//, "").replace(/\/.*$/, "")}`;
+
+  const old = await tooOldToRebuild(base);
+
+  // Could not be read at all. Rebuilding is still the right answer for a
+  // service that is genuinely broken, and the wrong one for a service built
+  // before the track list moved — and from out here they look the same. So
+  // the artist decides, knowing what is at stake.
+  if (old === "unknown") {
+    const go = window.confirm(
+      "Amply can't reach that address to see what version it is.\n\n"
+      + "If it's simply broken, rebuilding is what fixes it.\n\n"
+      + "But if you set it up before September 2026, rebuilding will leave its page empty, "
+      + "because its music is stored somewhere this version doesn't read. Setting up a new "
+      + "one is the answer for those.\n\nRebuild it anyway?",
+    );
+    if (!go) {
+      fail(
+        "Nothing was changed",
+        "Check the address, or set up a new streaming service if this one is from before September 2026.",
+        "Set up a new one",
+      );
+      document.querySelector("#err-actions .btn").addEventListener("click", () => location.assign("/start"));
+      return;
+    }
+  } else if (old) {
+    fail(
+      "This one is too old to rebuild",
+      `Your streaming service is version ${old}, from before Amply moved where the track list is kept. `
+      + "Rebuilding it would leave your page empty. Set up a new one instead, and add your music to that.",
+      "Set up a new one",
+    );
+    document.querySelector("#err-actions .btn").addEventListener("click", () => location.assign("/start"));
+    return;
+  }
+
+  try {
+    const result = await provision({
+      token,
+      relay: CONFIG.relay,
+      artistName: slug,
+      slug,
+      email: state.email || null,
+      withAccess: Boolean(state.email),
+      mode: "repair",
+      onStep: (id, s) => markStep(id, s),
+    });
+
+    const checks = await health(result.url || base);
+    paintChecks(checks, result.editorUrl || `${result.url || base}/manage`);
+    show("done");
+  } catch (err) {
+    const known = err instanceof ProvisionError;
+    fail(
+      known && err.kind === "auth" ? "Cloudflare refused the request" : "The rebuild didn't finish",
+      `${err.message}${known && err.detail ? ` (${err.detail})` : ""}`,
+    );
+  } finally {
+    // Same rule as setup: the permission ends with the job.
+    await revoke({ relay: CONFIG.relay, clientId: CONFIG.clientId, token });
+  }
+}
+
+(async function handleCallback() {
+  const cb = readCallback();
+  if (!cb) { show("intro"); return; }
+  history.replaceState({}, "", "/repair");
+  if (!cb.ok) { fail("Permission wasn't granted", cb.description || "Nothing in your account was changed."); return; }
+
+  try {
+    const { token } = await completeAuthorization({
+      clientId: CONFIG.clientId, relay: CONFIG.relay, code: cb.code, state: cb.state,
+    });
+    await run(token);
+  } catch (e) {
+    fail("Couldn't complete the connection", e.message);
+  }
+})();
+</script>
+</body>
+</html>

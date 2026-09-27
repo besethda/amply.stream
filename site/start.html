@@ -3,335 +3,312 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Set up your music — Amply</title>
-<meta name="description" content="Put your music on hosting you own. About five minutes.">
+<title>Set up your streaming service - Amply</title>
+<meta name="description" content="Your own streaming service, on hosting you own. About five minutes.">
 <meta name="robots" content="noindex">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="/style.css">
 <style>
-  body { padding-bottom: 120px; }
-  .proto {
-    position: sticky; top: 0; z-index: 20;
-    margin: 0 -20px 0; padding: 9px 20px;
-    background: var(--accent); color: #fff;
-    font-size: 13px; font-weight: 500; text-align: center;
-  }
-  .proto b { font-weight: 700; }
+  main { padding: clamp(26px, 3vw, 34px) 0 130px; }
 
-  .steps { display: flex; gap: 8px; margin: 0 0 36px; padding: 0; list-style: none; }
-  .steps li {
-    flex: 1; font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
-    color: var(--muted); padding-top: 9px; border-top: 3px solid var(--rule);
+  /* segmented progress, with the label beneath it */
+  .steps { display: flex; gap: 8px; list-style: none; padding: 0; margin: 0 0 16px; }
+  .steps li { flex: 1; height: 4px; border-radius: var(--pill); background: var(--line); }
+  .steps li[data-done], .steps li[data-on] { background: var(--orange); }
+  .stepname {
+    font-family: var(--mono); font-size: 14px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--ink3); margin: 0 0 clamp(34px, 4.5vw, 56px);
   }
-  .steps li[data-on] { color: var(--ink); border-top-color: var(--accent); }
-  .steps li[data-done] { color: var(--ink-2); border-top-color: var(--ink-2); }
 
   .panel { display: none; }
   .panel[data-active] { display: block; }
+  .panel h1 { margin-bottom: 22px; }
+  .panel > p.lead { margin-bottom: 38px; }
 
-  .btn {
-    display: inline-flex; align-items: center; gap: 8px;
-    font: inherit; font-weight: 600; font-size: 15px;
-    background: var(--accent); color: #fff; border: 0;
-    padding: 13px 22px; border-radius: 7px; cursor: pointer;
-    text-decoration: none; transition: filter .12s;
+  .stack { display: grid; gap: 14px; margin: 0 0 38px; }
+
+  /* tick / cross lists */
+  ul.marks { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+  ul.marks li { display: flex; gap: 16px; align-items: flex-start; font-size: 18px; color: var(--ink); }
+  ul.marks .m { flex: none; width: 20px; font-weight: 700; }
+  ul.marks .yes .m { color: var(--orange); }
+  ul.marks .no  .m { color: var(--ink3); }
+  ul.marks .no span:last-child { color: var(--ink2); }
+  .card.orange ul.marks li { color: var(--on-orange); }
+  .card.orange ul.marks .m { color: var(--on-orange); }
+
+  /* form */
+  label.f { display: block; margin: 0 0 26px; }
+  label.f > span { display: block; font-weight: 700; font-size: 19px; letter-spacing: -0.015em; margin-bottom: 6px; }
+  label.f > em { display: block; font-style: normal; font-size: 16px; color: var(--ink3); margin-bottom: 14px; }
+  input[type=text], input[type=email] {
+    width: 100%; font: inherit; font-size: 18px; padding: 17px 20px;
+    border: 1.5px solid var(--line); border-radius: var(--r);
+    background: var(--bg2); color: var(--ink);
   }
-  .btn:hover { filter: brightness(1.08); }
-  .btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
-  .btn[disabled] { opacity: .45; cursor: not-allowed; filter: none; }
-  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--rule); }
-  .btn.small { font-size: 13.5px; padding: 9px 15px; font-weight: 500; }
-  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 26px; }
-  .back {
-    background: none; border: 0; font: inherit; font-size: 14px; color: var(--muted);
-    cursor: pointer; padding: 6px 0; text-decoration: underline; text-underline-offset: 3px;
+  input::placeholder { color: var(--ink3); }
+  input:focus-visible { outline: 2.5px solid var(--orange); outline-offset: 1px; border-color: transparent; }
+
+  /* progress log */
+  ul.log { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+  ul.log li {
+    display: flex; gap: 18px; align-items: center;
+    background: var(--bg2); border: 1px solid var(--line);
+    border-radius: var(--r); padding: 18px 24px;
+    font-size: 18px; color: var(--ink3);
   }
-
-  .warn { border-left: 3px solid var(--accent); }
-  .warn h3 { margin: 0 0 8px; font-size: 15px; color: var(--ink); }
-
-  .task {
-    display: flex; gap: 14px; align-items: flex-start;
-    padding: 16px 0; border-bottom: 1px solid var(--rule);
-  }
-  .task:last-child { border-bottom: 0; }
-  .tick {
-    flex: none; width: 22px; height: 22px; margin-top: 2px; border-radius: 50%;
-    border: 2px solid var(--rule); display: grid; place-items: center;
-    font-size: 12px; font-weight: 700; color: #fff;
-  }
-  .task[data-done] .tick { background: var(--accent); border-color: var(--accent); }
-  .task[data-done] .tick::after { content: "✓"; }
-  .task-body { flex: 1; min-width: 0; }
-  .task-body h3 { margin: 0 0 4px; font-size: 15.5px; color: var(--ink); }
-  .task-body p { margin: 0 0 10px; font-size: 14px; }
-
-  .creates { list-style: none; padding: 0; margin: 0 0 20px; }
-  .creates li { padding: 11px 0; border-bottom: 1px solid var(--rule); font-size: 15px; color: var(--ink-2); }
-  .creates li:last-child { border-bottom: 0; }
-  .creates b { color: var(--ink); }
-  .scopes { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
-  .scopes li { padding: 6px 0; border: 0; }
-
-  .log { list-style: none; padding: 0; margin: 0; font-size: 14.5px; }
-  .log li { display: flex; gap: 11px; padding: 9px 0; color: var(--muted); }
-  .log li[data-state="run"] { color: var(--ink); }
-  .log li[data-state="ok"] { color: var(--ink-2); }
-  .log .dot { flex: none; width: 18px; text-align: center; }
+  ul.log li[data-state="run"] { color: var(--ink); border-color: var(--orange); }
+  ul.log li[data-state="ok"]  { color: var(--ink2); }
+  ul.log li[data-state="skip"]{ display: block; }
+  .dot { flex: none; width: 20px; font-family: var(--mono); font-size: 15px; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .log li[data-state="run"] .dot::after {
-    content: "◜"; display: inline-block; animation: spin .7s linear infinite;
-  }
-  .log li[data-state="ok"] .dot::after { content: "✓"; color: var(--accent); }
-  .log li[data-state="wait"] .dot::after { content: "·"; }
-  .log li[data-state="skip"] { color: var(--muted); }
-  .log li[data-state="skip"] .dot::after { content: "–"; }
-  @media (prefers-reduced-motion: reduce) {
-    .log li[data-state="run"] .dot::after { animation: none; content: "▸"; }
-  }
+  li[data-state="run"]  .dot::after { content: "\25DC"; display: inline-block; animation: spin .7s linear infinite; color: var(--orange); }
+  li[data-state="ok"]   .dot::after { content: "\2713"; color: var(--orange); }
+  li[data-state="wait"] .dot::after { content: "\00B7"; }
+  li[data-state="skip"] .dot::after { content: "\2013"; }
+  @media (prefers-reduced-motion: reduce) { li[data-state="run"] .dot::after { content: "\25B8"; animation: none; } }
 
-  .link-out {
-    background: var(--surface); border: 1px solid var(--rule); border-radius: 8px;
-    padding: 20px; margin: 0 0 20px; overflow-wrap: anywhere;
-  }
-  .link-out .url {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 17px; font-weight: 600; color: var(--ink); display: block; margin-bottom: 14px;
-  }
-
-  .devbar {
-    margin-top: 56px; padding-top: 18px; border-top: 1px dashed var(--rule);
-    font-size: 12.5px; color: var(--muted);
-  }
-  .devbar select, .devbar button {
-    font: inherit; font-size: 12.5px; padding: 5px 9px; border-radius: 5px;
-    border: 1px solid var(--rule); background: var(--surface); color: var(--ink);
-  }
-  .devbar .row { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-top: 9px; }
+  .back { margin-top: 24px; }
+  .devbar { margin-top: 90px; padding-top: 22px; border-top: 1px dashed var(--line);
+    font-family: var(--mono); font-size: 13px; color: var(--ink3); }
+  .devbar button { font: inherit; font-size: 13px; padding: 8px 16px; border-radius: var(--pill);
+    border: 1px solid var(--line); background: transparent; color: var(--ink3); cursor: pointer; }
 </style>
 </head>
 <body>
-<div class="proto"><b>Early access.</b> This really does create storage in your own Cloudflare account.</div>
-<div class="wrap">
 
-<header>
-  <a class="mark" href="/">ampl<span>y</span></a>
-</header>
+<div class="topbar">
+  <div class="topbar-in">
+    <a class="mark" href="/"><img src="/amply.svg" alt="" width="26" height="26">amply</a>
+  </div>
+</div>
+
+<main>
+<div class="col narrow">
 
 <ol class="steps" id="steps">
-  <li data-step="intro">Before you start</li>
-  <li data-step="cloudflare">Cloudflare</li>
-  <li data-step="connect">Connect</li>
-  <li data-step="done">Your link</li>
+  <li data-step="intro"></li><li data-step="cloudflare"></li>
+  <li data-step="connect"></li><li data-step="done"></li>
 </ol>
+<p class="stepname" id="stepname">Step 1 of 4, What happens</p>
 
-<!-- ───────────────────────── 1 ───────────────────────── -->
+<!-- 1 ─────────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="intro">
-  <h1>Your music, on hosting you own.</h1>
-  <p class="lead">Amply doesn't host your music — you do. It lives on your own Cloudflare
-  account, in your name, that you log into and control. We just set it up for you.</p>
+  <h1 class="step">Three steps.<br>Five minutes.</h1>
 
-  <h2>Three steps, about five minutes</h2>
-  <ul>
-    <li>Create a free Cloudflare account</li>
-    <li>Switch on R2 storage — <strong>this asks for a card</strong></li>
-    <li>Come back here and we'll build everything</li>
+  <ul class="rows stack">
+    <li><span class="n">1</span><span class="t">Open your own streaming account</span><span class="meta">3 min</span></li>
+    <li><span class="n">2</span><span class="t">Let Amply set it up for you</span><span class="meta">1 min</span></li>
+    <li><span class="n">3</span><span class="t">Add your music, and set your price</span><span class="meta">up to you</span></li>
   </ul>
 
-  <div class="box warn">
-    <h3>About the card</h3>
-    <p>Cloudflare requires one before storage can be switched on. That's their rule, not ours.
-    <strong>Nothing will be charged.</strong> Their free tier covers roughly a thousand tracks,
-    and streaming to your listeners costs nothing at any volume — bandwidth is free, which is
-    the whole reason this works.</p>
+  <div class="card orange" style="margin-bottom:30px">
+    <h2 style="font-size:clamp(28px,3.4vw,44px);margin-bottom:22px">You'll need a card.<br>Nothing gets charged.</h2>
+    <ul class="marks">
+      <li class="yes"><span class="m">&rarr;</span><span>Your hosting service asks for one on sign-up, the way a phone company does.</span></li>
+      <li class="yes"><span class="m">&rarr;</span><span><strong>Amply never sees it, and never charges you anything. Ever.</strong></span></li>
+      <li class="yes"><span class="m">&rarr;</span><span>The free tier covers <strong>10 GB</strong>, over a thousand songs, and around <strong>half a million plays a month</strong>.</span></li>
+      <li class="yes"><span class="m">&rarr;</span><span>Past that it's a few dollars a month, billed by your host, and you can cap it.</span></li>
+    </ul>
   </div>
 
-  <div class="box">
-    <p>When you sign up, <strong>use a personal email address you'll still have in ten
-    years</strong> — not a work or school one. Billing and account notices go there, and this
-    account is where your music lives. Turn on two-factor authentication while you're there.</p>
-  </div>
+  <p class="muted">This is <strong>your</strong> account, in your name. That's the whole point,
+  nobody can take your music down or change the terms on you. It also means the bill, the
+  password and the account are yours to look after.</p>
 
   <div class="actions">
-    <button class="btn" data-go="cloudflare">Start<span aria-hidden="true">→</span></button>
+    <button class="btn" data-go="cloudflare">Let's go</button>
+    <a class="link" href="/">Not now</a>
   </div>
 </section>
 
-<!-- ───────────────────────── 2 ───────────────────────── -->
+<!-- 2 ─────────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="cloudflare">
-  <h1>Set up Cloudflare</h1>
-  <p class="lead">One link does all of it. It opens in a new tab — leave this one open and
-  come back when you're done.</p>
+  <h1 class="step">Go open your<br>streaming account.</h1>
+  <p class="lead">Happens on their site. Come back here after.</p>
 
-  <div class="box">
-    <p><strong>What happens over there:</strong></p>
-    <ul style="margin-bottom:0">
-      <li>Create a Cloudflare account, or sign in if you already have one</li>
-      <li>You'll land on the storage page — switch on R2</li>
-      <li>It asks for a card. Nothing gets charged.</li>
+  <ul class="rows stack">
+    <li><span class="n">01</span><span class="t">Pick your sign up method.</span></li>
+    <li><span class="n">02</span><span class="t">Sign up for R2 storage, the free plan. The free tier is 10GB, over a thousand songs.</span></li>
+    <li><span class="n">03</span><span class="t">They'll ask for a card. Expected, and nothing is charged.</span></li>
+    <li><span class="n">04</span><span class="t">Come back here when you've added your card.</span></li>
+  </ul>
+  
+  <div class="actions" style="margin-bottom:42px">
+    <a class="btn" href="https://dash.cloudflare.com/sign-up?to=/:account/r2/overview"
+       target="_blank" rel="noopener" data-mark="cf">Open the sign-up page &nearr;</a>
+  </div>
+
+  <p class="muted">Didn't land on the storage page? <a href="https://dash.cloudflare.com/?to=/:account/r2/overview"
+     target="_blank" rel="noopener">Open it here</a> once you're signed in.</p>
+
+  <div class="card prep" style="margin:34px 0 30px">
+    <h3 style="margin-top:0">Then open two more pages</h3>
+    <p>Literally just open these links, let them load, and come back here.</p>
+
+    <ul class="marks prep-list">
+      <li data-prep="workers">
+        <span class="m">1</span>
+        <span>
+          <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages"
+             target="_blank" rel="noopener" data-mark="workers">Open Workers &nearr;</a>
+          <span class="muted"> After the page loads, come back here.</span>
+        </span>
+      </li>
+      <li data-prep="d1">
+        <span class="m">2</span>
+        <span>
+          <a href="https://dash.cloudflare.com/?to=/:account/workers/d1"
+             target="_blank" rel="noopener" data-mark="d1">Open D1 &nearr;</a>
+          <span class="muted">After the page loads, you're ready for setup!</span>
+        </span>
+      </li>
     </ul>
+
+    <p class="muted" style="margin-bottom:0">Already use Workers on this account? You can skip
+    these.</p>
   </div>
 
   <div class="actions">
-    <a class="btn" href="https://dash.cloudflare.com/?to=/:account/r2/overview"
-       target="_blank" rel="noopener" data-mark="cf">Open Cloudflare ↗</a>
+    <button class="btn" id="to-connect" data-go="connect">Done, all three are open</button>
   </div>
-
-  <div class="actions" style="margin-top:32px">
-    <button class="btn ghost" id="to-connect" data-go="connect">Finished at Cloudflare? Connect<span aria-hidden="true">→</span></button>
-  </div>
-  <div class="actions"><button class="back" data-go="intro">← Back</button></div>
+  <div class="back"><button class="link" data-go="intro">&larr; Back</button></div>
 </section>
 
-<!-- ───────────────────────── 3 ───────────────────────── -->
+<!-- 3 ─────────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="connect">
-  <h1>Connect your Cloudflare account</h1>
-  <p class="lead">We'll create three things in your account:</p>
+  <h1 class="step">Connect it.</h1>
+  <p class="lead">We set your streaming up for you, then remove our own access.</p>
 
-  <ul class="creates">
-    <li><b>An R2 bucket</b> — your audio files</li>
-    <li><b>A KV namespace</b> — your track list</li>
-    <li><b>A Worker</b> — serves your music to listeners</li>
+  <ul class="marks" style="margin-bottom:38px">
+    <li class="yes"><span class="m">&check;</span><span>Somewhere for your audio</span></li>
+    <li class="yes"><span class="m">&check;</span><span>Your track list</span></li>
+    <li class="yes"><span class="m">&check;</span><span>The thing that plays it, and your editor</span></li>
   </ul>
 
-  <h2>We're asking for</h2>
-  <ul class="creates scopes">
-    <li>account.read</li>
-    <li>workers-scripts.write</li>
-    <li>workers-kv-storage.write</li>
-    <li>workers-r2.write</li>
-    <li>access-org.write</li>
-    <li>access-idp.write</li>
-    <li>access-app.write</li>
-    <li>access-policy.write</li>
-  </ul>
-  <p style="font-size:13.5px;color:var(--muted)">The last four put your editor on your own
-  node behind a sign-in, so adding music never goes through us. They're used once, during
-  setup, and we keep no access afterwards.</p>
-
-  <div class="box warn">
-    <p><strong>We keep no access after this.</strong> No password, no stored permission,
-    nothing that lets us back in later. Our access lasts for the few seconds this takes, and
-    then it's gone. If you ever want to change something, you authorise us again.</p>
-  </div>
-
-  <div class="box">
-    <p><label for="artist-name"><strong>What should we call you?</strong></label></p>
-    <p style="font-size:14px;margin-bottom:10px">This names your files and your web address.
-    You can change how it's displayed later, but the address is harder to change — so pick
-    the name you release music under.</p>
-    <input id="artist-name" type="text" autocomplete="off" spellcheck="false"
-           placeholder="Hollow Coast"
-           style="width:100%;font:inherit;padding:11px 13px;border:1px solid var(--rule);
-                  border-radius:7px;background:var(--bg);color:var(--ink)">
-    <p style="font-size:13px;color:var(--muted);margin:10px 0 0" id="slug-preview"></p>
-  </div>
-
-  <div class="box">
-    <p><label for="artist-email"><strong>Your email address</strong></label></p>
-    <p style="font-size:14px;margin-bottom:10px">Used only to lock your editor to you.
-    Signing in later emails you a code — there's no password to lose, and we never store
-    the address anywhere.</p>
-    <input id="artist-email" type="email" autocomplete="email" spellcheck="false"
-           placeholder="you@example.com"
-           style="width:100%;font:inherit;padding:11px 13px;border:1px solid var(--rule);
-                  border-radius:7px;background:var(--bg);color:var(--ink)">
-  </div>
-
-  <div class="actions">
-    <button class="btn" id="connect-btn" disabled>Connect Cloudflare account<span aria-hidden="true">→</span></button>
-  </div>
-  <div class="actions"><button class="back" data-go="cloudflare">← Back</button></div>
-</section>
-
-<!-- ───────────────────────── 3b ───────────────────────── -->
-<section class="panel" data-panel="working">
-  <h1>Setting things up</h1>
-  <p class="lead">This takes a few seconds. You can leave this page open.</p>
-  <div class="box">
-    <ul class="log" id="log">
-      <li data-state="wait" data-task="account"><span class="dot"></span><span>Finding your account</span></li>
-      <li data-state="wait" data-task="bucket"><span class="dot"></span><span>Creating storage for your audio</span></li>
-      <li data-state="wait" data-task="kv"><span class="dot"></span><span>Creating your track list</span></li>
-      <li data-state="wait" data-task="worker"><span class="dot"></span><span>Deploying your player</span></li>
-      <li data-state="wait" data-task="subdomain"><span class="dot"></span><span>Giving it a web address</span></li>
-      <li data-state="wait" data-task="editor"><span class="dot"></span><span>Installing your editor</span></li>
-      <li data-state="wait" data-task="access"><span class="dot"></span><span>Locking the editor to you</span></li>
-      <li data-state="wait" data-task="manifest"><span class="dot"></span><span>Publishing your page</span></li>
+  <div class="card" style="margin-bottom:30px">
+    <p class="eyebrow" style="margin-bottom:20px">What we never ask for</p>
+    <ul class="marks">
+      <li class="no"><span class="m">&times;</span><span>Your card, or anything to do with your bank</span></li>
+      <li class="no"><span class="m">&times;</span><span>Your password</span></li>
+      <li class="no"><span class="m">&times;</span><span>To read the files you keep there</span></li>
+      <li class="no"><span class="m">&times;</span><span>To delete or change a thing</span></li>
     </ul>
   </div>
+
+  <div class="card orange" style="margin-bottom:38px">
+    <h3 style="margin-bottom:12px">Amply's access is gone the moment this finishes.</h3>
+    <p style="margin-bottom:0">You approve this on your host's page, not ours. Nothing from setup is kept or logged, and we're never given a way back in.</p>
+  </div>
+
+  <label class="f" for="artist-name">
+    <span>Your name</span>
+    <em>This names your page and your link. Use the name you release music under.</em>
+    <input id="artist-name" type="text" autocomplete="off" spellcheck="false" placeholder="Hollow Coast">
+  </label>
+  <p class="muted" id="slug-preview" style="margin:-16px 0 26px;font-family:var(--mono);font-size:15px"></p>
+
+  <label class="f" for="artist-email">
+    <span>Your email</span>
+    <em>The email address you'll use to log in. Amply doesn't keep your email address.</em>
+    <input id="artist-email" type="email" autocomplete="email" spellcheck="false" placeholder="you@example.com">
+  </label>
+
+  <div class="actions">
+    <button class="btn" id="connect-btn" disabled>Set up my streaming service</button>
+  </div>
+  <div class="back"><button class="link" data-go="cloudflare">&larr; Back</button></div>
 </section>
 
-<!-- ───────────────────────── account chooser ───────────────────────── -->
+<!-- working ────────────────────────────────────────────────────────── -->
+<section class="panel" data-panel="working">
+  <h1 class="step">Setting up.</h1>
+  <p class="lead">Under a minute. Put the kettle on.</p>
+  <ul class="log" id="log">
+    <li data-state="wait" data-task="account"><span class="dot"></span><span>Finding your account</span></li>
+    <li data-state="wait" data-task="bucket"><span class="dot"></span><span>Making somewhere for your audio</span></li>
+    <li data-state="wait" data-task="kv"><span class="dot"></span><span>Making your track list</span></li>
+    <li data-state="wait" data-task="worker"><span class="dot"></span><span>Putting up your page</span></li>
+    <li data-state="wait" data-task="subdomain"><span class="dot"></span><span>Giving it an address</span></li>
+    <li data-state="wait" data-task="editor"><span class="dot"></span><span>Installing your editor</span></li>
+    <li data-state="wait" data-task="access"><span class="dot"></span><span>Locking the editor to you</span></li>
+    <li data-state="wait" data-task="manifest"><span class="dot"></span><span>Publishing it</span></li>
+  </ul>
+</section>
+
+<!-- choose ─────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="choose">
-  <h1>Which account?</h1>
-  <p class="lead">You're a member of more than one Cloudflare account. Pick the one your
-  music should live in — this matters, so don't put it in an account that belongs to someone
-  else or to a job.</p>
-  <div id="account-list"></div>
-  <div class="actions"><button class="back" data-go="connect">← Back</button></div>
+  <h1 class="step">Which account?</h1>
+  <p class="lead">You're in more than one. Pick the one your music should live in, not a
+  work account, and not one that belongs to somebody else.</p>
+  <div id="account-list" class="stack"></div>
+  <div class="back"><button class="link" data-go="connect">&larr; Back</button></div>
 </section>
 
-<!-- ───────────────────────── errors ───────────────────────── -->
+<!-- error ──────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="error">
-  <h1 id="err-title">Something went wrong</h1>
+  <h1 class="step" id="err-title">That didn't go through.</h1>
   <p class="lead" id="err-body"></p>
   <div class="actions" id="err-actions"></div>
-  <div class="actions"><button class="back" data-go="cloudflare">← Back to the Cloudflare step</button></div>
+  <div class="back"><button class="link" data-go="cloudflare">&larr; Back a step</button></div>
 </section>
 
-<!-- ───────────────────────── 4 ───────────────────────── -->
+<!-- done ───────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="done">
-  <h1>You're live.</h1>
-  <p class="lead">Your music now has a home that belongs to you. Here's its address:</p>
+  <h1 class="step">It's yours.<br><span class="orange">Go add your music.</span></h1>
 
-  <div class="link-out">
-    <code class="url" id="node-url">https://hollow-coast.amply-node.workers.dev</code>
-    <div class="actions" style="margin-top:0">
-      <button class="btn small" id="copy">Copy link</button>
-      <button class="btn small ghost" id="share">Share</button>
+  <div class="actions" style="margin-bottom:26px">
+    <a class="btn" id="edit-link" href="/start">Open my streaming service</a>
+  </div>
+
+  <p class="lead" style="margin-bottom:0">You're now hosting your own streaming service, and
+  your own site for uploading songs to it. Sign in with the email address you gave,
+  a code gets sent there, so there's no password to remember.</p>
+
+  <p class="muted" id="edit-where" hidden></p>
+
+  <div class="card orange" id="cert-note" hidden style="margin-top:30px">
+    <h3 style="margin-bottom:10px">Your address is still being secured</h3>
+    <p id="cert-why" style="margin-bottom:14px">Cloudflare is issuing the certificate for your
+    new address. It usually takes a few minutes. Until it's done your browser will warn that
+    the address isn't safe, and it isn't worth sending to anyone yet.</p>
+    <div class="actions">
+      <button class="btn ghost" id="cert-recheck">Check again</button>
     </div>
   </div>
 
-  <div class="box warn" id="skipped-note" hidden>
-    <h3 id="skipped-title">Your editor isn't ready yet</h3>
+  <div class="card orange" id="skipped-note" hidden style="margin-top:30px">
+    <h3 id="skipped-title" style="margin-bottom:10px">Your editor isn't ready yet</h3>
     <p id="skipped-why"></p>
-    <p style="margin-bottom:0">Your node is live and your link works — you just can't add
-    music to it until this finishes. <strong>Run setup again</strong> and it'll pick up from
-    here; nothing gets duplicated.</p>
+    <p style="margin-bottom:0">Your streaming is live, you just can't add music yet.
+    <strong>Run setup again</strong> and it'll pick up from here.</p>
   </div>
 
-  <div class="box warn">
-    <p><strong>This link is how people find you.</strong> There's no Amply directory, no
-    search, and no algorithm — on purpose. Nobody decides who gets seen. Put this wherever
-    your audience already is: your bio, your posts, your mailing list.</p>
+  <div hidden>
+    <code id="node-url"></code>
+    <button id="copy"></button><button id="share"></button>
   </div>
-
-  <h2>Next</h2>
-  <ul>
-    <li>Upload your tracks and artwork</li>
-    <li>Set your price per minute, and where you want to be paid</li>
-    <li>Share your link</li>
-  </ul>
-
-  <div class="actions">
-    <a class="btn" id="edit-link" href="/start">Upload your music<span aria-hidden="true">→</span></a>
-  </div>
-  <p style="font-size:13px;color:var(--muted);margin-top:12px" id="edit-where"></p>
 </section>
 
-<!-- ───────────────────────── dev ───────────────────────── -->
 <div class="devbar">
-  For testing only — not part of what an artist sees.
-  <div class="row">
-    <button id="reset">Reset and start over</button>
-    <span>Clears saved progress. Does not delete anything already created in Cloudflare.</span>
-  </div>
+  For testing only, not part of what an artist sees.
+  <div style="margin-top:12px"><button id="reset">Reset and start over</button></div>
 </div>
 
-<footer>
-  <a href="/">Amply</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a>
-</footer>
 </div>
+</main>
+
+<footer>
+  <div class="footer-in">
+    <span>amply</span>
+    <div class="footer-links">
+      <a href="/">Home</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a>
+    </div>
+  </div>
+</footer>
 
 <script type="module">
 import { beginAuthorization, readCallback, completeAuthorization, revoke, ALL_SCOPES }
@@ -371,18 +348,45 @@ function show(step) {
     if (i < idx) li.setAttribute("data-done", "");
     if (i === idx) li.setAttribute("data-on", "");
   });
+  // The segments carry no text, so the label under them says where you are.
+  const NAMES = ["What happens", "Your storage", "Connect", "Your page"];
+  const name = document.getElementById("stepname");
+  if (name) name.textContent = `Step ${idx + 1} of 4 \u2014 ${NAMES[idx]}`;
   window.scrollTo({ top: 0, behavior: "instant" });
 }
 
 document.querySelectorAll("[data-go]").forEach((b) =>
   b.addEventListener("click", () => show(b.dataset.go)));
 
+// A brand-new Cloudflare account has to visit the Workers page and the D1
+// page once before the API will build anything in it, and no permission Amply
+// can ask for does that. So the artist opens them, as visible links: two
+// links, each its own click (a browser allows one new tab per click and
+// quietly blocks the rest), each ticked when opened. Claiming the workers.dev
+// address over the API doesn't cover it: on a fresh account Cloudflare wants
+// the account holder to choose it. Harmless on an account that has both.
+//
+// The Workers address is /workers-and-pages, not /workers/workers-and-pages.
+// Cloudflare moved it; the old path — still the one quoted in their own
+// workers.dev error message — is a 404 in the dashboard now. Test a link here
+// by opening it signed in to a fresh account, not by reading an error string.
+
 document.querySelectorAll("[data-mark]").forEach((a) =>
   a.addEventListener("click", () => { state.opened[a.dataset.mark] = true; save(); paintTasks(); }));
 
 function paintTasks() {
+  // Each page is ticked once it has been opened, so the artist can see what
+  // is left rather than remember it.
+  for (const li of document.querySelectorAll("[data-prep]")) {
+    const done = !!state.opened[li.dataset.prep];
+    li.classList.toggle("yes", done);
+    li.querySelector(".m").textContent = done ? "\u2713" : li.dataset.prep === "workers" ? "1" : "2";
+  }
+  // Quiet until all three have been opened. Still clickable, because someone
+  // who already runs Workers on this account genuinely does not need them.
   const btn = $("#to-connect");
-  if (btn) btn.classList.toggle("ghost", !state.opened.cf);
+  const ready = state.opened.cf && state.opened.workers && state.opened.d1;
+  if (btn) btn.classList.toggle("ghost", !ready);
 }
 
 // ── name → slug ────────────────────────────────────────────────────────────
@@ -390,12 +394,24 @@ const nameInput = $("#artist-name");
 const emailInput = $("#artist-email");
 const connectBtn = $("#connect-btn");
 
+/**
+ * An address that could receive a sign-in code.
+ *
+ * Not a validator — nobody can tell from the outside whether an address
+ * works. It is here to catch a blank or an obvious slip, because without an
+ * email there is nothing to attach a sign-in rule to, and the editor ends up
+ * unreachable with no way back in.
+ */
+const looksLikeEmail = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
+
 function refreshName() {
   const name = nameInput.value.trim();
   const slug = toSlug(name);
   state.artistName = name; save();
   state.email = emailInput.value.trim(); save();
-  connectBtn.disabled = name.length === 0;
+  // Both, and the email really is required: it is the only thing that will be
+  // allowed to open the editor afterwards.
+  connectBtn.disabled = name.length === 0 || !looksLikeEmail(state.email);
   $("#slug-preview").textContent = name
     ? `Your address will be: ${slug}.<your-subdomain>.workers.dev`
     : "";
@@ -426,9 +442,17 @@ const ERRORS = {
   r2_disabled: {
     title: "R2 isn't switched on yet",
     body: "Your account is connected, but storage hasn't been enabled. That's the step that " +
-          "asks for a card — nothing gets charged.",
+          "asks for a card, nothing gets charged.",
     action: { label: "Switch on R2 ↗", href: "https://dash.cloudflare.com/?to=/:account/r2/overview" },
-    retry: "Done — try again",
+    retry: "Done, try again",
+  },
+  d1_disabled: {
+    title: "One more switch to flip",
+    body: "Your account hasn't opened its database yet, which is where your track list " +
+          "lives. Cloudflare switches it on the first time you open its page. Open it, let it " +
+          "load, then come back here. There's nothing to set up on that page.",
+    action: { label: "Open the database page ↗", href: "https://dash.cloudflare.com/?to=/:account/workers/d1" },
+    retry: "Done, try again",
   },
   declined: {
     title: "Permissions weren't granted",
@@ -438,16 +462,18 @@ const ERRORS = {
   },
   name_taken: {
     title: "That name is already in use",
-    body: "Something in your account already has this name. Try a different one — it only " +
+    body: "Something in your account already has this name. Try a different one, it only " +
           "affects the address, and you can put a custom domain on top later.",
     retry: "Choose another name", goto: "connect",
   },
   no_subdomain: {
-    title: "Your account needs a workers.dev address",
-    body: "Cloudflare asks you to claim one, once, before anything can have a public URL. " +
-          "It takes a moment and it's free.",
-    action: { label: "Claim it ↗", href: "https://dash.cloudflare.com/?to=/:account/workers/subdomain" },
-    retry: "Done — try again",
+    title: "Your account needs a web address",
+    body: "Every Cloudflare account needs a workers.dev name before anything can go live, " +
+          "and a new account has to choose its own. Open the Workers page and, when it asks, " +
+          "pick a name — your artist name works well, since it becomes part of your link. " +
+          "Then come back and try again. Nothing is lost; setup carries on where it stopped.",
+    action: { label: "Open the Workers page ↗", href: "https://dash.cloudflare.com/?to=/:account/workers-and-pages" },
+    retry: "Done, try again",
   },
   no_account: {
     title: "No Cloudflare account found",
@@ -503,17 +529,36 @@ function fail(kind, detail) {
 // ── provisioning ───────────────────────────────────────────────────────────
 const session = { token: null, withAccess: true };
 
+// Amply leaves when the artist does, whatever state setup is in. A successful
+// run revokes the token itself (below). A failed one keeps it, deliberately,
+// because the usual fix is "switch on R2, then try again" and that retry needs
+// the same token. So this covers every other exit: a failure the artist walks
+// away from, a closed tab, a click to start again. sendBeacon is the one request
+// a browser still sends while a page is going away.
+//
+// It is best effort: a phone can kill a tab without firing this. The token
+// still cannot outlive its expiry, because it is never stored and cannot be
+// refreshed.
+addEventListener("pagehide", () => {
+  if (!session.token) return;
+  try {
+    navigator.sendBeacon(`${CONFIG.relay}/revoke`,
+      new URLSearchParams({ token: session.token, client_id: CONFIG.clientId }));
+  } catch { /* nothing more can be done from a closing page */ }
+  session.token = null;
+});
+
 function markStep(id, s, detail) {
   const li = document.querySelector(`#log li[data-task="${id}"]`);
   if (!li) return;
   li.setAttribute("data-state", s === "running" ? "run" : s === "skipped" ? "skip" : "ok");
   if (s === "skipped") {
-    // Show the reason inline. A tooltip is useless for diagnosis — nobody
+    // Show the reason inline. A tooltip is useless for diagnosis, nobody
     // hovers, and the reason is the only thing that explains what to do next.
     const note = document.createElement("span");
     note.style.cssText = "color:var(--muted);font-size:12.5px;display:block;margin-left:29px";
     note.textContent = detail
-      ? `couldn't finish — ${detail}`
+      ? `couldn't finish: ${detail}`
       : "couldn't finish";
     li.style.display = "block";
     li.appendChild(note);
@@ -542,9 +587,7 @@ async function runProvision(token, chosenAccountId = null) {
     $("#node-url").textContent = url;
     const edit = $("#edit-link");
     edit.href = editorUrl || "/start";
-    $("#edit-where").textContent = editorUrl
-      ? "Your editor is on your own node. Sign in with the code emailed to you."
-      : "Setup didn't finish — run it again to get your editor.";
+    edit.textContent = editorUrl ? "Open my streaming service" : "Run setup again";
 
     // The progress list disappears a moment after this screen appears, so any
     // skip reason has to be restated here or it is lost.
@@ -561,6 +604,7 @@ async function runProvision(token, chosenAccountId = null) {
     clearProgress();
 
     setTimeout(() => show("done"), 400);
+    watchCertificate(url);
   } catch (err) {
     if (err instanceof ProvisionError && err.kind === "choose_account") {
       renderAccountChooser(JSON.parse(err.detail), token);
@@ -582,6 +626,52 @@ function renderAccountChooser(accounts, token) {
     list.appendChild(b);
   });
   show("choose");
+}
+
+/**
+ * Wait for the address to be usable before encouraging anyone to open it.
+ *
+ * A brand-new workers.dev name has no certificate for a few minutes, and
+ * anything visiting it in that window gets a browser warning that the site is
+ * a security risk. The node is fine; the certificate simply is not there yet.
+ * An artist who sends their link during that gap sends a warning to their
+ * listeners, so the last screen says so plainly until it clears.
+ *
+ * A failed fetch here is a certificate or DNS problem, not an HTTP error: any
+ * response at all, including a 404, means the address works.
+ */
+async function reachable(url) {
+  try {
+    await fetch(`${url}/version`, { cache: "no-store" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function watchCertificate(url) {
+  if (!url) return;
+  const note = $("#cert-note");
+  const recheck = $("#cert-recheck");
+  if (!note) return;
+
+  let stop = false;
+  recheck.addEventListener("click", async () => {
+    recheck.disabled = true;
+    recheck.textContent = "Checking…";
+    const up = await reachable(url);
+    recheck.disabled = false;
+    recheck.textContent = "Check again";
+    if (up) { stop = true; note.hidden = true; }
+  });
+
+  // Roughly three minutes, which is longer than it has ever taken, then leave
+  // the note up with its button rather than pretending it is ready.
+  for (let i = 0; i < 24 && !stop; i++) {
+    if (await reachable(url)) { note.hidden = true; return; }
+    note.hidden = false;
+    await new Promise((r) => setTimeout(r, i < 6 ? 3000 : 10000));
+  }
 }
 
 // ── returning from Cloudflare ──────────────────────────────────────────────

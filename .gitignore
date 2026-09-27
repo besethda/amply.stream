@@ -16,6 +16,3 @@ node/wrangler.local.jsonc
 manage/node_modules/
 
 .build/
-
-# Working notes — not published
-docs/

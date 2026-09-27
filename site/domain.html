@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Host it on your own domain - Amply</title>
+<meta name="description" content="Put your streaming service at an address on your own domain, like listen.yourname.com.">
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<style>
+  .panel { display: none; }
+  .panel[data-on] { display: block; }
+  .field { display: block; margin: 0 0 20px; max-width: 30em; }
+  .field span { display: block; font-size: 15px; font-weight: 600; margin-bottom: 7px; }
+  .field input {
+    width: 100%; font: inherit; font-size: 17px; padding: 15px 17px;
+    border: 1.5px solid var(--line); border-radius: var(--r); background: var(--bg2); color: var(--ink);
+  }
+  .field .hint { font-weight: 400; font-size: 14px; color: var(--ink3); margin: 7px 0 0; }
+  .field input:focus-visible, button:focus-visible { outline: 2.5px solid var(--orange); outline-offset: 1px; }
+  .aside { background: var(--bg2); border-radius: var(--r); padding: 16px 18px; margin: 0 0 28px; max-width: 34em; font-size: 16px; }
+  #log { list-style: none; padding: 0; margin: 0 0 26px; display: grid; gap: 10px; max-width: 34em; }
+  #log li { display: flex; align-items: center; gap: 14px; padding: 15px 18px; background: var(--bg2); border-radius: var(--r); font-size: 16.5px; color: var(--ink3); }
+  #log li::before { content: "·"; width: 18px; text-align: center; font-weight: 700; }
+  #log li[data-state="run"] { color: var(--ink); }
+  #log li[data-state="run"]::before { content: "→"; color: var(--orange); }
+  #log li[data-state="ok"] { color: var(--ink); }
+  #log li[data-state="ok"]::before { content: "✓"; color: var(--orange); }
+  .big-link { font-family: var(--mono); font-size: 19px; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-in">
+    <a class="mark" href="/"><img src="/amply.svg" alt="" width="26" height="26">amply</a>
+  </div>
+</div>
+
+<main>
+<section class="col narrow" style="padding-top:clamp(40px,6vw,72px);padding-bottom:110px">
+
+<div class="panel" data-panel="intro" data-on>
+  <h1 class="step">Host it on<br>your own domain.</h1>
+  <p class="lead">
+    Put your streaming service at <strong>listen.yourname.com</strong>. Only the owner of
+    yourname.com can do that, so anyone who sees the address knows it's really you.
+  </p>
+
+  <div class="aside">
+    <strong>This is for domains already on Cloudflare.</strong> If yours is with Squarespace,
+    Wix, GoDaddy or anyone else, you don't need this: open your editor, go to Settings, and
+    link your domain with one DNS record. It takes a minute and gives listeners the same proof.
+  </div>
+
+  <label class="field">
+    <span>Your streaming service's address</span>
+    <input id="addr" type="text" inputmode="url" placeholder="yourname.something.workers.dev" autocomplete="off">
+    <span class="hint">The address from setup.</span>
+  </label>
+
+  <label class="field">
+    <span>The address you want</span>
+    <input id="host" type="text" inputmode="url" placeholder="listen.yourname.com" autocomplete="off">
+    <span class="hint">A new part in front of your domain — listen, music, or anything unused. Your
+    website stays exactly where it is.</span>
+  </label>
+
+  <div class="actions">
+    <button class="btn" id="connect">Connect to Cloudflare</button>
+  </div>
+</div>
+
+<div class="panel" data-panel="working">
+  <h1 class="step">Setting it up.</h1>
+  <p class="lead">Leave this open. It usually takes under a minute.</p>
+  <ul id="log">
+    <li data-task="account">Finding your account</li>
+    <li data-task="attach">Putting your service on your domain</li>
+    <li data-task="remember">Telling your editor about it</li>
+  </ul>
+</div>
+
+<div class="panel" data-panel="done">
+  <h1 class="step">Done.<br><span class="orange">Here's your address.</span></h1>
+  <p><a class="big-link" id="new-link" href="/"></a></p>
+  <p class="lead" id="done-note">Share this from now on. Your old address keeps working too.</p>
+</div>
+
+<div class="panel" data-panel="error">
+  <h1 class="step" id="err-title">Something went wrong.</h1>
+  <p class="lead" id="err-body"></p>
+  <p class="muted" id="err-detail"></p>
+  <p class="muted">Nothing on your website or your streaming service was changed.</p>
+  <div class="actions" id="err-actions"></div>
+</div>
+
+</section>
+</main>
+
+<footer><div class="footer-in"><span>amply</span><div class="footer-links">
+<a href="/">Home</a><a href="/why">Why it works this way</a><a href="/privacy">Privacy</a>
+</div></div></footer>
+
+<script type="module">
+import { beginAuthorization, readCallback, completeAuthorization, revoke, SCOPES } from "/js/pkce.js";
+import { attachDomain, domainProblem, ProvisionError, toSlug } from "/js/provision.js";
+
+const CONFIG = {
+  clientId: "3c90043d38e9a202d4147d82740092d7",
+  relay: "https://amply-relay.sdarmistead.workers.dev",
+  redirectUri: window.location.origin + "/oauth/callback",
+};
+
+const $ = (s) => document.querySelector(s);
+const KEY = "amply.domain.v1";
+let state = { address: "", host: "" };
+try { Object.assign(state, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
+
+function show(name) {
+  document.querySelectorAll("[data-panel]").forEach((p) => p.toggleAttribute("data-on", p.dataset.panel === name));
+  window.scrollTo({ top: 0, behavior: "instant" });
+}
+
+// What to do about each way this can fail, in words for the artist.
+const FIXES = {
+  domain_not_on_cloudflare: [
+    "That domain isn't on your Cloudflare account",
+    "This only works for a domain on Cloudflare. If yours is with Squarespace, Wix or anyone else, link it from your editor instead: Settings → Your own domain. One DNS record, and listeners get the same proof.",
+  ],
+  domain_pending: [
+    "Your domain isn't active on Cloudflare yet",
+    "Cloudflare is still waiting for the nameserver change at your registrar. That can take a few hours. Try again once Cloudflare says the domain is active.",
+  ],
+  hostname_in_use: [
+    "That address is already in use",
+    "Something already answers at that address, and Amply never replaces an existing record. Choose a different name in front of your domain, like music or listen.",
+  ],
+  domain_permission: [
+    "Cloudflare didn't allow it",
+    "Your account said no to attaching a domain. Tell whoever runs Amply what it said — it may need one more permission added.",
+  ],
+  no_worker: [
+    "Couldn't find your streaming service",
+    "Check the address is the one from setup, and that you signed in to the same Cloudflare account.",
+  ],
+};
+
+function fail(title, body, detail) {
+  $("#err-title").textContent = title;
+  $("#err-body").textContent = body || "";
+  $("#err-detail").textContent = detail || "";
+  const acts = $("#err-actions");
+  acts.innerHTML = "";
+  const b = document.createElement("button");
+  b.className = "btn";
+  b.textContent = "Try again";
+  b.addEventListener("click", () => show("intro"));
+  acts.appendChild(b);
+  show("error");
+}
+
+const slugFrom = (address) =>
+  toSlug(String(address || "").trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "").split(".")[0] || "");
+const cleanHost = (h) => String(h || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+
+$("#addr").value = state.address || "";
+$("#host").value = state.host || "";
+
+$("#connect").addEventListener("click", async () => {
+  state.address = $("#addr").value.trim();
+  state.host = cleanHost($("#host").value);
+  if (!slugFrom(state.address)) return fail("That address doesn't look right", "It should look like yourname.something.workers.dev.");
+  const problem = domainProblem(state.host);
+  if (problem) return fail("That address won't work", problem);
+  save();
+  $("#connect").disabled = true;
+  try {
+    // Only what setup already asked for. Attaching a domain needs nothing more.
+    await beginAuthorization({
+      clientId: CONFIG.clientId, redirectUri: CONFIG.redirectUri, scopes: SCOPES, returnTo: "/domain",
+    });
+  } catch (e) {
+    $("#connect").disabled = false;
+    fail("Couldn't reach Cloudflare", e.message);
+  }
+});
+
+function mark(id, s) {
+  const li = document.querySelector(`#log li[data-task="${id}"]`);
+  if (li) li.setAttribute("data-state", s === "running" ? "run" : "ok");
+}
+
+async function run(token) {
+  show("working");
+  try {
+    const { url, host } = await attachDomain({
+      token, relay: CONFIG.relay, slug: slugFrom(state.address), hostname: state.host, onStep: mark,
+    });
+    // Not checked from here: this page may only talk to Cloudflare and to
+    // workers.dev, and a new domain's certificate takes a few minutes anyway.
+    const a = $("#new-link");
+    a.href = url;
+    a.textContent = host;
+    $("#done-note").textContent =
+      "Share this from now on — your editor will too, and your old address keeps working. " +
+      "Cloudflare issues the certificate in the background, so if it shows a warning for the " +
+      "first few minutes, wait and try again rather than sending it to anyone.";
+    show("done");
+  } catch (err) {
+    const fix = err instanceof ProvisionError && FIXES[err.kind];
+    if (fix) fail(fix[0], fix[1], err.detail ? `Cloudflare said: ${err.detail}` : "");
+    else fail("That didn't work", err.message, err.detail ? `Cloudflare said: ${err.detail}` : "");
+  } finally {
+    await revoke({ relay: CONFIG.relay, clientId: CONFIG.clientId, token });
+  }
+}
+
+(async function handleCallback() {
+  const cb = readCallback();
+  if (!cb) { show("intro"); return; }
+  history.replaceState({}, "", "/domain");
+  if (!cb.ok) { fail("Permission wasn't granted", cb.description || "Nothing was changed."); return; }
+  try {
+    const { token } = await completeAuthorization({
+      clientId: CONFIG.clientId, relay: CONFIG.relay, code: cb.code, state: cb.state,
+    });
+    await run(token);
+  } catch (e) {
+    fail("Couldn't complete the connection", e.message);
+  }
+})();
+</script>
+</body>
+</html>

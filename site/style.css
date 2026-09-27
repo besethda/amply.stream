@@ -1,54 +1,227 @@
+/* Amply — design system.
+   Light only, deliberately. A theme toggle is a thing to maintain and a thing
+   to get wrong, and this site is a handful of pages that need to be clear
+   rather than clever. Text on orange is ink, not white — the orange is too light for white
+   to pass contrast. */
+
 :root {
-  --ink: #17161a;
-  --ink-2: #55525c;
-  --muted: #8a8792;
-  --bg: #fbfaf8;
-  --surface: #ffffff;
-  --rule: #e6e3dd;
-  --accent: #b5482a;
+  color-scheme: light only;
+  --orange:    #f6711e;
+  --on-orange: #131110;
+  --bg:        #ffffff;
+  --bg2:       #f7f4f1;
+  --ink:       #131110;
+  --ink2:      #4a4644;
+  --ink3:      #66615d;
+  --line:      #e3ddd8;
+  --deep:      #131110;   /* full-bleed dark panels */
+  --on-deep:   #faf7f5;
+
+  --r:    14px;
+  --r-lg: 18px;
+  --pill: 999px;
+
+  --col:  1300px;         /* homepage content column */
+  --col-narrow: 800px;    /* the setup flow reads as a single column */
+  --gut:  clamp(20px, 4vw, 48px);
+
+  --sans: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ink: #f2f0ec; --ink-2: #b4b0a8; --muted: #86827c;
-    --bg: #131215; --surface: #1b1a1e; --rule: #2c2a30; --accent: #e0714d;
-  }
-}
+
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
-  padding: 0 20px 96px;
   background: var(--bg);
   color: var(--ink);
-  font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
-.wrap { max-width: 660px; margin: 0 auto; }
-header { padding: 56px 0 40px; border-bottom: 1px solid var(--rule); margin-bottom: 40px; }
+
+/* ── layout ───────────────────────────────────────────────────────── */
+
+.col     { max-width: var(--col);        margin: 0 auto; padding: 0 var(--gut); }
+.col.narrow { max-width: var(--col-narrow); }
+.bleed   { width: 100%; }
+section  { padding: clamp(46px, 5.5vw, 86px) 0; }
+
+/* Consecutive sections would each contribute a full pad, doubling the gap
+   between them. One gap, not two. */
+section + section { padding-top: 0; }
+
+/* ── header ───────────────────────────────────────────────────────── */
+
+.topbar {
+  position: sticky; top: 0; z-index: 40;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.topbar-in {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 17px var(--gut);
+}
 .mark {
-  display: inline-block; font-weight: 700; font-size: 15px; letter-spacing: -0.01em;
+  display: inline-flex; align-items: center; gap: 10px;
+  font-weight: 800; font-size: 25px; letter-spacing: -0.035em;
   color: var(--ink); text-decoration: none;
 }
-.mark span { color: var(--accent); }
-h1 { font-size: 30px; line-height: 1.15; letter-spacing: -0.02em; margin: 28px 0 10px; }
-.updated { color: var(--muted); font-size: 13px; margin: 0; }
-h2 {
-  font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--muted); margin: 44px 0 14px; font-weight: 600;
+.mark svg { width: 26px; height: 26px; display: block; color: var(--orange); }
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+
+/* ── type ─────────────────────────────────────────────────────────── */
+
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+h1 {
+  font-weight: 800; letter-spacing: -0.042em; line-height: 0.94;
+  font-size: clamp(44px, 8.4vw, 118px);
 }
-p { margin: 0 0 16px; color: var(--ink-2); }
-p.lead { font-size: 18px; color: var(--ink); }
-strong { color: var(--ink); font-weight: 600; }
-ul { margin: 0 0 16px; padding-left: 20px; color: var(--ink-2); }
-li { margin-bottom: 9px; }
-a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+h1.step { font-size: clamp(38px, 5.6vw, 76px); line-height: 0.98; letter-spacing: -0.038em; }
+h2 { font-weight: 800; letter-spacing: -0.038em; line-height: 1.02; font-size: clamp(32px, 6.5vw, 76px); }
+h3 { font-weight: 700; letter-spacing: -0.025em; font-size: clamp(21px, 2vw, 26px); }
+
+p { margin: 0 0 18px; color: var(--ink2); }
+p.lead { font-size: clamp(18px, 1.6vw, 21px); max-width: 34em; }
+.orange { color: var(--orange); }
+.muted  { color: var(--ink3); }
+.mono   { font-family: var(--mono); }
+.eyebrow {
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink3); margin: 0 0 22px;
+}
+a { color: var(--orange); text-underline-offset: 2px; }
+strong { font-weight: 600; color: var(--ink); }
+
+/* ── buttons ──────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  font: inherit; font-weight: 700; font-size: 19px; letter-spacing: -0.01em;
+  background: var(--orange); color: var(--on-orange);
+  border: 0; padding: 19px 34px; border-radius: var(--pill);
+  cursor: pointer; text-decoration: none;
+  transition: filter .12s ease, transform .08s ease;
+}
+.btn:hover { filter: brightness(1.06); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2.5px solid var(--ink); outline-offset: 3px; }
+.btn[disabled] { opacity: .35; cursor: not-allowed; filter: none; transform: none; }
+.btn.ghost {
+  background: transparent; color: var(--ink); border: 1.5px solid var(--line);
+  font-family: var(--mono); font-weight: 400; font-size: 15px; padding: 11px 22px;
+}
+.btn.sm { font-size: 16px; padding: 13px 24px; }
+.link {
+  background: none; border: 0; font: inherit; font-size: 16px; color: var(--ink3);
+  cursor: pointer; padding: 6px 0; text-decoration: underline; text-underline-offset: 3px;
+}
+.link:hover { color: var(--ink); }
+.actions { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
+
+/* ── panels ───────────────────────────────────────────────────────── */
+
+.panel-orange { background: var(--orange); color: var(--on-orange); }
+.panel-orange p, .panel-orange .muted { color: rgba(19, 17, 16, 0.74); }
+.panel-deep   { background: var(--deep); color: var(--on-deep); }
+.panel-deep p { color: rgba(250, 247, 245, 0.62); }
+
+.card {
+  background: var(--bg2); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 30px;
+}
+.card > :last-child { margin-bottom: 0; }
+.card.orange { background: var(--orange); border-color: transparent; color: var(--on-orange); }
+.card.orange p { color: rgba(19, 17, 16, 0.76); }
+
+/* ── rows (numbered list items in the flow) ───────────────────────── */
+
+.rows { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+.rows li {
+  display: flex; align-items: center; gap: 22px;
+  background: var(--bg2); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 22px 26px;
+  font-size: 19px; color: var(--ink);
+}
+.rows .n { font-weight: 800; font-size: 21px; color: var(--orange); flex: none; min-width: 26px; }
+.rows .t { flex: 1; min-width: 0; }
+.rows .meta { font-family: var(--mono); font-size: 15px; color: var(--ink3); flex: none; }
+
+/* ── reading pages: privacy, terms, protecting your music ─────────── */
+
+/* A warm band with the page's name, so each of these reads as a page of its
+   own rather than a paragraph that starts under the logo. */
+.page-head {
+  background: var(--bg2); border-bottom: 1px solid var(--line);
+  padding: clamp(44px, 6vw, 84px) 0 clamp(36px, 5vw, 60px);
+}
+.page-head .eyebrow { margin-bottom: 18px; }
+.page-head h1 {
+  font-size: clamp(38px, 5.6vw, 72px); line-height: 0.98; letter-spacing: -0.038em;
+  margin-bottom: 24px;
+}
+.page-head .lead { margin: 0; color: var(--ink2); }
+
+/* Body copy. The global h2 is sized for the homepage and carries no margin,
+   which on a page of prose runs each heading straight into its paragraph. */
+.prose { padding: clamp(40px, 5vw, 64px) 0 120px; }
+.prose h2 {
+  font-size: clamp(25px, 2.6vw, 32px); line-height: 1.1; letter-spacing: -0.03em;
+  margin: 52px 0 16px;
+}
+.prose .col > :first-child { margin-top: 0; }
+.prose p, .prose li { max-width: 40em; }
+.prose ul, .prose ol:not(.ladder) { padding-left: 1.3em; color: var(--ink2); }
+.prose li { margin-bottom: 8px; }
+.prose pre {
+  background: var(--bg2); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 18px 20px; overflow-x: auto; margin: 0 0 22px;
+  font-family: var(--mono); font-size: 13.5px; line-height: 1.6; white-space: pre-wrap;
+}
+
+.prose p code, .prose li code {
+  font-family: var(--mono); font-size: 0.88em;
+  background: var(--bg2); padding: 1px 6px; border-radius: 6px;
+}
+
+/* A point that needs to stand out from the prose around it. */
 .box {
-  background: var(--surface); border: 1px solid var(--rule);
-  border-radius: 8px; padding: 18px 20px; margin: 0 0 20px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 20px 24px; margin: 0 0 26px;
 }
+.box p { margin: 0 0 10px; }
 .box p:last-child { margin-bottom: 0; }
-footer {
-  margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--rule);
-  color: var(--muted); font-size: 14px;
+
+/* Numbered steps on a line: the escalation on /protect, in the order to try
+   them. The number sits on the line, so the indent is the line, not a gap. */
+ol.ladder { counter-reset: step; list-style: none; padding: 0; margin: 8px 0 28px; }
+ol.ladder > li {
+  position: relative; margin-left: 14px; padding: 0 0 28px 32px;
+  border-left: 2px solid var(--line);
 }
-footer a { color: var(--muted); }
+ol.ladder > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+ol.ladder > li::before {
+  counter-increment: step; content: counter(step);
+  position: absolute; left: -15px; top: -1px;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--orange); color: var(--on-orange);
+  font-size: 14px; font-weight: 700; display: grid; place-items: center;
+}
+ol.ladder h3 { margin: 0 0 6px; font-size: 19px; line-height: 1.35; }
+ol.ladder p { margin-bottom: 10px; }
+
+/* ── footer ───────────────────────────────────────────────────────── */
+
+footer { border-top: 1px solid var(--line); }
+.footer-in {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 20px; flex-wrap: wrap;
+  padding: 30px var(--gut);
+  font-family: var(--mono); font-size: 15px; color: var(--ink3);
+}
+.footer-in a { color: var(--ink3); text-decoration: none; }
+.footer-in a:hover { color: var(--ink); }
+.footer-links { display: flex; gap: 26px; flex-wrap: wrap; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

@@ -46,12 +46,6 @@ const ALLOWED: Array<{ method: string; pattern: RegExp }> = [
   // Storage for audio.
   { method: "POST", pattern: /^\/accounts\/[0-9a-f]{32}\/r2\/buckets$/ },
   { method: "GET", pattern: /^\/accounts\/[0-9a-f]{32}\/r2\/buckets$/ },
-  // The manifest.
-  { method: "POST", pattern: /^\/accounts\/[0-9a-f]{32}\/storage\/kv\/namespaces$/ },
-  { method: "GET", pattern: /^\/accounts\/[0-9a-f]{32}\/storage\/kv\/namespaces$/ },
-  { method: "PUT", pattern: /^\/accounts\/[0-9a-f]{32}\/storage\/kv\/namespaces\/[0-9a-f]{32}\/values\/[A-Za-z0-9_-]{1,64}$/ },
-  // Read the manifest back, so the management UI edits what is actually live.
-  { method: "GET", pattern: /^\/accounts\/[0-9a-f]{32}\/storage\/kv\/namespaces\/[0-9a-f]{32}\/values\/[A-Za-z0-9_-]{1,64}$/ },
   // Audio and artwork. Object keys may contain slashes and dots; no traversal,
   // no query smuggling.
   { method: "PUT", pattern: /^\/accounts\/[0-9a-f]{32}\/r2\/buckets\/[a-z0-9][a-z0-9-]{1,62}\/objects\/(?!.*\.\.)[A-Za-z0-9!_.*'()/-]{1,512}$/ },
@@ -70,12 +64,31 @@ const ALLOWED: Array<{ method: string; pattern: RegExp }> = [
   { method: "POST", pattern: /^\/accounts\/[0-9a-f]{32}\/access\/identity_providers$/ },
   { method: "POST", pattern: /^\/accounts\/[0-9a-f]{32}\/access\/apps$/ },
   { method: "POST", pattern: /^\/accounts\/[0-9a-f]{32}\/access\/apps\/[0-9a-f-]{36}\/policies$/ },
-  // The node itself.
+  // Read back who an already-existing application admits. Setup adopts an app
+  // it finds for this address, and adopting one without reading its rule would
+  // mean inheriting whoever it lets in.
+  { method: "GET", pattern: /^\/accounts\/[0-9a-f]{32}\/access\/apps\/[0-9a-f-]{36}\/policies$/ },
+  // The artist's database: the track list, the sign-in settings, and a tally
+  // per listener. Creating one, and running the schema into it.
+  { method: "GET", pattern: /^\/accounts\/[0-9a-f]{32}\/d1\/database$/ },
+  { method: "POST", pattern: /^\/accounts\/[0-9a-f]{32}\/d1\/database$/ },
+  { method: "POST", pattern: /^\/accounts\/[0-9a-f]{32}\/d1\/database\/[0-9a-f-]{36}\/query$/ },
+  // The streaming service itself.
   { method: "PUT", pattern: /^\/accounts\/[0-9a-f]{32}\/workers\/scripts\/[a-z0-9-]{1,63}$/ },
   { method: "GET", pattern: /^\/accounts\/[0-9a-f]{32}\/workers\/scripts\/[a-z0-9-]{1,63}$/ },
   // Give it a public URL.
   { method: "GET", pattern: /^\/accounts\/[0-9a-f]{32}\/workers\/subdomain$/ },
+  // Claim the account's workers.dev name. A new account has none, and
+  // Cloudflare's advice, that opening the dashboard creates one, does not
+  // hold: artists were left stuck at a screen telling them to go and do
+  // something the page did not do.
+  { method: "PUT", pattern: /^\/accounts\/[0-9a-f]{32}\/workers\/subdomain$/ },
   { method: "POST", pattern: /^\/accounts\/[0-9a-f]{32}\/workers\/scripts\/[a-z0-9-]{1,63}\/subdomain$/ },
+  // Put the artist's service on a domain they own, like listen.theirname.com.
+  // Body-checked below: a hostname and the Worker's name, and never the flag
+  // that would overwrite an existing DNS record — that is how an artist's
+  // website would get replaced by accident.
+  { method: "PUT", pattern: /^\/accounts\/[0-9a-f]{32}\/workers\/domains$/ },
 ];
 
 function allowedOrigin(req: Request, env: Env): string | null {
@@ -211,6 +224,30 @@ export default {
         const config = (parsed as { config?: unknown }).config;
         if (config && typeof config === "object" && Object.keys(config).length > 0) {
           return refuse(403, "the one-time PIN provider takes no configuration", origin);
+        }
+        forwardBody = raw;
+      }
+
+      if (request.method === "PUT" && /\/workers\/domains$/.test(path)) {
+        const raw = await request.text();
+        let parsed: { hostname?: unknown; service?: unknown; override_existing_dns_record?: unknown };
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          return refuse(400, "domain body must be JSON", origin);
+        }
+        const host = String(parsed?.hostname || "");
+        if (!/^[a-z0-9-]+(\.[a-z0-9-]+){2,}$/.test(host) || /\.(workers|pages)\.dev$/.test(host)) {
+          return refuse(403, "only a subdomain of the artist's own domain may be attached", origin);
+        }
+        if (!/^[a-z0-9-]{1,63}$/.test(String(parsed?.service || ""))) {
+          return refuse(403, "not a Worker name", origin);
+        }
+        // Replacing whatever already answers at a hostname is how an artist's
+        // website would be overwritten. Setup never asks for it; nor may
+        // anything else through here.
+        if (parsed.override_existing_dns_record) {
+          return refuse(403, "existing DNS records are never overwritten", origin);
         }
         forwardBody = raw;
       }

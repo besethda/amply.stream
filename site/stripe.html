@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card subscriptions with Stripe - Amply</title>
+<meta name="description" content="A step-by-step guide for artists: connecting your own Stripe account to Amply so fans can subscribe by card.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<style>
+  .prose h2 { scroll-margin-top: 90px; }
+  .prose ol.steps-list { padding-left: 22px; display: grid; gap: 12px; }
+  .prose ol.steps-list li::marker { font-weight: 700; color: var(--orange); }
+  .prose .note { background: var(--bg2); border-radius: var(--r); padding: 16px 18px; }
+  .prose .perms-wrap { overflow-x: auto; }
+  .prose table.perms { border-collapse: collapse; margin: 10px 0; font-size: 15px; }
+  .prose table.perms th, .prose table.perms td { text-align: left; padding: 6px 18px 6px 0; border-bottom: 1px solid var(--line); }
+  .prose table.perms td:nth-child(2) { font-weight: 700; }
+  .prose dl.trouble dt { font-weight: 700; margin-top: 14px; }
+  .prose dl.trouble dd { margin: 4px 0 0; }
+  .prose code { font-family: var(--mono); font-size: .92em; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-in">
+    <a class="mark" href="/"><img src="/amply.svg" alt="" width="26" height="26">amply</a>
+    <div class="topbar-actions"><a class="btn sm" href="/why#subscriptions">How subscriptions work</a></div>
+  </div>
+</div>
+
+<main>
+<header class="page-head">
+  <div class="col narrow">
+    <p class="eyebrow">For artists</p>
+    <h1>Card payments, through your own Stripe</h1>
+    <p class="lead">Let fans subscribe by card, or buy your songs and albums to keep. The money goes
+    straight to your Stripe account, and you can try it all with pretend money first.</p>
+  </div>
+</header>
+
+<div class="prose"><div class="col narrow">
+
+<h2 id="before">Before you start</h2>
+
+<ul>
+  <li><strong>It's your Stripe account, not ours.</strong> Stripe pays you directly and takes its
+  usual fee (about 2.9% + 30¢ a payment in the US). Amply takes nothing and never sees the money.</li>
+  <li><strong>To test, you need only an email address.</strong> Real payments need your ID and a bank
+  account, as an individual or a company.</li>
+  <li><strong>Your key stays on your streaming service.</strong> It can do only the few things Amply
+  needs, and it's never shown again, to you or to Amply.</li>
+</ul>
+
+<h2 id="account">1. Make a Stripe account</h2>
+
+<p>Sign up at <a href="https://dashboard.stripe.com/register" rel="noopener">dashboard.stripe.com/register</a>.
+You can skip Stripe's setup questions for now: every account starts in <strong>test mode</strong>,
+where nothing real is charged.</p>
+
+<p><strong>Set the name fans will see</strong> on Stripe's checkout page to your artist name, with a
+support email: <a href="https://dashboard.stripe.com/settings/public" rel="noopener">Settings → Public details</a>.</p>
+
+<h2 id="key">2. Get a key for Amply</h2>
+
+<div id="with-app" hidden>
+<h3>With Amply for Artists (one click)</h3>
+<ol class="steps-list">
+  <li><a class="btn" id="install-app" href="#" rel="noopener">Install Amply for Artists</a> in your
+  Stripe account. Stripe shows what the key can do; choose <strong>Install</strong>.</li>
+  <li>Choose <strong>View API keys</strong> and copy the key (it starts <code>rk_test_</code> in test mode).</li>
+</ol>
+<h3>Or by hand</h3>
+</div>
+
+<ol class="steps-list">
+  <li>Open <a href="https://dashboard.stripe.com/test/apikeys" rel="noopener">API keys in test mode</a>,
+  create a restricted key, and choose <strong>Building your own integration</strong>.</li>
+  <li>Set exactly these, and leave every other row as <strong>None</strong>:
+    <div class="perms-wrap">
+    <table class="perms">
+      <thead><tr><th>Row</th><th>Set to</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Products</td><td>Write</td><td>to make what you sell</td></tr>
+        <tr><td>Payment Links</td><td>Write</td><td>a checkout link for each plan, song and album</td></tr>
+        <tr><td>Prices</td><td>Write</td><td>to set their prices</td></tr>
+        <tr><td>Customer portal</td><td>Write</td><td>so fans can cancel on Stripe's own page</td></tr>
+        <tr><td>Subscriptions</td><td>Read</td><td>to confirm a subscription is paid</td></tr>
+        <tr><td>Checkout Sessions</td><td>Read</td><td>to check which fan a payment was for</td></tr>
+      </tbody>
+    </table>
+    </div>
+    The key can't move money, see card numbers, issue refunds or pay anything out.</li>
+  <li>Create it and copy it. It starts <code>rk_test_</code>; Stripe shows it only once, so if you
+  lose it, make another.</li>
+</ol>
+
+<h2 id="connect">3. Connect it</h2>
+
+<ol class="steps-list">
+  <li>In your editor, open <strong>Settings → Subscriptions</strong>.</li>
+  <li>For subscriptions, tick the plans you want and set their prices (each at least $2). Only
+  selling songs and albums? Choose <strong>Connect for music only</strong> instead, and put prices
+  on your albums and songs under <strong>Music</strong>.</li>
+  <li>Paste the key and connect. Your streaming service sets everything up in your Stripe account.</li>
+  <li><strong>Publish.</strong> Plans and prices appear in the Amply app.</li>
+</ol>
+
+<p class="note">If a permission is missing, connecting says which, and undoes anything it had
+already made. Fix the key in Stripe and connect again.</p>
+
+<h2 id="try">4. Try it</h2>
+
+<ol class="steps-list">
+  <li>Open your page in the Amply app and tap a plan.</li>
+  <li>Save the backup key the app shows you, then continue to Stripe.</li>
+  <li>Pay with Stripe's test card: <code>4242 4242 4242 4242</code>, any future expiry date, any three
+  digits, any name and postcode.</li>
+  <li>You land back in the app, subscribed, and your paid tracks play. In your editor, under
+  <strong>Listeners</strong>, you appear as a subscriber.</li>
+  <li>To test cancelling: on your page in the app, choose <strong>Manage or cancel</strong>.</li>
+</ol>
+
+<h2 id="live">5. Go live</h2>
+
+<ol class="steps-list">
+  <li><strong>Activate your Stripe account.</strong> In the Stripe dashboard, follow <em>Activate
+  payments</em>: your details, ID and bank account. Stripe sometimes takes a day or two to check.</li>
+  <li><strong>Get a live key.</strong> Switch off test mode and get a key the same way as in step 2
+  (the app, or by hand with the same six permissions). A live key starts <code>rk_live_</code>.</li>
+  <li><strong>Swap it in.</strong> In your editor, under Subscriptions, choose <strong>Switch to a
+  live key</strong>, paste it, and save.</li>
+  <li><strong>Publish.</strong> From now on, payments are real.</li>
+</ol>
+
+<p>Test subscribers don't carry over — test mode and live mode are separate worlds in Stripe.</p>
+
+<h2 id="after">Once it's running</h2>
+
+<ul>
+  <li><strong>Getting paid.</strong> Stripe pays out to your bank on a schedule you set in the Stripe
+  dashboard, usually every few days.</li>
+  <li><strong>Cancelling.</strong> Fans cancel from your page in the Amply app, on Stripe's own
+  page; they keep listening until the end of what they paid for. You can also cancel anyone from
+  <em>Subscriptions</em> in the Stripe dashboard.</li>
+  <li><strong>Refunds</strong> are up to you, from the payment in the Stripe dashboard.</li>
+  <li><strong>Receipts.</strong> Turn on emailed receipts in Stripe under Settings → Customer emails,
+  so fans get one for each payment and renewal.</li>
+  <li><strong>Tax.</strong> Selling subscriptions makes you a seller. In the EU that usually means
+  VAT and a 14-day right to cancel; some US states tax digital music. Stripe Tax can work it out
+  for about 0.5% a payment. We can't give tax advice — if you're unsure, ask an accountant.</li>
+  <li><strong>Changing prices</strong> makes new checkout links. People already subscribed keep the
+  price they signed up at.</li>
+  <li><strong>Stopping.</strong> <em>Stop selling subscriptions</em> takes the plans off your page.
+  People already subscribed keep listening, and keep being renewed by Stripe, until they cancel;
+  your streaming service lets go of your key once the last one ends.</li>
+</ul>
+
+<h2 id="trouble">If something goes wrong</h2>
+
+<dl class="trouble">
+  <dt>"Your key is missing a permission…"</dt>
+  <dd>It names the row. In Stripe, open the ⋯ menu next to your key → <em>Edit key</em>, set that
+  row, save, and connect again.</dd>
+
+  <dt>"That's Stripe's publishable key"</dt>
+  <dd>Stripe shows two keys together. The publishable one (<code>pk_</code>) is public and no use
+  here; copy the secret one below it, which starts <code>rk_</code>. You may need to choose
+  <em>Reveal</em> first.</dd>
+
+  <dt>"Stripe doesn't recognise that key"</dt>
+  <dd>Copy it again — the whole thing, starting <code>rk_</code>. If you've lost it, make a new one;
+  Stripe only shows a key once.</dd>
+
+  <dt>"Your Stripe account isn't activated for real payments yet"</dt>
+  <dd>Finish <em>Activate payments</em> in the Stripe dashboard, or keep using a test key until you
+  have.</dd>
+
+  <dt>A fan paid but isn't shown as subscribed</dt>
+  <dd>It can take a minute. If it still hasn't appeared, the fan can choose <em>Check again</em> on
+  your page in the app — that finds a payment even if they never made it back from Stripe. Check
+  your streaming service is up to date, too (the editor offers updates).</dd>
+
+  <dt>"Your key couldn't set up Stripe's cancellation page"</dt>
+  <dd>Add <em>Customer portal — Write</em> to the key and save your plans again. Fans must be able to
+  cancel as easily as they subscribed.</dd>
+</dl>
+
+</div></div>
+</main>
+
+<footer><div class="footer-in"><span>amply</span><div class="footer-links">
+<a href="/">Home</a><a href="/why">Why it works this way</a><a href="/paying">Paying</a><a href="/privacy">Privacy</a>
+</div></div></footer>
+</body>
+</html>

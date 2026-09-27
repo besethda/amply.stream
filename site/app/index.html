@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Amply</title>
+<meta name="description" content="Listen to artists who host their own music, and pay them directly.">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0f0d0c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Amply">
+<link rel="manifest" href="/app/app.webmanifest">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/app/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- The fonts' stylesheet is added by the app (main.jsx), not here: a
+     stylesheet in the head holds up the first paint, and on a slow connection
+     that meant a blank screen instead of the logo below. -->
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/app/app.css">
+<style>
+  /* The logo, while the app starts and checks it's the latest version.
+     Inline, so it shows at once, without a connection. */
+  #splash { position: fixed; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center;
+    background: #0f0d0c; transition: opacity .28s ease; }
+  #splash svg { width: 76px; height: 76px; animation: breathe 1.6s ease-in-out infinite; }
+  #splash.gone { opacity: 0; pointer-events: none; }
+  @keyframes breathe { 50% { opacity: .55; transform: scale(.96); } }
+  @media (prefers-reduced-motion: reduce) { #splash svg { animation: none; } }
+</style>
+</head>
+<body>
+<div id="splash" aria-hidden="true">
+  <svg viewBox="0 0 24 24" fill="#f6711e">
+    <rect x="7.93" y="1.2" width="1.01" height="17.99" rx="0.51"/>
+    <rect x="7.93" y="18.18" width="1.01" height="1.01"/>
+    <rect x="10.44" y="2.42" width="1.01" height="9.22" rx="0.51"/>
+    <rect x="12.59" y="4.12" width="1.08" height="6.7" rx="0.54"/>
+    <rect x="15.71" y="0.35" width="0.89" height="12.06" rx="0.45"/>
+    <rect x="17.82" y="2.4" width="1.13" height="8.45" rx="0.56"/>
+    <rect x="20.94" y="1.18" width="1.03" height="10.57" rx="0.52"/>
+    <rect x="22.96" y="4.91" width="1.03" height="13.72" rx="0.52"/>
+    <rect x="22.96" y="17.6" width="1.03" height="1.03"/>
+    <circle cx="4.47" cy="19.19" r="4.47"/>
+    <circle cx="19.49" cy="18.63" r="4.5"/>
+  </svg>
+</div>
+<div id="app"></div>
+<noscript><p style="padding:24px">This app needs JavaScript to play music.</p></noscript>
+<script type="module" src="/app/app.js"></script>
+</body>
+</html>

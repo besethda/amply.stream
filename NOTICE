@@ -15,14 +15,8 @@ limitations under the License.
 
 ---
 
-THE NAME AND THE LOGO ARE NOT LICENSED WITH THE CODE.
-
-"Amply", and the logo artwork in this repository, are not licensed under
-the Apache License. Section 6 of that License grants no trademark rights,
-and this notice makes the position explicit for the artwork as well.
-
-Fork the code freely and ship it under your own name and mark. This is
-deliberate rather than proprietary instinct: the name and logo are what an
-artist checks on a Cloudflare consent screen when deciding whether the
-application asking for access to their account is the one they meant to
-trust. A fork wearing them would make that check meaningless.
+"Amply" is a project name, not a licensed trademark. Section 6 of the
+License does not grant permission to use it. Fork the code freely; ship it
+under your own name. This is deliberate — the name is what artists check
+when deciding whether the thing asking for access to their Cloudflare
+account is the one they trust.

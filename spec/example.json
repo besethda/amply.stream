@@ -5,12 +5,14 @@
     "name": "Hollow Coast",
     "bio": "Recorded in a converted lifeboat station on the Norfolk coast. Everything here is original and self-released.",
     "image": "https://music.hollowcoast.com/art/avatar.jpg",
+    "banner": "https://music.hollowcoast.com/art/banner.jpg",
     "links": [
       { "label": "Bandcamp", "url": "https://hollowcoast.bandcamp.com" },
       { "label": "Instagram", "url": "https://instagram.com/hollowcoast" }
     ]
   },
   "content": { "explicit": false },
+  "licence": { "type": "amply-personal-1" },
   "payment": [
     {
       "type": "solana-usdc",
@@ -26,12 +28,14 @@
       "title": "Longwave",
       "date": "2026-03-01",
       "art": "https://music.hollowcoast.com/art/longwave.jpg",
+      "colors": { "accent": "#e0652c", "deep": "#2a1a12" },
       "tracks": [
         {
           "id": "signal-fade",
           "title": "Signal Fade",
           "duration": 214,
-          "url": "https://music.hollowcoast.com/audio/signal-fade.m4a"
+          "url": "https://music.hollowcoast.com/audio/signal-fade.m4a",
+          "waves": "https://music.hollowcoast.com/audio/signal-fade.waves"
         },
         {
           "id": "north-sea-static",

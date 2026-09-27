@@ -1,0 +1,24 @@
+{
+  "name": "amply-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The listening app: reads an artist's manifest, plays it, and pays them.",
+  "type": "module",
+  "scripts": {
+    "build": "rm -rf ../.build/app && esbuild src/main.jsx --bundle --splitting --format=esm --target=es2022 --jsx=automatic --jsx-import-source=preact --minify --outdir=../.build/app && node build.mjs && node ../scripts/make-icons.mjs",
+    "test": "esbuild test-app.mjs --bundle --format=esm --platform=node --target=es2022 --jsx=automatic --jsx-import-source=preact --outfile=../.build/test/app.js && node ../.build/test/app.js && node test-wallet.mjs && node test-pay.mjs && node test-spend.mjs && node test-paying.mjs && node test-identify.mjs && node test-topup.mjs && node test-player.mjs && node test-collection.mjs && node test-visualizer.mjs && node test-update.mjs && node test-tips.mjs && node test-tags.mjs && node test-security.mjs",
+    "prove": "node prove-payment.mjs"
+  },
+  "dependencies": {
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.99.0",
+    "buffer": "^6.0.3",
+    "jsqr": "^1.4.0",
+    "preact": "^10.24.0",
+    "uqr": "^0.1.2"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0",
+    "preact-render-to-string": "^6.7.0"
+  }
+}

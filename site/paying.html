@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paying for music on Amply - Amply</title>
+<meta name="description" content="A step-by-step guide to paying artists on Amply, for someone who has never used crypto.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<style>
+  .prose h2 { scroll-margin-top: 90px; }
+  .prose ol.steps-list { padding-left: 22px; display: grid; gap: 12px; }
+  .prose ol.steps-list li::marker { font-weight: 700; color: var(--orange); }
+  .prose .note { background: var(--bg2); border-radius: var(--r); padding: 16px 18px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-in">
+    <a class="mark" href="/"><img src="/amply.svg" alt="" width="26" height="26">amply</a>
+    <div class="topbar-actions"><a class="btn sm" href="/app/">Open the app</a></div>
+  </div>
+</div>
+
+<main>
+<header class="page-head">
+  <div class="col narrow">
+    <p class="eyebrow">Paying for music</p>
+    <h1>Never used crypto? Start here.</h1>
+    <p class="lead">Artists on Amply are paid as you listen, straight from your wallet to theirs,
+    with nobody taking a cut. Setting that up takes about ten minutes, once.</p>
+  </div>
+</header>
+
+<div class="prose"><div class="col narrow">
+
+<h2 id="ways">Two ways to pay an artist</h2>
+
+<p>Each artist chooses, and their page in the app says which:</p>
+<ul>
+  <li><strong>By subscription</strong> — pay by card for a year or a few months. No crypto needed:
+  tap <em>Subscribe</em> on their page, save the backup key the app shows you, and pay on Stripe's
+  page. You can stop reading here.</li>
+  <li><strong>By the minute</strong> — the app pays a fraction of a cent for each minute you listen,
+  from a small wallet on your phone. That needs the setup below, once.</li>
+</ul>
+<p>Free tracks play for anyone, either way.</p>
+
+<h2 id="listeners">Setting up paying by the minute</h2>
+
+<p>You'll use two apps: <strong>Phantom</strong>, a free wallet app where you buy the money, and
+<strong>Amply</strong>, which pays artists from its own small wallet while you listen. You move a
+few dollars from one to the other, and that's it.</p>
+
+<ol class="steps-list">
+  <li><strong>Install Phantom</strong> on your phone, from the link on
+  <a href="https://phantom.com" rel="noopener">phantom.com</a> so you get the real app — fake
+  wallet apps exist. Create a wallet, and <strong>write the list of words it shows you on
+  paper</strong>. Anyone with those words can take what's in it; never type them anywhere else.</li>
+
+  <li><strong>Buy some USDC and a little SOL in Phantom.</strong> Tap <em>Buy</em> and pay by card.
+  USDC is a digital dollar — it's what pays artists; $5 to $20 is plenty to start. SOL pays the
+  network's fee, which is a fraction of a cent each time; about a dollar's worth lasts a long time.
+  <strong>Choose USDC itself if Phantom offers it</strong> — buying SOL and swapping it costs an
+  extra fee of about 1%. The card company will
+  ask for ID. That's normal, and required by law.<br><strong>If your money shows up as "Cash"</strong>
+  (a "$" coin): that's Phantom's own dollar, which Amply can't use yet. Tap <em>Swap</em> and turn
+  it into USDC, plus a couple of dollars' worth of SOL. The same goes if Phantom only offered you
+  SOL: swap most of it into USDC.</li>
+
+  <li><strong>Open the Amply app</strong> at <a href="/app/">amply.stream/app</a>, go to
+  <em>Paying</em>, and create a wallet. Write down its backup key too — it's the key to the money
+  in <em>this</em> wallet.</li>
+
+  <li><strong>Top it up.</strong> The first time, send by hand: under <em>Topping it up</em>, copy
+  the address, then in Phantom tap <em>Send</em> → <strong>SOL</strong> → paste → $1 worth, and again
+  <em>Send</em> → <strong>USDC</strong> → paste → a few dollars. A brand-new wallet has to be set up on
+  the network before anything else can reach it, and Phantom's ordinary Send does that. <strong>From
+  then on it's one tap</strong>: tap an amount, and Phantom opens with everything filled in.</li>
+
+  <li><strong>Listen.</strong> Add an artist by their link or their website. You'll see their price
+  before anything is charged, and the app pays them as you listen — no approving each payment.</li>
+</ol>
+
+<p class="note"><strong>Setting up on a computer?</strong> The top-up screen also shows codes you
+can scan with Phantom's camera instead of tapping.</p>
+
+<h2 id="costs">What it costs you</h2>
+
+<ul>
+  <li><strong>Buying:</strong> the card company's fee, usually 3–5% including its exchange rate.
+  Paying by bank transfer, where offered, is cheaper. Topping up $20 once costs less than $5 four
+  times.</li>
+  <li><strong>Setting up:</strong> about 30¢, once, to set up the Amply wallet on the network. It
+  comes out of the SOL.</li>
+  <li><strong>Listening:</strong> about a tenth of a cent each time the app pays an artist — a fixed
+  amount, not a percentage, so it's around 1% at a typical 10¢ payment. Ten hours of listening in a
+  month costs about 5¢ in fees.</li>
+</ul>
+<p>The artist receives every cent of their price. Amply takes nothing.</p>
+
+<h2 id="back">Getting your money back</h2>
+
+<p>In the Amply app, under <em>Sending it back</em>, paste your Phantom address — in Phantom tap
+<em>Receive</em>, choose <strong>Solana</strong>, and copy it — and tap <em>Send everything</em>.
+Whatever you haven't spent goes back to Phantom.</p>
+
+<h2 id="artists">If you're an artist</h2>
+
+<ol class="steps-list">
+  <li><strong>Install Phantom</strong> and create a wallet, as above. Write down the words. You don't
+  need to buy anything to be paid.</li>
+  <li><strong>Give Amply your address.</strong> In your editor, open <em>Settings</em> →
+  <em>Who gets paid</em>. On a computer with the Phantom browser extension, tap <em>Use my Phantom
+  address</em>; otherwise, in Phantom tap <em>Receive</em>, choose <strong>Solana</strong>, copy it,
+  and paste it in.</li>
+  <li><strong>Publish.</strong> Payments arrive in Phantom as people listen.</li>
+</ol>
+
+<p>More on choosing a wallet, and on getting money into your bank, is in
+<a href="/why#setup-wallet">Which wallet should I use?</a> To let fans subscribe by card as well,
+see <a href="/stripe">Card subscriptions with Stripe</a>.</p>
+
+<h2 id="safe">Staying safe</h2>
+
+<ul>
+  <li><strong>The words are the money.</strong> Nobody from Amply, Phantom or anywhere else will
+  ever need them. Anyone who asks is trying to steal from you.</li>
+  <li><strong>Always Solana.</strong> If an app or exchange asks which network to send on, the
+  answer is Solana. USDC sent any other way won't arrive, and usually can't be recovered.</li>
+  <li><strong>Keep it small.</strong> Treat the Amply wallet like cash in a pocket: a few dollars at a
+  time. The app will never send more than $2 in one payment or $10 in a day, whatever an artist's
+  page asks for.</li>
+</ul>
+
+</div></div>
+</main>
+
+<footer><div class="footer-in"><span>amply</span><div class="footer-links">
+<a href="/">Home</a><a href="/why">Why it works this way</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a>
+</div></div></footer>
+</body>
+</html>

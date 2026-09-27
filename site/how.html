@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How it works - Amply</title>
+<meta name="description" content="A note from Seth, the developer: why Amply exists, what it is, how it makes money, and why it is a tool rather than a music service.">
+<meta property="og:title" content="A note from Seth">
+<meta property="og:description" content="Why Amply exists, and how it works.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<style>
+  .topbar-link {
+    color: var(--ink2); text-decoration: none; font-weight: 600; font-size: 16px; padding: 10px 12px;
+  }
+  .topbar-link:hover { color: var(--ink); }
+  .topbar-actions .btn { white-space: nowrap; }
+  @media (max-width: 480px) {
+    .topbar-actions { gap: 4px; }
+    .topbar-link { font-size: 15px; padding: 8px; white-space: nowrap; }
+    .topbar-actions .btn.sm { font-size: 15px; padding: 11px 16px; }
+  }
+  .prose p { font-size: clamp(18px, 1.5vw, 20px); line-height: 1.6; }
+  .sign { font-family: var(--mono); color: var(--ink3); }
+  /* The last section: back to the homepage, on black like its How it works link. */
+  .home-link { background: var(--deep); padding-block: clamp(48px, 6vw, 84px); }
+  .home-link a { display: inline-flex; align-items: center; gap: 24px; color: var(--on-deep); text-decoration: none; }
+  .home-link .arrow { font-size: clamp(36px, 5vw, 64px); color: var(--orange); transition: transform .15s ease; }
+  .home-link a:hover .arrow { transform: translateX(-8px); }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-in">
+    <a class="mark" href="/"><img src="/amply.svg" alt="" width="26" height="26">amply</a>
+    <div class="topbar-actions"><a class="topbar-link" href="/artists">For artists</a><a class="btn sm" href="/app/">Open the app</a></div>
+  </div>
+</div>
+
+<main>
+<header class="page-head">
+  <div class="col narrow">
+    <p class="eyebrow">How it works</p>
+    <h1>A note from Seth, the developer.</h1>
+  </div>
+</header>
+
+<div class="prose"><div class="col narrow">
+
+<p>Amply is a project I've been thinking about for two years. I've written music for many
+years, and I love the process of recording something new: mixing sounds together into
+something you can feel, something you want to share.</p>
+
+<p>But as a musician, I also know how hard it is to <em>be</em> a musician. Like many others,
+I went a different route and studied software development, which is now another passion of
+mine. I had the idea for Amply two years ago, and it took me those two years to figure out a
+way for it to actually work. It's something I'm really passionate about, and my dream is to
+make streaming profitable for artists.</p>
+
+<h2>What is Amply?</h2>
+
+<p>Amply is a tool that sets up a streaming service for artists, completely owned by them. It
+helps them with hosting, payments, GDPR and managing their music. Alongside that, there's a
+free listening app that anyone can download and use.</p>
+
+<p>Artists can sell their music per stream, by the month or year, or sell songs and albums
+outright. They decide the price, and they get all of the money (apart from the payment
+provider's fees, like Stripe's).</p>
+
+<h2>How does Amply make money?</h2>
+
+<p>It doesn't. This is my passion project, and I want to genuinely help artists. In the
+future I might add a small one-time payment for Amply's setup tool, but for now it will
+remain free.</p>
+
+<h2>How does Amply avoid licensing and royalties?</h2>
+
+<p>Amply is a tool, not a music service. Each artist's streaming service runs on hosting in
+their own name, and Amply is only involved in setting it up. Once it's set up, Amply removes
+its own access.</p>
+
+<p>That means Amply doesn't sell, hold or control any music at all. Music is never uploaded to
+Amply, and when you listen, it streams straight from the artist's own service to you, without
+passing through Amply. Payments go straight to the artist too, so Amply never touches the
+money.</p>
+
+<p>The listening app is a free tool that Amply doesn't make any money from. Like a web
+browser, it simply plays what artists publish themselves. The artist is the one publishing
+their music, just as they would on their own website.</p>
+
+<p>Amply also doesn't store any list of artists to recommend in the listening app. This means
+artists are responsible for marketing their own streaming services. Each artist has a link
+that can be opened in the listening app, unlocking their music.</p>
+
+<p>Thank you for using Amply!</p>
+
+<p class="sign">— Seth</p>
+
+</div></div>
+</main>
+
+<section class="home-link">
+  <div class="col">
+    <a href="/">
+      <span class="arrow" aria-hidden="true">←</span>
+      <h2>Back home</h2>
+    </a>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-in">
+    <span>amply</span>
+    <div class="footer-links">
+      <a href="/">Home</a>
+      <a href="/artists">For artists</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/terms">Terms</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

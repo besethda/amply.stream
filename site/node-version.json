@@ -1,0 +1,43 @@
+{
+  "version": "3.18.4",
+  "spec": 1,
+  "schema": [
+    "CREATE TABLE IF NOT EXISTS settings ( key TEXT PRIMARY KEY, value TEXT NOT NULL )",
+    "CREATE TABLE IF NOT EXISTS listeners ( pubkey TEXT PRIMARY KEY, plays INTEGER NOT NULL DEFAULT 0, seconds INTEGER NOT NULL DEFAULT 0, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, blocked INTEGER NOT NULL DEFAULT 0 )",
+    "CREATE TABLE IF NOT EXISTS subscriptions ( wallet TEXT PRIMARY KEY, subscription TEXT NOT NULL, customer TEXT, until INTEGER NOT NULL, updated INTEGER NOT NULL )",
+    "CREATE INDEX IF NOT EXISTS subscriptions_by_id ON subscriptions (subscription)",
+    "CREATE TABLE IF NOT EXISTS sales ( ref TEXT PRIMARY KEY, item TEXT NOT NULL, buyer TEXT NOT NULL, owner TEXT, gift TEXT, via TEXT NOT NULL, created INTEGER NOT NULL )",
+    "CREATE INDEX IF NOT EXISTS sales_by_owner ON sales (owner)",
+    "CREATE INDEX IF NOT EXISTS sales_by_buyer ON sales (buyer)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS sales_by_gift ON sales (gift)",
+    "CREATE TABLE IF NOT EXISTS downloads ( ref TEXT NOT NULL, track TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (ref, track) )"
+  ],
+  "migrations": [],
+  "limits": [
+    {
+      "binding": "LIMIT_LISTEN",
+      "limit": 40,
+      "period": 60,
+      "namespace": "7101"
+    },
+    {
+      "binding": "LIMIT_MEDIA",
+      "limit": 600,
+      "period": 60,
+      "namespace": "7102"
+    },
+    {
+      "binding": "LIMIT_WALLET",
+      "limit": 6,
+      "period": 60,
+      "namespace": "7103"
+    },
+    {
+      "binding": "LIMIT_NEW",
+      "limit": 20,
+      "period": 60,
+      "namespace": "7104"
+    }
+  ],
+  "published": "2026-09-27"
+}

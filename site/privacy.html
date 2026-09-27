@@ -3,31 +3,47 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Privacy — Amply</title>
+<title>Privacy - Amply</title>
 <meta name="description" content="Amply collects nothing. No accounts, no analytics, no server that could hold your data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div class="wrap">
-<header>
-  <a class="mark" href="/">ampl<span>y</span></a>
-  <h1>Privacy</h1>
-  <p class="updated">Last updated 18 September 2026</p>
-</header>
-
-<p class="lead">Amply collects nothing about you. Not a reduced amount — nothing. There is
+<div class="topbar">
+  <div class="topbar-in">
+    <a class="mark" href="/"><img src="/amply.svg" alt="" width="26" height="26">amply</a>
+    <div class="topbar-actions"><a class="btn sm" href="/start">Start</a></div>
+  </div>
+</div>
+<main>
+<header class="page-head">
+  <div class="col narrow">
+    <p class="eyebrow">Privacy</p>
+    <h1>We collect nothing.</h1>
+    <p class="lead">Amply collects nothing about you. Not a reduced amount, nothing. There is
 no account to create, no analytics, and no server that could store anything if we wanted it to.</p>
+  </div>
+</header>
+<div class="prose"><div class="col narrow">
 
 <p>That is a consequence of how Amply is built rather than a policy we chose to adopt. There
-is no backend holding a list of artists, no database of listeners, and no record anywhere of
-who listened to what.</p>
+is no backend holding a list of artists, no database of listeners, and nothing we could hand
+over, sell or lose.</p>
+
+<p><strong>One thing is not ours to promise.</strong> An artist who charges for their music
+serves it only to listeners who identify themselves with a wallet, and if you play it, that
+artist's own server records that your wallet did. It runs in their account, not ours. What
+that means for you is below.</p>
 
 <h2>This website</h2>
 
 <p>Static files. No cookies, no analytics, no tracking pixels, no fingerprinting. We do not
 know that you visited.</p>
 
-<h2>Setting up an artist node</h2>
+<h2>Setting up an artist's streaming service</h2>
 
 <p>When an artist connects their Cloudflare account, the authorisation happens between them
 and Cloudflare. We receive a short-lived access token, use it to create their storage and
@@ -40,20 +56,23 @@ Worker, and discard it.</p>
   authorises us again.</p>
 </div>
 
-<p>We keep no record that the setup happened — no artist list, no email address, no node URL.
+<p>We keep no record that the setup happened, no artist list, no email address, no web address.
 The relay that carries those requests is stateless, has no storage attached to it, and logs
-nothing. <a href="https://github.com/besethda/amply-stream">Its source is public</a>; it is
-short enough to read in a minute.</p>
+nothing.</p>
+
+<p>You don't have to take that on trust. Your Cloudflare account keeps its own audit log of
+every change made in it, and it will show exactly what setup created, and that nothing has
+touched your account on Amply's behalf since.</p>
 
 <h2>The listener app</h2>
 
 <p>Everything stays on the device:</p>
 
 <ul>
-  <li><strong>Which artists you follow</strong> — stored locally, never transmitted to us.</li>
-  <li><strong>What you listen to, and for how long</strong> — measured on your device so that
+  <li><strong>Which artists you follow</strong>, stored locally, never transmitted to us.</li>
+  <li><strong>What you listen to, and for how long</strong>, measured on your device so that
   artists can be paid. It never leaves it.</li>
-  <li><strong>Your wallet key</strong> — generated on your device and held in its secure
+  <li><strong>Your wallet key</strong>, generated on your device and held in its secure
   storage. We never see it, cannot recover it, and could not spend from it.</li>
 </ul>
 
@@ -61,22 +80,65 @@ short enough to read in a minute.</p>
 without a backup and you lose the library and the balance. We would rather be honest about
 that than hold your data in order to avoid it.</p>
 
+<h2>Music you pay for</h2>
+
+<p>Music an artist has made free plays for anyone, with no identification and nothing
+recorded. Music an artist charges for is served only to a listener whose app proves which
+wallet it holds, because that is how the artist is paid and how they can stop serving
+someone who doesn't pay. Your app does that by signing a challenge; there is still no
+account, no password and no email.</p>
+
+<p>When you play a paid track, <strong>that artist's server keeps a running total for your
+wallet</strong>: how many tracks, how many minutes, and when you were last there. It does
+not record which tracks you played, or when you played them, because Amply's software does
+not collect that. The artist can see those totals and can decide to stop serving your
+wallet.</p>
+
+<p>This is the artist's data, held by the artist, under their own responsibility. It is
+also deletable by you, without asking anyone: your app can prove the row is yours by
+signing for it, and the record is erased immediately. No form, no identity documents, and
+nobody to persuade.</p>
+
+<p><strong>One exception, and we would rather state it than bury it.</strong> If an artist
+has stopped serving your wallet, erasing your record does not lift that. Everything about
+your listening goes — how much, how long, when — and what stays is the address itself,
+marked as barred. Otherwise the erasure right would double as a way to undo any artist's
+decision to stop dealing with someone, which is not what it is for. Erasure has always had
+limits where a controller has grounds to keep something, and this is the smallest one we
+could implement.</p>
+
+<p>The app shows an artist's price before you play anything of theirs, and a paid track
+never plays without a wallet, so it cannot happen by accident.</p>
+
+<h2>Amply for Artists, our app for Stripe</h2>
+
+<p>Artists who sell card subscriptions can install our app, Amply for Artists, in their own Stripe account. It
+exists only so Stripe can make a key limited to what an artist's streaming service needs:
+setting up subscription plans and checkout links, and checking who has subscribed. The artist
+copies that key into their own streaming service, where it stays. <strong>The app collects
+nothing, and we never receive the key, the payments, or anything about the artist's
+customers.</strong> The artist can uninstall the app, or delete the key, in Stripe at any time.</p>
+
 <h2>What other people can see</h2>
 
 <p>We are not the only party involved, and it would be misleading to describe only our own
 part.</p>
 
 <ul>
-  <li><strong>The artist's node</strong> serves the audio, so it can see requests for it, the
+  <li><strong>The artist's own streaming service</strong> serves the audio, so it can see
+  requests for it, the
   same way any website can. It belongs to the artist, and it is their responsibility.</li>
   <li><strong>Cloudflare</strong> operates that infrastructure, under the artist's own account
   and Cloudflare's own privacy policy.</li>
+  <li><strong>Stripe</strong>, if you subscribe to an artist by card. You pay on Stripe's own
+  page, to the artist's own Stripe account, under Stripe's privacy policy. The artist's
+  streaming service keeps only your wallet address, the subscription's ids and when it ends.</li>
   <li><strong>The payment on-ramp</strong>, if you fund a wallet, is a separate company whose
   terms and identity checks are their own.</li>
   <li><strong>The blockchain.</strong> Payments to artists are recorded on a public ledger.
   This is worth understanding clearly: those records are <strong>permanent, public, and
   cannot be deleted</strong>. Anyone can see that an address paid an artist, when, and how
-  much. Addresses are not names, but they are not anonymous either — a wallet can be linked
+  much. Addresses are not names, but they are not anonymous either, a wallet can be linked
   to a person, particularly through the on-ramp that funded it.</li>
 </ul>
 
@@ -89,17 +151,16 @@ write to us and we will look into it.</p>
 <h2>Changes</h2>
 
 <p>If this page changes, the change is visible in
-<a href="https://github.com/besethda/amply-stream">the public repository's history</a>, with
+<a href="https://github.com/besethda/amply.stream">the public repository's history</a>, with
 a date and a diff. We cannot quietly revise it.</p>
 
 <h2>Contact</h2>
 
-<p>Open an issue on <a href="https://github.com/besethda/amply-stream">the repository</a>.</p>
+<p>Open an issue on <a href="https://github.com/besethda/amply.stream">the repository</a>.</p>
 
-<footer>
-  <a href="/">Amply</a> · <a href="/terms">Terms</a> ·
-  <a href="https://github.com/besethda/amply-stream">Source</a>
-</footer>
-</div>
+</div></div></main>
+<footer><div class="footer-in"><span>amply</span><div class="footer-links">
+<a href="/">Home</a><a href="/protect">Protecting your music</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a>
+</div></div></footer>
 </body>
 </html>

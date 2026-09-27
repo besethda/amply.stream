@@ -1,0 +1,11 @@
+# Built by Bubblewrap/Gradle; regenerated on every build.
+.gradle/
+build/
+app/build/
+local.properties
+*.apk
+*.aab
+*.idsig
+# Never commit the signing key.
+*.keystore
+*.jks

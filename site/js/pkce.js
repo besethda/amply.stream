@@ -32,17 +32,17 @@ export const SCOPES = [
   "account-settings.read",      // enumerate which account to build in
   "workers-scripts.write",      // deploy the node, with its bindings declared
                                 // in the upload metadata
-  "workers-kv-storage.write",   // create the namespace, write the manifest
+  "d1.write",                   // the database: track list, settings, listeners
   "workers-r2.write",           // create the audio bucket
 ];
 
 /**
- * Only needed to put the editor on the artist's own node behind Cloudflare
- * Access. Everything else works without them, so setup treats the steps that
- * use them as optional and falls back to the hosted editor.
+ * Only needed to lock the editor to the artist with Cloudflare Access.
+ * Everything else works without them, so setup lets the steps that use them
+ * fail softly (OPTIONAL_STEPS in provision.js).
  *
- * Do not infer these ids from their dashboard labels. Four separate wrong
- * guesses in this project so far, and this trio in particular:
+ * Do not infer these ids from their dashboard labels. The obvious guesses are
+ * wrong, these in particular:
  *
  *   - "Access: Apps and Policies" is `zone-access.write` and is ZONE-scoped.
  *     It looks like the obvious choice, it sits in the account-level Zero
@@ -95,8 +95,8 @@ export async function beginAuthorization({
   const verifier = randomString();
   const state = randomString(16);
 
-  // `returnTo` lets setup and the management page share one registered redirect
-  // URI. The callback page reads it and forwards there.
+  // `returnTo` lets setup, rebuild and the domain page share one registered
+  // redirect URI. The callback page reads it and forwards there.
   sessionStorage.setItem(SESSION_KEY, JSON.stringify({ verifier, state, redirectUri, returnTo }));
 
   const params = new URLSearchParams({
@@ -110,18 +110,6 @@ export async function beginAuthorization({
   });
 
   window.location.assign(`${AUTH_URL}?${params}`);
-}
-
-/** Where the flow should resume after the callback. */
-export function returnPath(fallback = "/start") {
-  try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    const to = raw && JSON.parse(raw).returnTo;
-    // Only same-origin absolute paths — never a caller-supplied URL.
-    return typeof to === "string" && /^\/[A-Za-z0-9/_-]*$/.test(to) ? to : fallback;
-  } catch {
-    return fallback;
-  }
 }
 
 /** Read `?code=…&state=…` (or `?error=…`) off the callback URL. */

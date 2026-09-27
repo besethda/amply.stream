@@ -5,132 +5,914 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Your music</title>
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="/studio.webmanifest">
+<link rel="apple-touch-icon" href="/studio/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Your music">
 <style>
+/* Amply — design system.
+   Light only, deliberately. A theme toggle is a thing to maintain and a thing
+   to get wrong, and this site is a handful of pages that need to be clear
+   rather than clever. Text on orange is ink, not white — the orange is too light for white
+   to pass contrast. */
+
 :root {
-  --ink: #17161a;
-  --ink-2: #55525c;
-  --muted: #8a8792;
-  --bg: #fbfaf8;
-  --surface: #ffffff;
-  --rule: #e6e3dd;
-  --accent: #b5482a;
+  color-scheme: light only;
+  --orange:    #f6711e;
+  --on-orange: #131110;
+  --bg:        #ffffff;
+  --bg2:       #f7f4f1;
+  --ink:       #131110;
+  --ink2:      #4a4644;
+  --ink3:      #66615d;
+  --line:      #e3ddd8;
+  --deep:      #131110;   /* full-bleed dark panels */
+  --on-deep:   #faf7f5;
+
+  --r:    14px;
+  --r-lg: 18px;
+  --pill: 999px;
+
+  --col:  1300px;         /* homepage content column */
+  --col-narrow: 800px;    /* the setup flow reads as a single column */
+  --gut:  clamp(20px, 4vw, 48px);
+
+  --sans: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ink: #f2f0ec; --ink-2: #b4b0a8; --muted: #86827c;
-    --bg: #131215; --surface: #1b1a1e; --rule: #2c2a30; --accent: #e0714d;
-  }
-}
+
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0;
-  padding: 0 20px 96px;
   background: var(--bg);
   color: var(--ink);
-  font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
-.wrap { max-width: 660px; margin: 0 auto; }
-header { padding: 56px 0 40px; border-bottom: 1px solid var(--rule); margin-bottom: 40px; }
+
+/* ── layout ───────────────────────────────────────────────────────── */
+
+.col     { max-width: var(--col);        margin: 0 auto; padding: 0 var(--gut); }
+.col.narrow { max-width: var(--col-narrow); }
+.bleed   { width: 100%; }
+section  { padding: clamp(46px, 5.5vw, 86px) 0; }
+
+/* Consecutive sections would each contribute a full pad, doubling the gap
+   between them. One gap, not two. */
+section + section { padding-top: 0; }
+
+/* ── header ───────────────────────────────────────────────────────── */
+
+.topbar {
+  position: sticky; top: 0; z-index: 40;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.topbar-in {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 17px var(--gut);
+}
 .mark {
-  display: inline-block; font-weight: 700; font-size: 15px; letter-spacing: -0.01em;
+  display: inline-flex; align-items: center; gap: 10px;
+  font-weight: 800; font-size: 25px; letter-spacing: -0.035em;
   color: var(--ink); text-decoration: none;
 }
-.mark span { color: var(--accent); }
-h1 { font-size: 30px; line-height: 1.15; letter-spacing: -0.02em; margin: 28px 0 10px; }
-.updated { color: var(--muted); font-size: 13px; margin: 0; }
-h2 {
-  font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--muted); margin: 44px 0 14px; font-weight: 600;
+.mark svg { width: 26px; height: 26px; display: block; color: var(--orange); }
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+
+/* ── type ─────────────────────────────────────────────────────────── */
+
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+h1 {
+  font-weight: 800; letter-spacing: -0.042em; line-height: 0.94;
+  font-size: clamp(44px, 8.4vw, 118px);
 }
-p { margin: 0 0 16px; color: var(--ink-2); }
-p.lead { font-size: 18px; color: var(--ink); }
-strong { color: var(--ink); font-weight: 600; }
-ul { margin: 0 0 16px; padding-left: 20px; color: var(--ink-2); }
-li { margin-bottom: 9px; }
-a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+h1.step { font-size: clamp(38px, 5.6vw, 76px); line-height: 0.98; letter-spacing: -0.038em; }
+h2 { font-weight: 800; letter-spacing: -0.038em; line-height: 1.02; font-size: clamp(32px, 6.5vw, 76px); }
+h3 { font-weight: 700; letter-spacing: -0.025em; font-size: clamp(21px, 2vw, 26px); }
+
+p { margin: 0 0 18px; color: var(--ink2); }
+p.lead { font-size: clamp(18px, 1.6vw, 21px); max-width: 34em; }
+.orange { color: var(--orange); }
+.muted  { color: var(--ink3); }
+.mono   { font-family: var(--mono); }
+.eyebrow {
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink3); margin: 0 0 22px;
+}
+a { color: var(--orange); text-underline-offset: 2px; }
+strong { font-weight: 600; color: var(--ink); }
+
+/* ── buttons ──────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  font: inherit; font-weight: 700; font-size: 19px; letter-spacing: -0.01em;
+  background: var(--orange); color: var(--on-orange);
+  border: 0; padding: 19px 34px; border-radius: var(--pill);
+  cursor: pointer; text-decoration: none;
+  transition: filter .12s ease, transform .08s ease;
+}
+.btn:hover { filter: brightness(1.06); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2.5px solid var(--ink); outline-offset: 3px; }
+.btn[disabled] { opacity: .35; cursor: not-allowed; filter: none; transform: none; }
+.btn.ghost {
+  background: transparent; color: var(--ink); border: 1.5px solid var(--line);
+  font-family: var(--mono); font-weight: 400; font-size: 15px; padding: 11px 22px;
+}
+.btn.sm { font-size: 16px; padding: 13px 24px; }
+.link {
+  background: none; border: 0; font: inherit; font-size: 16px; color: var(--ink3);
+  cursor: pointer; padding: 6px 0; text-decoration: underline; text-underline-offset: 3px;
+}
+.link:hover { color: var(--ink); }
+.actions { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
+
+/* ── panels ───────────────────────────────────────────────────────── */
+
+.panel-orange { background: var(--orange); color: var(--on-orange); }
+.panel-orange p, .panel-orange .muted { color: rgba(19, 17, 16, 0.74); }
+.panel-deep   { background: var(--deep); color: var(--on-deep); }
+.panel-deep p { color: rgba(250, 247, 245, 0.62); }
+
+.card {
+  background: var(--bg2); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 30px;
+}
+.card > :last-child { margin-bottom: 0; }
+.card.orange { background: var(--orange); border-color: transparent; color: var(--on-orange); }
+.card.orange p { color: rgba(19, 17, 16, 0.76); }
+
+/* ── rows (numbered list items in the flow) ───────────────────────── */
+
+.rows { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+.rows li {
+  display: flex; align-items: center; gap: 22px;
+  background: var(--bg2); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 22px 26px;
+  font-size: 19px; color: var(--ink);
+}
+.rows .n { font-weight: 800; font-size: 21px; color: var(--orange); flex: none; min-width: 26px; }
+.rows .t { flex: 1; min-width: 0; }
+.rows .meta { font-family: var(--mono); font-size: 15px; color: var(--ink3); flex: none; }
+
+/* ── reading pages: privacy, terms, protecting your music ─────────── */
+
+/* A warm band with the page's name, so each of these reads as a page of its
+   own rather than a paragraph that starts under the logo. */
+.page-head {
+  background: var(--bg2); border-bottom: 1px solid var(--line);
+  padding: clamp(44px, 6vw, 84px) 0 clamp(36px, 5vw, 60px);
+}
+.page-head .eyebrow { margin-bottom: 18px; }
+.page-head h1 {
+  font-size: clamp(38px, 5.6vw, 72px); line-height: 0.98; letter-spacing: -0.038em;
+  margin-bottom: 24px;
+}
+.page-head .lead { margin: 0; color: var(--ink2); }
+
+/* Body copy. The global h2 is sized for the homepage and carries no margin,
+   which on a page of prose runs each heading straight into its paragraph. */
+.prose { padding: clamp(40px, 5vw, 64px) 0 120px; }
+.prose h2 {
+  font-size: clamp(25px, 2.6vw, 32px); line-height: 1.1; letter-spacing: -0.03em;
+  margin: 52px 0 16px;
+}
+.prose .col > :first-child { margin-top: 0; }
+.prose p, .prose li { max-width: 40em; }
+.prose ul, .prose ol:not(.ladder) { padding-left: 1.3em; color: var(--ink2); }
+.prose li { margin-bottom: 8px; }
+.prose pre {
+  background: var(--bg2); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 18px 20px; overflow-x: auto; margin: 0 0 22px;
+  font-family: var(--mono); font-size: 13.5px; line-height: 1.6; white-space: pre-wrap;
+}
+
+.prose p code, .prose li code {
+  font-family: var(--mono); font-size: 0.88em;
+  background: var(--bg2); padding: 1px 6px; border-radius: 6px;
+}
+
+/* A point that needs to stand out from the prose around it. */
 .box {
-  background: var(--surface); border: 1px solid var(--rule);
-  border-radius: 8px; padding: 18px 20px; margin: 0 0 20px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 20px 24px; margin: 0 0 26px;
 }
+.box p { margin: 0 0 10px; }
 .box p:last-child { margin-bottom: 0; }
-footer {
-  margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--rule);
-  color: var(--muted); font-size: 14px;
+
+/* Numbered steps on a line: the escalation on /protect, in the order to try
+   them. The number sits on the line, so the indent is the line, not a gap. */
+ol.ladder { counter-reset: step; list-style: none; padding: 0; margin: 8px 0 28px; }
+ol.ladder > li {
+  position: relative; margin-left: 14px; padding: 0 0 28px 32px;
+  border-left: 2px solid var(--line);
 }
-footer a { color: var(--muted); }
+ol.ladder > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+ol.ladder > li::before {
+  counter-increment: step; content: counter(step);
+  position: absolute; left: -15px; top: -1px;
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--orange); color: var(--on-orange);
+  font-size: 14px; font-weight: 700; display: grid; place-items: center;
+}
+ol.ladder h3 { margin: 0 0 6px; font-size: 19px; line-height: 1.35; }
+ol.ladder p { margin-bottom: 10px; }
 
-/* Functional pass. Layout and states first; a visual pass comes later. */
-  body { padding-bottom: 96px; }
-  .card {
-    background: var(--surface); border: 1px solid var(--rule); border-radius: 10px;
-    padding: 22px; margin: 0 0 20px;
+/* ── footer ───────────────────────────────────────────────────────── */
+
+footer { border-top: 1px solid var(--line); }
+.footer-in {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 20px; flex-wrap: wrap;
+  padding: 30px var(--gut);
+  font-family: var(--mono); font-size: 15px; color: var(--ink3);
+}
+.footer-in a { color: var(--ink3); text-decoration: none; }
+.footer-in a:hover { color: var(--ink); }
+.footer-links { display: flex; gap: 26px; flex-wrap: wrap; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* The artist's workspace.
+   Inlined into the self-contained copy served from the artist's own node, so it
+   can reference only tokens from style.css, nothing external.
+
+   The public site is white with warm panels. This is the inverse: a warm ground
+   with white cards floating on it, because a workspace is a surface you put
+   things on rather than a page you read. */
+
+:root {
+  --good:     #2c6b45;   /* a split that adds up */
+  --bad:      #b03636;   /* an upload that didn't finish */
+  --bad-bg:   #fdf1f0;
+  --hatch:    #eeeae4;   /* the "nothing here yet" diagonal fill */
+}
+
+body {
+  background: var(--bg2);
+  padding-bottom: 120px;          /* clears the player bar */
+}
+
+/* A floor, not a layout. Every picture here is sized by the box that holds it,
+   but a picked image is whatever the artist's camera produced, and one styling
+   mistake should not put a 4000px photo through the page. */
+img { max-width: 100%; }
+
+.wrap { display: block; }
+
+/* ── header ───────────────────────────────────────────────────────── */
+
+.top {
+  position: sticky; top: 0; z-index: 50;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+.top-in {
+  max-width: var(--col); margin: 0 auto; padding: 16px var(--gut);
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.top-mark { display: inline-flex; align-items: baseline; gap: 12px; min-width: 0; }
+.top-mark .mark { font-size: 24px; }
+.top-mark .where {
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink3); white-space: nowrap;
+}
+.top-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
+
+/* the "N changes not live yet" pill */
+.state {
+  display: inline-flex; align-items: center; gap: 10px;
+  border: 1px solid var(--line); border-radius: var(--pill);
+  padding: 10px 20px; font-size: 16px; font-weight: 600; color: var(--ink);
+  background: var(--bg);
+}
+.state .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--orange); flex: none; }
+.state.clean { color: var(--ink3); font-weight: 400; }
+.state .short, .publish .short { display: none; }
+.page-links { display: none; }
+.state.clean .dot { background: var(--line); }
+
+/* ── tabs ─────────────────────────────────────────────────────────── */
+
+/* Inside .top, so the whole bar sticks as one piece and there is no hand-tuned
+   offset to fall out of step with the header's height. */
+.tabs-in {
+  max-width: var(--col); margin: 0 auto; padding: 0 var(--gut);
+  display: flex; align-items: stretch; justify-content: space-between; gap: 20px;
+  border-top: 1px solid var(--line);
+}
+.tablist { display: flex; gap: 8px; }
+.tab {
+  background: none; border: 0; font: inherit; font-size: 19px; font-weight: 600;
+  letter-spacing: -0.02em; color: var(--ink3); cursor: pointer;
+  padding: 14px 16px 11px; border-bottom: 3px solid transparent; margin-bottom: -1px;
+}
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--orange); }
+.tab:focus-visible { outline: 2.5px solid var(--orange); outline-offset: -3px; }
+
+.tabs-right { display: flex; align-items: center; gap: 22px; }
+.quiet-link {
+  font-family: var(--mono); font-size: 14px; color: var(--orange);
+  background: none; border: 0; padding: 0; cursor: pointer; text-decoration: none;
+  white-space: nowrap;
+}
+.quiet-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.quiet-link.done { color: var(--good); }
+
+/* ── page body ────────────────────────────────────────────────────── */
+
+.page { max-width: var(--col); margin: 0 auto; padding: 42px var(--gut) 0; }
+.page-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; margin-bottom: 26px;
+}
+.page-head h1 {
+  font-size: clamp(34px, 4.4vw, 52px); line-height: 1; letter-spacing: -0.035em;
+  display: inline-flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+}
+.page-head .count { font-family: var(--mono); font-size: 15px; font-weight: 400; color: var(--ink3); letter-spacing: 0; }
+/* The site's own .page-head (a banner with padding and a rule under it) is in
+   the shared stylesheet too; in the editor it's just a heading row. */
+.page .page-head { padding: 0; border: 0; background: none; }
+.page .page-head h1 { margin: 0; }
+
+.stack { display: grid; gap: 20px; }
+
+/* Cards here float on the warm ground, so they are white and the fields inside
+   them are warm. That is the opposite of the public site and deliberate. */
+.card {
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: var(--r-lg); padding: 26px;
+}
+.card h2 {
+  margin: 0 0 6px; font-size: 22px; font-weight: 700; letter-spacing: -0.025em;
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+}
+.card h2 .note {
+  font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--ink3); font-weight: 400;
+}
+.card > p { font-size: 16.5px; }
+.card > p:last-child { margin-bottom: 0; }
+
+/* A quiet question mark: the reasoning lives on the website, where it can be
+   improved without every artist rebuilding their node. */
+.why {
+  display: inline-grid; place-items: center; width: 20px; height: 20px;
+  border-radius: 50%; background: var(--bg2); color: var(--ink3);
+  font-family: var(--mono); font-size: 12px; font-weight: 500;
+  text-decoration: none; flex: none; align-self: center;
+}
+.why:hover, .why.on { background: var(--orange); color: var(--on-orange); }
+button.why { border: 0; padding: 0; cursor: pointer; vertical-align: middle; margin-left: 4px; }
+/* What a ? opens: right under the heading or label it belongs to. */
+.help {
+  display: block; margin: 10px 0 4px; padding: 12px 14px; border-radius: var(--r);
+  background: var(--bg2); color: var(--ink2);
+  font-family: var(--sans, inherit); font-size: 15px; font-weight: 400; line-height: 1.5;
+  letter-spacing: 0; text-transform: none;
+}
+.help a { color: var(--orange); }
+.field-label .help { margin-bottom: 8px; }
+/* The Stripe App, as three steps. */
+.stripe-steps { margin: 4px 0 16px; padding-left: 22px; display: grid; gap: 8px; font-size: 15.5px; }
+.stripe-steps .btn { margin-left: 2px; }
+details.try-it summary { cursor: pointer; font-weight: 600; }
+
+/* ── form controls ────────────────────────────────────────────────── */
+
+input[type=text], input[type=number], input[type=date], input[type=url], input[type=password],
+textarea, select {
+  width: 100%; font: inherit; font-size: 16px; padding: 12px 14px;
+  border: 1.5px solid transparent; border-radius: var(--r);
+  background: var(--bg2); color: var(--ink);
+}
+input[type=text]:hover, input[type=number]:hover, input[type=password]:hover, textarea:hover { border-color: var(--line); }
+input:focus-visible, textarea:focus-visible, select:focus-visible,
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible {
+  outline: 2.5px solid var(--orange); outline-offset: 1px;
+}
+textarea { resize: vertical; line-height: 1.5; min-height: 110px; }
+::placeholder { color: var(--ink3); opacity: 1; }
+
+.field { display: block; margin: 0 0 18px; }
+.field:last-child { margin-bottom: 0; }
+.field-label { display: block; font-size: 15px; font-weight: 600; margin-bottom: 7px; }
+
+/* pill buttons, smaller than the marketing ones */
+.btn.sm { font-size: 17px; padding: 14px 26px; }
+.btn.ghost {
+  background: var(--bg); color: var(--ink); border: 1.5px solid var(--line);
+  font-family: var(--sans); font-weight: 600; font-size: 16px; padding: 12px 22px;
+}
+.btn.ghost:hover { border-color: var(--ink3); filter: none; }
+.btn.dark { background: var(--deep); color: var(--on-deep); }
+
+/* a square icon button: remove, reorder */
+.icon {
+  background: var(--bg); border: 1.5px solid var(--line); border-radius: 10px;
+  width: 34px; height: 34px; cursor: pointer; color: var(--ink3);
+  font-size: 15px; line-height: 1; display: inline-flex;
+  align-items: center; justify-content: center; flex: none;
+}
+.icon:hover { border-color: var(--ink3); color: var(--ink); }
+.icon[disabled] { opacity: .25; cursor: not-allowed; }
+.icon.stack2 { width: 22px; height: 18px; border: 0; background: none; font-size: 11px; }
+
+/* ── banners ──────────────────────────────────────────────────────── */
+
+.banner {
+  padding: 15px 20px; border-radius: var(--r); font-size: 16px;
+  display: flex; justify-content: space-between; gap: 16px; align-items: center;
+  margin: 0 0 24px;
+}
+.banner.ok    { background: rgba(246, 113, 30, .13); color: var(--ink); }
+.banner.error { background: var(--bad-bg); color: var(--ink); }
+/* Quieter than either: this is worth acting on, but it is not an error and the
+   artist's music is working fine. */
+.banner.update { background: var(--bg2); color: var(--ink2); border: 1px solid var(--line); }
+.banner.update .link { white-space: nowrap; }
+
+/* ── music tab: releases ──────────────────────────────────────────── */
+
+/* Not overflow: hidden. Nothing here needs clipping, and a track's menu has
+   to be able to hang below the card's edge. */
+.release { padding: 0; }
+
+.release-head {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 22px; padding: 26px; align-items: start;
+}
+/* The release's date and price: top right, stacked. */
+.release-side { display: grid; gap: 10px; justify-items: end; }
+.side-field { display: grid; grid-template-columns: auto auto; align-items: center; gap: 10px; }
+.side-field .label { font-size: 14px; font-weight: 600; color: var(--ink2); white-space: nowrap; text-align: right; }
+.side-field input[type=date] { width: 170px; }
+.release-fields .count { display: block; margin-top: 10px; font-family: var(--mono); font-size: 14px; color: var(--ink3); }
+.release-art {
+  width: 140px; height: 140px; flex: none; border-radius: var(--r);
+  background: var(--bg2); border: 1.5px solid transparent;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; cursor: pointer; color: var(--ink3); padding: 0; overflow: hidden;
+  font-family: var(--mono); font-size: 12px;
+}
+.release-art svg { display: block; }
+.release-art:hover { border-color: var(--line); color: var(--ink2); }
+.release-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.release-art.set { border-style: solid; border-color: var(--line); }
+
+.release-fields { flex: 1 1 260px; min-width: 0; }
+.release-title {
+  font-size: 22px; font-weight: 700; letter-spacing: -0.025em; padding: 16px 18px;
+}
+
+.release-draft {
+  margin: 0 26px 18px; padding: 14px 18px; border-radius: var(--r);
+  background: var(--bg2); font-size: 15.5px; color: var(--ink2);
+}
+
+/* track rows */
+.tracks { list-style: none; padding: 0; margin: 0; }
+.track { border-top: 1px solid var(--line); }
+.track-row {
+  display: flex; align-items: center; gap: 16px; padding: 14px 26px;
+}
+.track-order { display: flex; flex-direction: column; align-items: center; }
+.play {
+  width: 40px; height: 40px; flex: none; border-radius: 50%;
+  border: 1.5px solid var(--ink); background: var(--bg); color: var(--ink);
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px; line-height: 1; padding: 0;
+}
+.play:hover { background: var(--ink); color: var(--bg); }
+.play[disabled] { opacity: .3; cursor: not-allowed; background: var(--bg); color: var(--ink); }
+.play.on { background: var(--orange); border-color: var(--orange); color: var(--on-orange); }
+
+.track-title {
+  flex: 1 1 200px; min-width: 0; font-weight: 600; font-size: 17px;
+  background: none; padding: 10px 12px;
+}
+.track-title:hover { background: var(--bg2); }
+.track-dur { font-family: var(--mono); font-size: 14px; color: var(--ink3); flex: none; }
+
+/* The heavy-file mark. Orange, like the note it opens: nothing is broken. */
+.warn-toggle {
+  width: 26px; height: 26px; flex: none; border-radius: 50%; padding: 0;
+  border: 0; background: var(--orange); color: var(--on-orange); cursor: pointer;
+  font: inherit; font-weight: 800; font-size: 15px; line-height: 26px; text-align: center;
+}
+.warn-toggle:hover, .warn-toggle[aria-expanded="true"] { background: var(--ink); color: var(--bg); }
+/* Each track's Edit button, and the panel it opens under the row. */
+.track-edit-btn {
+  flex: none; font-size: 14.5px; font-weight: 600; padding: 8px 16px; border-radius: var(--pill);
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer;
+}
+.track-edit-btn:hover, .track-edit-btn.on { border-color: var(--orange); color: var(--orange); }
+.track-panel {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  margin: 0 26px 14px; padding: 14px; border-radius: var(--r); background: var(--bg2);
+}
+.track-panel .btn.ghost { font-size: 15px; padding: 9px 18px; background: var(--bg); }
+.track-panel .btn.ghost.danger { color: var(--bad); }
+.panel-sale { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.panel-sale .track-price { display: inline-flex; align-items: center; gap: 8px; }
+.panel-sale .label { font-family: var(--sans); font-size: 14px; font-weight: 600; color: var(--ink2); }
+.panel-sale .money { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); }
+.track-mark.sale { background: var(--bg2); color: var(--ink); }
+.track-edit-btn .edit-icon { display: none; }
+.track-tags { display: contents; }
+.track-row .btn.ghost { font-size: 15px; padding: 9px 18px; }
+
+.track-problem {
+  background: var(--bad-bg); border-radius: var(--r); margin: 0 26px 16px;
+  padding: 16px 20px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+}
+.track-problem .what { flex: 1 1 260px; min-width: 0; }
+.track-problem strong { display: block; color: var(--bad); font-size: 16.5px; margin-bottom: 3px; }
+.track-problem p { margin: 0; font-size: 15.5px; }
+
+/* A heavy file. Orange rather than red: nothing failed, the music is up and
+   plays, it is just slow to reach people. */
+.track-warn {
+  background: rgba(246, 113, 30, .09); border-radius: var(--r); margin: 0 26px 16px;
+  padding: 16px 20px;
+}
+.track-warn strong { display: block; font-size: 16.5px; margin-bottom: 4px; }
+.track-warn p { margin: 0 0 8px; font-size: 15.5px; max-width: 62em; }
+.track-warn p:last-child { margin-bottom: 0; }
+
+.dropzone {
+  margin: 0 26px 26px; padding: 26px; text-align: center;
+  border: 1.5px solid transparent; border-radius: var(--r);
+  background: var(--bg2); color: var(--ink2); font-size: 16.5px; cursor: pointer;
+  width: calc(100% - 52px); font-family: inherit;
+}
+.dropzone:hover { border-color: var(--line); color: var(--ink); }
+.dropzone.over { border-color: var(--orange); color: var(--ink); }
+
+.release-foot {
+  display: flex; justify-content: flex-end; padding: 0 26px 22px;
+}
+
+/* What's set on a track, at a glance: free, or a price to keep it. */
+.track-mark {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+  background: rgba(246, 113, 30, .14); color: var(--ink); border-radius: var(--pill);
+  padding: 3px 9px; flex: none;
+}
+
+/* What a song or an album costs to buy and keep. */
+.track-price, .release-price {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  font-family: var(--mono); font-size: 14px; color: var(--ink2);
+}
+.track-price input { width: 78px; padding: 6px 8px; font-size: 14px; }
+.release-price input { width: 130px; }
+
+/* ── who is listening ─────────────────────────────────────────────── */
+
+table.listeners { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 15.5px; }
+table.listeners th {
+  text-align: left; font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--ink3); font-weight: 500;
+  padding: 0 12px 10px 0; border-bottom: 1px solid var(--line);
+}
+table.listeners td { padding: 12px 12px 12px 0; border-bottom: 1px solid var(--line); }
+table.listeners td:first-child { font-size: 14px; }
+table.listeners tr.blocked td { color: var(--ink3); text-decoration: line-through; }
+table.listeners tr.blocked td:last-child { text-decoration: none; }
+table.listeners .link { font-size: 15px; }
+/* The row's actions: the one that matters most first, the two for handling a
+   request about someone's data quieter beside it. Wraps on a phone. */
+table.listeners td.row-do { display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; }
+table.listeners .link.quiet { color: var(--ink3); font-size: 14px; }
+table.listeners .link.quiet:hover { color: var(--ink); }
+table.listeners .link.danger:hover { color: var(--bad); }
+table.listeners td.short { color: var(--bad); font-weight: 600; }
+table.listeners tr.blocked td.short { color: var(--ink3); font-weight: 400; }
+table.listeners .overdue { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--bad); white-space: nowrap; }
+table.listeners tr.late td { background: color-mix(in srgb, var(--bad) 6%, transparent); }
+table.listeners tr.blocked .overdue { color: var(--ink3); }
+
+/* Connecting Stripe: the exact rows to set, and how to try it. */
+table.perms { border-collapse: collapse; margin: 8px 0 4px; font-size: 14px; }
+table.perms td { padding: 4px 14px 4px 0; border-bottom: 1px solid var(--line); }
+table.perms td:nth-child(2) { font-weight: 600; }
+.try-it { background: var(--bg2, #f6f4f1); border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
+.try-it ol { margin: 8px 0; padding-left: 20px; display: grid; gap: 4px; }
+.try-it code { white-space: nowrap; }
+
+/* the line above the table: when payments were last read, and how to look again */
+.reconcile {
+  display: flex; gap: 12px; align-items: baseline; justify-content: space-between;
+  flex-wrap: wrap; margin-top: 16px; font-size: 15px; color: var(--ink2);
+}
+.reconcile-do { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.icon.refresh { display: inline-flex; align-items: center; justify-content: center; color: var(--ink2); }
+.icon.refresh:disabled { opacity: .5; }
+.icon.refresh.turning svg { animation: turning 0.9s linear infinite; }
+@keyframes turning { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .icon.refresh.turning svg { animation: none; } }
+
+/* Signing out, at the foot of Settings. */
+.sign-out { display: flex; justify-content: center; padding: 8px 0 12px; }
+
+/* ── settings tab ─────────────────────────────────────────────────── */
+
+.profile { padding: 0; overflow: hidden; }
+/* A button is not centred vertically by default, and this one is a 155px box
+   with one line of text in the middle of it. */
+.banner-art {
+  height: 155px; width: 100%; border: 0; padding: 0 var(--gut); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  background-color: var(--bg2);
+  background-image: repeating-linear-gradient(
+    -45deg, var(--bg2) 0 6px, var(--hatch) 6px 12px);
+  font-family: var(--mono); font-size: 13.5px; color: var(--ink3);
+  text-align: center; overflow: hidden;
+}
+.banner-art.set { padding: 0; }
+.banner-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.banner-art:hover { color: var(--ink); }
+
+/* Sits astride the cover's bottom edge, a little under half of it above the
+   line. No ring: the design does not have one, and the warm fill already
+   separates it from both the cover and the white below. */
+.avatar-wrap { padding: 0 26px; margin-top: -36px; line-height: 0; }
+.avatar {
+  width: 88px; height: 88px; border-radius: 50%; padding: 0; cursor: pointer;
+  background: var(--bg2); border: 0; overflow: hidden;
+  font-family: var(--mono); font-size: 12px; color: var(--ink3); line-height: 1.3;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.avatar:hover { color: var(--ink); }
+
+.profile-fields { padding: 22px 26px 26px; }
+
+.link-row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.link-row .what { flex: 0 1 240px; }
+.link-row .where { flex: 1 1 300px; min-width: 0; }
+
+.checkbox {
+  display: flex; align-items: center; gap: 10px; margin-top: 22px;
+  font-size: 15.5px; color: var(--ink2); cursor: pointer;
+}
+.checkbox input { width: auto; }
+
+/* price */
+.price-grid { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; margin-top: 22px; }
+.price-set { flex: 1 1 320px; min-width: 0; }
+.price-now { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+.price-now .price-input,
+.price-now .unit {
+  font-size: 54px; font-weight: 800; letter-spacing: -0.045em; color: var(--orange);
+  line-height: 1; font-variant-numeric: tabular-nums;
+}
+.price-now .price-input {
+  width: 3.4ch; padding: 0; border: 0; background: none; text-align: right;
+  font-family: var(--sans); -moz-appearance: textfield; appearance: textfield;
+}
+/* The spinners would sit on top of a 54px figure and there is a slider for
+   nudging it. */
+.price-now .price-input::-webkit-outer-spin-button,
+.price-now .price-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.price-now .price-input:hover { background: none; }
+.price-now .price-input:focus-visible { outline-offset: 3px; }
+.price-now .unit { margin-left: 1px; }
+.price-now span:not(.unit) { font-size: 18px; font-weight: 600; margin-left: 8px; }
+
+input[type=range] {
+  width: 100%; accent-color: var(--orange); margin: 0; height: 24px;
+}
+.scale {
+  display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: 13px; color: var(--ink3); margin-top: 2px;
+}
+.price-pending {
+  background: rgba(246, 113, 30, .09); border-radius: var(--r);
+  padding: 14px 18px; font-size: 15.5px; color: var(--ink); margin: 16px 0 0;
+}
+.price-says {
+  flex: 1 1 280px; background: var(--bg2); border-radius: var(--r); padding: 22px 24px;
+}
+.price-says b { display: block; font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+.price-says p { margin: 0; font-size: 16px; }
+
+/* choice pills, for how often listeners pay */
+.choices { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.choice {
+  font: inherit; font-size: 17px; font-weight: 600; cursor: pointer;
+  background: var(--bg); color: var(--ink);
+  border: 1.5px solid var(--line); border-radius: var(--pill); padding: 12px 24px;
+}
+.choice:hover { border-color: var(--ink3); }
+.choice[aria-pressed="true"] {
+  background: var(--deep); color: var(--on-deep); border-color: var(--deep);
+}
+
+.payout-says { margin: 16px 0 0; font-size: 16px; color: var(--ink2); }
+
+/* splits */
+.split-bar {
+  height: 11px; border-radius: var(--pill); background: var(--bg2);
+  overflow: hidden; display: flex; margin: 22px 0 10px;
+}
+.split-bar i { display: block; height: 100%; background: var(--orange); }
+.split-bar i:nth-child(even) { background: #f9a066; }
+.split-sum { font-size: 17px; margin-bottom: 18px; }
+.split-sum b { font-weight: 700; }
+.split-sum.ok b, .split-sum.ok em { color: var(--good); font-style: normal; }
+.split-sum.off b, .split-sum.off em { color: var(--bad); font-style: normal; }
+.split-sum em { font-size: 16px; font-weight: 400; margin-left: 8px; }
+
+.payee {
+  background: var(--bg2); border-radius: var(--r); padding: 18px 20px; margin-bottom: 14px;
+}
+.payee-top { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+.payee-top .swatch { width: 14px; height: 14px; border-radius: 4px; background: var(--orange); flex: none; }
+.payee-top .swatch.two { background: #f9a066; }
+.payee-top input { background: var(--bg); }
+.payee-split { display: flex; gap: 14px; align-items: flex-end; }
+.payee-split .where { flex: 1 1 260px; min-width: 0; }
+.payee-split .share { flex: 0 0 120px; }
+.payee-split input { background: var(--bg); }
+.payee-split .pct { display: flex; align-items: center; gap: 8px; }
+.payee-split .pct span { font-size: 16px; color: var(--ink3); }
+.payee-earns { font-size: 15px; color: var(--ink3); margin: 12px 0 0; }
+
+/* the publish card at the foot of settings */
+.publish-card {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 24px; flex-wrap: wrap;
+}
+.publish-card div { flex: 1 1 320px; min-width: 0; }
+.publish-card h2 { margin-bottom: 4px; }
+.publish-card p { margin: 0; }
+
+/* ── earnings tab ─────────────────────────────────────────────────── */
+
+.nothing { max-width: 720px; }
+.nothing h2 { font-size: clamp(30px, 3.6vw, 44px); letter-spacing: -0.035em; margin-bottom: 14px; }
+.nothing > p { font-size: 18px; max-width: 32em; }
+.steps { list-style: none; padding: 0; margin: 26px 0; display: grid; gap: 12px; }
+.steps li {
+  display: flex; align-items: center; gap: 18px;
+  background: var(--bg2); border-radius: var(--r); padding: 18px 22px; font-size: 17px;
+}
+.steps .n { font-weight: 800; color: var(--orange); flex: none; }
+.steps .t { flex: 1; font-weight: 600; }
+.steps .s { font-family: var(--mono); font-size: 13.5px; color: var(--ink3); }
+
+.copy-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 22px; }
+.copy-row code {
+  font-family: var(--mono); font-size: 14.5px; color: var(--ink3); overflow-wrap: anywhere;
+}
+
+
+/* ── the player bar ───────────────────────────────────────────────── */
+
+.player {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  background: var(--deep); color: var(--on-deep);
+  padding: 0 0 env(safe-area-inset-bottom, 0px);
+}
+.player-in {
+  max-width: var(--col); margin: 0 auto; padding: 14px var(--gut);
+  display: flex; align-items: center; gap: 18px;
+}
+.player .play { border-color: var(--on-deep); background: transparent; color: var(--on-deep); }
+.player .play:hover { background: var(--on-deep); color: var(--deep); }
+.player .what { flex: 1 1 auto; min-width: 0; }
+.player .what b { display: block; font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player .what span { font-family: var(--mono); font-size: 12.5px; color: rgba(250, 247, 245, 0.6); }
+.player .time { font-family: var(--mono); font-size: 13px; color: rgba(250, 247, 245, 0.6); flex: none; font-variant-numeric: tabular-nums; }
+.player .close { background: none; border: 0; color: rgba(250, 247, 245, 0.6); cursor: pointer; font-size: 18px; padding: 6px; }
+.player .close:hover { color: var(--on-deep); }
+.player-track { height: 3px; background: rgba(250, 247, 245, 0.18); }
+.player-track i { display: block; height: 100%; background: var(--orange); }
+
+/* ── phone ────────────────────────────────────────────────────────── */
+
+@media (max-width: 700px) {
+  /* The header: logo, a short status and Publish on one row, the tabs on the
+     next, and nothing else. It stays pinned, so every row here is a row of
+     screen the artist does not get back. */
+  .top-in { padding: 10px var(--gut); gap: 10px; }
+  .top-mark .mark { font-size: 21px; gap: 8px; }
+  .top-mark .mark svg { width: 22px; height: 22px; }
+  .top-mark .where { display: none; }
+  .top-right { flex-wrap: nowrap; gap: 8px; }
+  .state { padding: 7px 12px; font-size: 14px; gap: 7px; white-space: nowrap; }
+  .state .long, .publish .long { display: none; }
+  .state .short, .publish .short { display: inline; }
+  .top .btn.sm { font-size: 15px; padding: 10px 18px; }
+
+  .tabs-in { padding: 0 calc(var(--gut) - 10px); }
+  .tablist { gap: 0; width: 100%; justify-content: space-between; }
+  .tab { font-size: 16.5px; padding: 11px 10px 9px; }
+  .tabs-right { display: none; }
+
+  /* The links the header gave up, at the top of the page instead. */
+  .page-links {
+    display: flex; flex-wrap: wrap; gap: 10px 20px; margin: -20px 0 22px;
   }
-  .card h2 { margin: 0 0 6px; font-size: 18px; color: var(--ink);
-             text-transform: none; letter-spacing: 0; font-weight: 600; }
-  .card h3 { margin: 24px 0 10px; font-size: 13px; text-transform: uppercase;
-             letter-spacing: .07em; color: var(--muted); font-weight: 600; }
-  .card > p:first-of-type { margin-top: 0; }
-  .muted { color: var(--muted); font-size: 14px; font-weight: 400; }
+  .page { padding-top: 34px; }
 
-  .field { display: block; margin: 0 0 16px; }
-  .field-label { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
-  .field-hint { display: block; font-size: 12.5px; color: var(--muted); margin-top: 5px; }
-  input[type=text], input[type=number], input[type=date], textarea {
-    width: 100%; font: inherit; font-size: 15px; padding: 10px 12px;
-    border: 1px solid var(--rule); border-radius: 7px;
-    background: var(--bg); color: var(--ink);
+  /* The cover and the date and price share the top row; the title goes under. */
+  .release-head { grid-template-columns: auto minmax(0, 1fr); padding: 20px; gap: 14px 16px; }
+  .release-fields { grid-column: 1 / -1; grid-row: 2; }
+  .release-side { grid-column: 2; grid-row: 1; justify-items: stretch; align-content: start; }
+  .side-field { grid-template-columns: 1fr; gap: 4px; }
+  .side-field .label { text-align: left; }
+  .release-side, .side-field { min-width: 0; }
+  .side-field input[type=date] {
+    width: 100%; min-width: 0; box-sizing: border-box; display: block; -webkit-appearance: none; appearance: none;
   }
-  input:focus-visible, textarea:focus-visible, button:focus-visible {
-    outline: 2px solid var(--accent); outline-offset: 2px;
+  .side-field input[type=date]::-webkit-date-and-time-value { text-align: left; }
+  .release-price { display: flex; }
+  .release-price input { flex: 1; min-width: 0; width: auto; }
+  /* Artwork stays square, as it will be everywhere else it is shown. */
+  .release-art { width: 120px; height: 120px; }
+  .track-panel { margin: 0 16px 12px; }
+  /* On a phone the title needs the room: Edit is a pencil, and the length goes. */
+  .track-edit-btn { width: 36px; height: 36px; padding: 0; font-size: 17px; display: grid; place-items: center; }
+  .track-edit-btn .edit-word { display: none; }
+  .track-edit-btn .edit-icon { display: inline; }
+
+  /* Two lines: the title, and under it what's set. */
+  .track-row {
+    display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto;
+    column-gap: 8px; row-gap: 6px; padding: 12px 16px;
   }
-  input:disabled { color: var(--muted); }
-  textarea { resize: vertical; }
-  .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; }
-  .row > .field { flex: 1 1 200px; margin-bottom: 16px; }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .track-row > .track-order, .track-row > .play, .track-row > .track-edit-btn { grid-row: 1 / span 2; }
+  .track-row > .track-title { grid-column: 3; grid-row: 1; }
+  .track-tags { grid-column: 3; grid-row: 2; display: flex; align-items: center; gap: 8px; padding-left: 6px; flex-wrap: wrap; }
+  .track-tags .warn-toggle { width: 24px; height: 24px; font-size: 13px; line-height: 24px; }
+  .track-title { flex: 1 1 0; min-width: 0; padding: 8px 6px; font-size: 16px; }
+  .play { width: 36px; height: 36px; }
+  .track-dur { font-size: 13px; }
+  .track-row .icon:not(.stack2) { width: 32px; height: 32px; }
+  .dropzone, .track-problem, .track-warn { margin-left: 20px; margin-right: 20px; width: calc(100% - 40px); }
+  .price-now .price-input, .price-now .unit { font-size: 44px; }
+  .link-row { flex-wrap: wrap; }
+  .link-row .what, .link-row .where { flex: 1 1 100%; }
+  .payee-split { flex-wrap: wrap; }
+  .payee-split .where { flex-basis: 100%; }
+  .card { padding: 20px; }
+  .profile, .release { padding: 0; }
+  .profile-fields { padding: 20px; }
+  .avatar-wrap { padding: 0 20px; }
+  .page-head h1 { font-size: 30px; }
+  .page .page-head { margin-bottom: 18px; }
+  .choice { font-size: 16px; padding: 10px 18px; }
 
-  .btn { display: inline-flex; align-items: center; gap: 7px; font: inherit;
-         font-weight: 600; font-size: 14.5px; background: var(--accent); color: #fff;
-         border: 0; padding: 11px 18px; border-radius: 7px; cursor: pointer; }
-  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--rule); font-weight: 500; }
-  .btn.block { display: block; width: 100%; text-align: left; margin-bottom: 10px; }
-  .btn[disabled] { opacity: .45; cursor: not-allowed; }
-  .link { background: none; border: 0; font: inherit; font-size: 13.5px; color: var(--muted);
-          cursor: pointer; text-decoration: underline; text-underline-offset: 3px; padding: 4px 0; }
-  .link.danger { color: #c0392b; }
-  .icon { background: none; border: 1px solid var(--rule); border-radius: 5px;
-          width: 26px; height: 22px; cursor: pointer; color: var(--ink-2); font-size: 12px; line-height: 1; }
-  .icon[disabled] { opacity: .3; cursor: not-allowed; }
-  .checkbox { display: inline-flex; align-items: center; gap: 8px; font-size: 14px;
-              color: var(--ink-2); cursor: pointer; }
-  .checkbox input { width: auto; }
+  /* The links the header gave up, as a row of small pills. */
+  .page-links { gap: 8px; margin: -18px 0 20px; }
+  .page-links .quiet-link {
+    border: 1px solid var(--line); border-radius: var(--pill); padding: 7px 13px;
+    font-size: 14px; text-decoration: none; background: var(--bg);
+  }
+  .release-price input { width: 110px; }
 
-  .bar { display: flex; justify-content: space-between; align-items: center; gap: 16px;
-         flex-wrap: wrap; padding: 18px 0 20px; border-bottom: 1px solid var(--rule); margin-bottom: 24px; }
-  .bar-actions { display: flex; align-items: center; gap: 14px; }
-  .node-url { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+  /* Listeners as cards: a table this wide can't be read on a phone. */
+  table.listeners, table.listeners tbody, table.listeners tr, table.listeners td { display: block; width: 100%; }
+  table.listeners thead { display: none; }
+  table.listeners tr { border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; margin-bottom: 10px; }
+  table.listeners td { border: 0; padding: 3px 0; display: flex; justify-content: space-between; gap: 12px; }
+  table.listeners td[data-k]::before { content: attr(data-k); color: var(--ink3); font-size: 13px; font-family: var(--mono); }
+  table.listeners td.row-do { justify-content: flex-start; padding-top: 8px; }
+}
 
-  .banner { padding: 12px 16px; border-radius: 8px; margin: 0 0 20px; font-size: 14.5px;
-            display: flex; justify-content: space-between; gap: 14px; align-items: center; }
-  .banner.ok { background: rgba(12,163,12,.12); color: var(--ink); }
-  .banner.error { background: rgba(208,59,59,.12); color: var(--ink); }
+/* The DNS record to copy: three labelled lines, the value allowed to wrap. */
+.dns-record { display: grid; gap: 10px; background: var(--bg2); border-radius: var(--r); padding: 16px 18px; margin: 12px 0 16px; }
+.dns-record > div { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.dns-record .k { flex: 0 0 110px; font-size: 13px; color: var(--ink3); font-family: var(--mono); text-transform: uppercase; letter-spacing: .06em; }
+.dns-record code { font-family: var(--mono); font-size: 14.5px; }
+.dns-record code.v { word-break: break-all; flex: 1 1 260px; }
+.where-dns { margin: 0 0 16px; font-size: 15.5px; }
+.where-dns summary { cursor: pointer; font-weight: 600; }
+.where-dns ul { padding-left: 18px; display: grid; gap: 6px; margin: 10px 0; }
+.dns-check { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.dns-said { font-size: 15px; color: var(--ink2); }
+.dns-said.ok { color: var(--good); font-weight: 600; }
 
-  .release { border: 1px solid var(--rule); border-radius: 9px; padding: 18px; margin: 0 0 16px; }
-  .release-head { display: flex; gap: 14px; align-items: center; margin-bottom: 14px; }
-  .release-title { font-weight: 600; font-size: 16px; }
-  .tracks { list-style: none; padding: 0; margin: 0 0 14px; }
-  .track { display: flex; gap: 14px; align-items: center; padding: 12px 0;
-           border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
-  .track:last-child { border-bottom: 0; }
-  .track-order { display: flex; flex-direction: column; gap: 3px; }
-  .track-main { flex: 1 1 220px; min-width: 0; }
-  .track-meta { display: flex; gap: 12px; font-size: 12.5px; color: var(--muted); margin-top: 5px; flex-wrap: wrap; }
-  .track-actions { display: flex; gap: 14px; align-items: center; }
-  .tag { background: var(--rule); padding: 1px 7px; border-radius: 4px; }
-  .empty { color: var(--muted); font-size: 14px; padding: 10px 0; }
-  .foot { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--rule); }
+/* Filling the artist's own address from Phantom, under the first row only. */
+.from-phantom { display: block; margin: -6px 0 12px; font-size: 14.5px; }
+
+/* Subscription plans: a tick, a name, a price, one row each. */
+.plans { display: grid; gap: 10px; margin: 16px 0; }
+.plan { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 16px; }
+.plan .plan-name { flex: 1 1 140px; }
+.plan .plan-price { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); }
+.plan .plan-price input { width: 90px; font: inherit; padding: 8px 10px; border-radius: var(--r);
+  border: 1.5px solid var(--line); background: var(--bg); color: var(--ink); }
+.plan .plan-price input:disabled { opacity: .45; }
 
 </style>
 </head>
@@ -140,7 +922,7 @@ footer a { color: var(--muted); }
   <noscript><p>This page needs JavaScript to edit your music.</p></noscript>
 </div>
 <script type="module">
-var G,y,he,qe,F,ue,me,ve,Q,O,N,ye,te,Z,ee,Ge,z={},V=[],Ke=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine[ch]|zoo|^ord|itera/i,K=Array.isArray;function A(e,t){for(var n in t)e[n]=t[n];return e}function ne(e){e&&e.parentNode&&e.parentNode.removeChild(e)}function Je(e,t,n){var o,a,r,l={};for(r in t)r=="key"?o=t[r]:r=="ref"?a=t[r]:l[r]=t[r];if(arguments.length>2&&(l.children=arguments.length>3?G.call(arguments,2):n),typeof e=="function"&&e.defaultProps!=null)for(r in e.defaultProps)l[r]===void 0&&(l[r]=e.defaultProps[r]);return B(e,l,o,a,null)}function B(e,t,n,o,a){var r={type:e,props:t,key:n,ref:o,__k:null,__:null,__b:0,__e:null,__c:null,constructor:void 0,__v:a??++he,__i:-1,__u:0};return a==null&&y.vnode!=null&&y.vnode(r),r}function E(e){return e.children}function W(e,t){this.props=e,this.context=t}function $(e,t){if(t==null)return e.__?$(e.__,e.__i+1):null;for(var n;t<e.__k.length;t++)if((n=e.__k[t])!=null&&n.__e!=null)return n.__e;return typeof e.type=="function"?$(e):null}function Xe(e){if(e.__P&&e.__d){var t=e.__v,n=t.__e,o=[],a=[],r=A({},t);r.__v=t.__v+1,y.vnode&&y.vnode(r),oe(e.__P,r,t,e.__n,e.__P.namespaceURI,32&t.__u?[n]:null,o,n??$(t),!!(32&t.__u),a),r.__v=t.__v,r.__.__k[r.__i]=r,xe(o,r,a),t.__e=t.__=null,r.__e!=n&&ge(r)}}function ge(e){if((e=e.__)!=null&&e.__c!=null)return e.__e=e.__c.base=null,e.__k.some(function(t){if(t!=null&&t.__e!=null)return e.__e=e.__c.base=t.__e}),ge(e)}function pe(e){(!e.__d&&(e.__d=!0)&&F.push(e)&&!q.__r++||ue!=y.debounceRendering)&&((ue=y.debounceRendering)||me)(q)}function q(){try{for(var e,t=1;F.length;)F.length>t&&F.sort(ve),e=F.shift(),t=F.length,Xe(e)}finally{F.length=q.__r=0}}function be(e,t,n,o,a,r,l,c,f,i,d){var b,s,u,m,v,h,g=o&&o.__k||V,p=t.length;for(f=Ye(n,t,g,f,p),b=0;b<p;b++)(u=n.__k[b])!=null&&(s=u.__i!=-1&&g[u.__i]||z,u.__i=b,h=oe(e,u,s,a,r,l,c,f,i,d),m=u.__e,u.ref&&s.ref!=u.ref&&(s.ref&&re(s.ref,null,u),d.push(u.ref,u.__c||m,u)),v==null&&m!=null&&(v=m),4&u.__u?(f=ke(u,f,e),s.__e&&(s.__e=null)):typeof u.type=="function"&&h!==void 0?f=h:m&&(f=m.nextSibling),u.__u&=-7);return n.__e=v,f}function Ye(e,t,n,o,a){var r,l,c,f,i,d=n.length,b=d,s=0;for(e.__k=new Array(a),r=0;r<a;r++)(l=t[r])!=null&&typeof l!="boolean"&&typeof l!="function"?(typeof l=="string"||typeof l=="number"||typeof l=="bigint"||l.constructor==String?l=e.__k[r]=B(null,l,null,null,null):K(l)?l=e.__k[r]=B(E,{children:l},null,null,null):l.constructor===void 0&&l.__b>0?l=e.__k[r]=B(l.type,l.props,l.key,l.ref?l.ref:null,l.__v):e.__k[r]=l,f=r+s,l.__=e,l.__b=e.__b+1,c=null,(i=l.__i=Qe(l,n,f,b))!=-1&&(b--,(c=n[i])&&(c.__u|=2)),c==null||c.__v==null?(i==-1&&(a>d?s--:a<d&&s++),typeof l.type!="function"&&(l.__u|=4)):i!=f&&(i==f-1?s--:i==f+1?s++:(i>f?s--:s++,l.__u|=4))):e.__k[r]=null;if(b)for(r=0;r<d;r++)(c=n[r])!=null&&!(2&c.__u)&&(c.__e==o&&(o=$(c)),Se(c,c));return o}function ke(e,t,n){var o,a;if(typeof e.type=="function"){for(o=e.__k,a=0;o&&a<o.length;a++)o[a]&&(o[a].__=e,t=ke(o[a],t,n));return t}e.__e!=t&&(t&&e.type&&!t.parentNode&&(t=$(e)),t=n.insertBefore(e.__e,t||null));do t=t&&t.nextSibling;while(t!=null&&t.nodeType==8);return t}function Qe(e,t,n,o){var a,r,l,c=e.key,f=e.type,i=t[n],d=i!=null&&(2&i.__u)==0;if(i===null&&c==null||d&&c==i.key&&f==i.type)return n;if(o>(d?1:0)){for(a=n-1,r=n+1;a>=0||r<t.length;)if((i=t[l=a>=0?a--:r++])!=null&&!(2&i.__u)&&c==i.key&&f==i.type)return l}return-1}function fe(e,t,n){t[0]=="-"?e.setProperty(t,n??""):e[t]=n==null?"":typeof n!="number"||Ke.test(t)?n:n+"px"}function j(e,t,n,o,a){var r,l;e:if(t=="style")if(typeof n=="string")e.style.cssText=n;else{if(typeof o=="string"&&(e.style.cssText=o=""),o)for(t in o)n&&t in n||fe(e.style,t,"");if(n)for(t in n)o&&n[t]==o[t]||fe(e.style,t,n[t])}else if(t[0]=="o"&&t[1]=="n")r=t!=(t=t.replace(ye,"$1")),l=t.toLowerCase(),t=l in e||t=="onFocusOut"||t=="onFocusIn"?l.slice(2):t.slice(2),e.l||(e.l={}),e.l[t+r]=n,n?o?n[N]=o[N]:(n[N]=te,e.addEventListener(t,r?ee:Z,r)):e.removeEventListener(t,r?ee:Z,r);else{if(a=="http://www.w3.org/2000/svg")t=t.replace(/xlink(H|:h)/,"h").replace(/sName$/,"s");else if(t!="width"&&t!="height"&&t!="href"&&t!="list"&&t!="form"&&t!="tabIndex"&&t!="download"&&t!="rowSpan"&&t!="colSpan"&&t!="role"&&t!="popover"&&t in e)try{e[t]=n??"";break e}catch{}typeof n=="function"||(n==null||n===!1&&t[4]!="-"?e.removeAttribute(t):e.setAttribute(t,t=="popover"&&n==1?"":n))}}function de(e){return function(t){if(this.l){var n=this.l[t.type+e];if(t[O]==null)t[O]=te++;else if(t[O]<n[N])return;return n(y.event?y.event(t):t)}}}function oe(e,t,n,o,a,r,l,c,f,i){var d,b,s,u,m,v,h,g,p,k,C,S,D,ce,R,Y,P=t.type;if(t.constructor!==void 0)return null;128&n.__u&&(f=!!(32&n.__u),r=[c=t.__e=n.__e]),(d=y.__b)&&d(t);e:if(typeof P=="function"){b=l.length;try{if(p=t.props,k=P.prototype&&P.prototype.render,C=(d=P.contextType)&&o[d.__c],S=d?C?C.props.value:d.__:o,n.__c?g=(s=t.__c=n.__c).__=s.__E:(k?t.__c=s=new P(p,S):(t.__c=s=new W(p,S),s.constructor=P,s.render=et),C&&C.sub(s),s.state||(s.state={}),s.__n=o,u=s.__d=!0,s.__h=[],s._sb=[]),k&&s.__s==null&&(s.__s=s.state),k&&P.getDerivedStateFromProps!=null&&(s.__s==s.state&&(s.__s=A({},s.__s)),A(s.__s,P.getDerivedStateFromProps(p,s.__s))),m=s.props,v=s.state,s.__v=t,u)k&&P.getDerivedStateFromProps==null&&s.componentWillMount!=null&&s.componentWillMount(),k&&s.componentDidMount!=null&&s.__h.push(s.componentDidMount);else{if(k&&P.getDerivedStateFromProps==null&&p!==m&&s.componentWillReceiveProps!=null&&s.componentWillReceiveProps(p,S),t.__v==n.__v||!s.__e&&s.shouldComponentUpdate!=null&&s.shouldComponentUpdate(p,s.__s,S)===!1){t.__v!=n.__v&&(s.props=p,s.state=s.__s,s.__d=!1),t.__e=n.__e,t.__k=n.__k,t.__k.some(function(U){U&&(U.__=t)}),V.push.apply(s.__h,s._sb),s._sb=[],s.__h.length&&l.push(s),c=$(n);break e}s.componentWillUpdate!=null&&s.componentWillUpdate(p,s.__s,S),k&&s.componentDidUpdate!=null&&s.__h.push(function(){s.componentDidUpdate(m,v,h)})}if(s.context=S,s.props=p,s.__P=e,s.__e=!1,D=y.__r,ce=0,k)s.state=s.__s,s.__d=!1,D&&D(t),d=s.render(s.props,s.state,s.context),V.push.apply(s.__h,s._sb),s._sb=[];else do s.__d=!1,D&&D(t),d=s.render(s.props,s.state,s.context),s.state=s.__s;while(s.__d&&++ce<25);s.state=s.__s,s.getChildContext!=null&&(o=A(A({},o),s.getChildContext())),k&&!u&&s.getSnapshotBeforeUpdate!=null&&(h=s.getSnapshotBeforeUpdate(m,v)),R=d!=null&&d.type===E&&d.key==null?Ce(d.props.children):d,c=be(e,K(R)?R:[R],t,n,o,a,r,l,c,f,i),s.base=t.__e,t.__u&=-161,s.__h.length&&l.push(s),g&&(s.__E=s.__=null)}catch(U){if(l.length=b,t.__v=null,f||r!=null){if(U.then){for(t.__u|=f?160:128;c&&c.nodeType==8&&c.nextSibling;)c=c.nextSibling;r!=null&&(r[r.indexOf(c)]=null),t.__e=c}else if(r!=null)for(Y=r.length;Y--;)ne(r[Y])}else t.__e=n.__e;t.__k==null&&(t.__k=n.__k||[]),U.then||we(t),y.__e(U,t,n)}}else r==null&&t.__v==n.__v?(t.__k=n.__k,t.__e=n.__e):c=t.__e=Ze(n.__e,t,n,o,a,r,l,f,i);return(d=y.diffed)&&d(t),128&t.__u?void 0:c}function we(e){e&&(e.__c&&(e.__c.__e=!0),e.__k&&e.__k.some(we))}function xe(e,t,n){for(var o=0;o<n.length;o++)re(n[o],n[++o],n[++o]);y.__c&&y.__c(t,e),e.some(function(a){try{e=a.__h,a.__h=[],e.some(function(r){r.call(a)})}catch(r){y.__e(r,a.__v)}})}function Ce(e){return typeof e!="object"||e==null||e.__b>0?e:K(e)?e.map(Ce):e.constructor!==void 0?null:A({},e)}function Ze(e,t,n,o,a,r,l,c,f){var i,d,b,s,u,m,v,h=n.props||z,g=t.props,p=t.type;if(p=="svg"?a="http://www.w3.org/2000/svg":p=="math"?a="http://www.w3.org/1998/Math/MathML":a||(a="http://www.w3.org/1999/xhtml"),r!=null){for(i=0;i<r.length;i++)if((u=r[i])&&"setAttribute"in u==!!p&&(p?u.localName==p:u.nodeType==3)){e=u,r[i]=null;break}}if(e==null){if(p==null)return document.createTextNode(g);e=document.createElementNS(a,p,g.is&&g),c&&(y.__m&&y.__m(t,r),c=!1),r=null}if(p==null)h===g||c&&e.data==g||(e.data=g);else{if(r=p=="textarea"&&g.defaultValue!=null?null:r&&G.call(e.childNodes),!c&&r!=null)for(h={},i=0;i<e.attributes.length;i++)h[(u=e.attributes[i]).name]=u.value;for(i in h)u=h[i],i=="dangerouslySetInnerHTML"?b=u:i=="children"||i in g||i=="value"&&"defaultValue"in g||i=="checked"&&"defaultChecked"in g||j(e,i,null,u,a);for(i in g)u=g[i],i=="children"?s=u:i=="dangerouslySetInnerHTML"?d=u:i=="value"?m=u:i=="checked"?v=u:c&&typeof u!="function"||h[i]===u||j(e,i,u,h[i],a);if(d)c||b&&(d.__html==b.__html||d.__html==e.innerHTML)||(e.innerHTML=d.__html),t.__k=[];else if(b&&(e.innerHTML=""),be(t.type=="template"?e.content:e,K(s)?s:[s],t,n,o,p=="foreignObject"?"http://www.w3.org/1999/xhtml":a,r,l,r?r[0]:n.__k&&$(n,0),c,f),r!=null)for(i=r.length;i--;)ne(r[i]);c&&p!="textarea"||(i="value",p=="progress"&&m==null?e.removeAttribute("value"):m!=null&&(m!==e[i]||p=="progress"&&!m||p=="option"&&m!=h[i])&&j(e,i,m,h[i],a),i="checked",v!=null&&v!=e[i]&&j(e,i,v,h[i],a))}return e}function re(e,t,n){try{if(typeof e=="function"){var o=typeof e.__u=="function";o&&e.__u(),o&&t==null||(e.__u=e(t))}else e.current=t}catch(a){y.__e(a,n)}}function Se(e,t,n){var o,a;if(y.unmount&&y.unmount(e),(o=e.ref)&&(o.current&&o.current!=e.__e||re(o,null,t)),(o=e.__c)!=null){if(o.componentWillUnmount)try{o.componentWillUnmount()}catch(r){y.__e(r,t)}o.base=o.__P=o.__n=null}if(o=e.__k)for(a=0;a<o.length;a++)o[a]&&Se(o[a],t,n||typeof e.type!="function");n||ne(e.__e),e.__c=e.__=e.__e=void 0}function et(e,t,n){return this.constructor(e,n)}function Pe(e,t,n){var o,a,r,l;t==document&&(t=document.documentElement),y.__&&y.__(e,t),a=(o=typeof n=="function")?null:n&&n.__k||t.__k,r=[],l=[],oe(t,e=(!o&&n||t).__k=Je(E,null,[e]),a||z,z,t.namespaceURI,!o&&n?[n]:a?null:t.firstChild?G.call(t.childNodes):null,r,!o&&n?n:a?a.__e:t.firstChild,o,l),xe(r,e,l),e.props.children=null}G=V.slice,y={__e:function(e,t,n,o){for(var a,r,l;t=t.__;)if((a=t.__c)&&!a.__)try{if((r=a.constructor)&&r.getDerivedStateFromError!=null&&(a.setState(r.getDerivedStateFromError(e)),l=a.__d),a.componentDidCatch!=null&&(a.componentDidCatch(e,o||{}),l=a.__d),l)return a.__E=a}catch(c){e=c}throw e}},he=0,qe=function(e){return e!=null&&e.constructor===void 0},W.prototype.setState=function(e,t){var n;n=this.__s!=null&&this.__s!=this.state?this.__s:this.__s=A({},this.state),typeof e=="function"&&(e=e(A({},n),this.props)),e&&A(n,e),e!=null&&this.__v&&(t&&this._sb.push(t),pe(this))},W.prototype.forceUpdate=function(e){this.__v&&(this.__e=!0,e&&this.__h.push(e),pe(this))},W.prototype.render=E,F=[],me=typeof Promise=="function"?Promise.prototype.then.bind(Promise.resolve()):setTimeout,ve=function(e,t){return e.__v.__b-t.__v.__b},q.__r=0,Q=Math.random().toString(8),O="__d"+Q,N="__a"+Q,ye=/(PointerCapture)$|Capture$/i,te=0,Z=de(!1),ee=de(!0),Ge=0;var H,w,ae,Ae,L=0,Ie=[],x=y,Ee=x.__b,Me=x.__r,Fe=x.diffed,Te=x.__c,De=x.unmount,$e=x.__;function le(e,t){x.__h&&x.__h(w,e,L||t),L=0;var n=w.__H||(w.__H={__:[],__h:[]});return e>=n.__.length&&n.__.push({}),n.__[e]}function T(e){return L=1,tt(je,e)}function tt(e,t,n){var o=le(H++,2);if(o.t=e,!o.__c&&(o.__=[n?n(t):je(void 0,t),function(c){var f=o.__N?o.__N[0]:o.__[0],i=o.t(f,c);f!==i&&(o.__N=[i,o.__[1]],o.__c.setState({}))}],o.__c=w,!w.__f)){var a=function(c,f,i){if(!o.__c.__H)return!0;var d=!1,b=o.__c.props!==c;if(o.__c.__H.__.some(function(u){if(u.__N){d=!0;var m=u.__[0];u.__=u.__N,u.__N=void 0,m!==u.__[0]&&(b=!0)}}),r){var s=r.call(this,c,f,i);return d?s||b:s}return!d||b};w.__f=!0;var r=w.shouldComponentUpdate,l=w.componentWillUpdate;w.componentWillUpdate=function(c,f,i){if(this.__e){var d=r;r=void 0,a(c,f,i),r=d}l&&l.call(this,c,f,i)},w.shouldComponentUpdate=a}return o.__N||o.__}function X(e,t){var n=le(H++,3);!x.__s&&Re(n.__H,t)&&(n.__=e,n.u=t,w.__H.__h.push(n))}function Ne(e){return L=5,He(function(){return{current:e}},[])}function He(e,t){var n=le(H++,7);return Re(n.__H,t)&&(n.__=e(),n.__H=t,n.__h=e),n.__}function Le(e,t){return L=8,He(function(){return e},t)}function nt(){for(var e;e=Ie.shift();){var t=e.__H;if(e.__P&&t)try{t.__h.some(J),t.__h.some(se),t.__h=[]}catch(n){t.__h=[],x.__e(n,e.__v)}}}x.__b=function(e){w=null,Ee&&Ee(e)},x.__=function(e,t){e&&t.__k&&t.__k.__m&&(e.__m=t.__k.__m),$e&&$e(e,t)},x.__r=function(e){Me&&Me(e),H=0;var t=(w=e.__c).__H;t&&(ae===w?(t.__h=[],w.__h=[],t.__.some(function(n){n.__N&&(n.__=n.__N),n.u=n.__N=void 0})):(t.__h.some(J),t.__h.some(se),t.__h=[],H=0)),ae=w},x.diffed=function(e){Fe&&Fe(e);var t=e.__c;t&&t.__H&&(t.__H.__h.length&&(Ie.push(t)!==1&&Ae===x.requestAnimationFrame||((Ae=x.requestAnimationFrame)||ot)(nt)),t.__H.__.some(function(n){n.u&&(n.__H=n.u,n.u=void 0)})),ae=w=null},x.__c=function(e,t){t.some(function(n){try{n.__h.some(J),n.__h=n.__h.filter(function(o){return!o.__||se(o)})}catch(o){t.some(function(a){a.__h&&(a.__h=[])}),t=[],x.__e(o,n.__v)}}),Te&&Te(e,t)},x.unmount=function(e){De&&De(e);var t,n=e.__c;n&&n.__H&&(n.__H.__.some(function(o){try{J(o)}catch(a){t=a}}),n.__H=void 0,t&&x.__e(t,n.__v))};var Ue=typeof requestAnimationFrame=="function";function ot(e){var t,n=function(){clearTimeout(o),Ue&&cancelAnimationFrame(t),setTimeout(e)},o=setTimeout(n,35);Ue&&(t=requestAnimationFrame(n))}function J(e){var t=w,n=e.__c;typeof n=="function"&&(e.__c=void 0,n()),w=t}function se(e){var t=w;e.__c=e.__(),w=t}function Re(e,t){return!e||e.length!==t.length||t.some(function(n,o){return n!==e[o]})}function je(e,t){return typeof t=="function"?t(e):t}var rt=0,mt=Array.isArray;function _(e,t,n,o,a,r){t||(t={});var l,c,f=t;if("ref"in f)for(c in f={},t)c=="ref"?l=t[c]:f[c]=t[c];var i={type:e,props:f,key:n,ref:l,__k:null,__:null,__b:0,__e:null,__c:null,constructor:void 0,__v:--rt,__i:-1,__u:0,__source:a,__self:r};if(typeof e=="function"&&(l=e.defaultProps))for(c in l)f[c]===void 0&&(f[c]=l[c]);return y.vnode&&y.vnode(i),i}var Oe=90*1024*1024;function Be(e,t){let n=(e||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,48)||"untitled",o=n,a=2;for(;t.has(o);)o=`${n}-${a++}`;return o}function We(e){let t=new Set;for(let n of e.releases||[]){t.add(n.id);for(let o of n.tracks||[])t.add(o.id)}return t}var at=e=>`${Math.floor(e/60)}:${String(e%60).padStart(2,"0")}`,M=({label:e,hint:t,children:n})=>_("label",{class:"field",children:[_("span",{class:"field-label",children:e}),n,t&&_("span",{class:"field-hint",children:t})]}),I=({value:e,onInput:t,...n})=>_("input",{type:"text",value:e??"",onInput:o=>t(o.target.value),...n});function _e({kind:e,children:t,onDismiss:n}){return t?_("div",{class:`banner ${e}`,role:e==="error"?"alert":"status",children:[_("span",{children:t}),n&&_("button",{class:"link",onClick:n,children:"dismiss"})]}):null}function st({track:e,onChange:t,onRemove:n,onMove:o,first:a,last:r}){return _("li",{class:"track",children:[_("div",{class:"track-order",children:[_("button",{class:"icon",disabled:a,onClick:()=>o(-1),title:"Move up",children:"\u2191"}),_("button",{class:"icon",disabled:r,onClick:()=>o(1),title:"Move down",children:"\u2193"})]}),_("div",{class:"track-main",children:[_(I,{value:e.title,onInput:l=>t({...e,title:l}),placeholder:"Track title",class:"track-title"}),_("div",{class:"track-meta",children:[_("span",{children:at(e.duration)}),_("span",{class:"mono",children:e.id}),e.explicit&&_("span",{class:"tag",children:"explicit"})]})]}),_("div",{class:"track-actions",children:[_("label",{class:"checkbox",children:[_("input",{type:"checkbox",checked:!!e.explicit,onChange:l=>t({...e,explicit:l.target.checked||void 0})}),_("span",{children:"Explicit"})]}),_("button",{class:"link danger",onClick:n,children:"Remove"})]})]})}function lt({release:e,node:t,manifest:n,onChange:o,onRemove:a,upload:r,notify:l}){let[c,f]=T(null),i=Ne(null),d=u=>o({...e,tracks:u});async function b(u){let m=We(n),v=[];for(let h of Array.from(u)){if(h.size>Oe){l("error",`${h.name} is too large (max ${Math.round(Oe/1048576)}MB).`);continue}try{f(h.name);let g=await it(h),p=`audio/${ct(h.name)}`;await r(p,h);let k=h.name.replace(/\.[^.]+$/,"").replace(/[_-]+/g," ").trim(),C=Be(k,m);m.add(C),v.push({id:C,title:k,duration:g,url:`${t.url}/${p}`})}catch(g){l("error",`${h.name}: ${g.message}`)}finally{f(null)}}v.length&&d([...e.tracks||[],...v])}let s=(u,m)=>{let v=[...e.tracks],h=u+m;h<0||h>=v.length||([v[u],v[h]]=[v[h],v[u]],d(v))};return _("section",{class:"release",children:[_("header",{class:"release-head",children:[_(I,{value:e.title,onInput:u=>o({...e,title:u}),placeholder:"Release title",class:"release-title"}),_("button",{class:"link danger",onClick:a,children:"Delete release"})]}),_("div",{class:"row",children:[_(M,{label:"Release date",children:_("input",{type:"date",value:e.date||"",onInput:u=>o({...e,date:u.target.value||void 0})})}),_(M,{label:"Identifier",hint:"Fixed once published \u2014 listeners' saved state keys off it.",children:_("input",{type:"text",value:e.id,disabled:!0,class:"mono"})})]}),_("ul",{class:"tracks",children:[(e.tracks||[]).map((u,m)=>_(st,{track:u,first:m===0,last:m===e.tracks.length-1,onMove:v=>s(m,v),onChange:v=>d(e.tracks.map((h,g)=>g===m?v:h)),onRemove:()=>d(e.tracks.filter((v,h)=>h!==m))},u.id)),!e.tracks?.length&&_("li",{class:"empty",children:"No tracks yet."})]}),_("input",{ref:i,type:"file",accept:"audio/*",multiple:!0,hidden:!0,onChange:u=>{b(u.target.files),u.target.value=""}}),_("button",{class:"btn ghost",disabled:!!c,onClick:()=>i.current.click(),children:c?`Uploading ${c}\u2026`:"Add tracks"})]})}function _t({payment:e,onChange:t}){let n=e.find(r=>r.type==="solana-usdc")||null,o=e.filter(r=>r.type==="link"),a=(r,l)=>t([...r?[r]:[],...l]);return _("section",{class:"card",children:[_("h2",{children:"Getting paid"}),_("p",{class:"muted",children:"Money goes straight from a listener to you. Amply is not in the transaction and cannot see, hold or take a share of it."}),_("h3",{children:"Pay per listen"}),n?_(E,{children:[_(M,{label:"Solana wallet address",children:_(I,{value:n.address,class:"mono",onInput:r=>a({...n,address:r.trim()},o)})}),_("div",{class:"row",children:[_(M,{label:"Price per minute (USD)",hint:"A 3\xBD minute track earns about this \xD73.5.",children:_("input",{type:"number",min:"0.001",max:"1",step:"0.001",value:n.ratePerMinute,onInput:r=>a({...n,ratePerMinute:Number(r.target.value)},o)})}),_(M,{label:"Pay out at (USD)",hint:"Smaller amounts roll over rather than sending.",children:_("input",{type:"number",min:"0.05",max:"100",step:"0.05",value:n.settleAt??1,onInput:r=>a({...n,settleAt:Number(r.target.value)},o)})})]}),_("button",{class:"link danger",onClick:()=>a(null,o),children:"Remove wallet"})]}):_("button",{class:"btn ghost",onClick:()=>a({type:"solana-usdc",address:"",ratePerMinute:.01,settleAt:1},o),children:"Add a wallet"}),_("h3",{children:"Or a support link"}),_("p",{class:"muted",children:"Ko-fi, Bandcamp, a membership page \u2014 anything you already use."}),o.map((r,l)=>_("div",{class:"row",children:[_(M,{label:"Label",children:_(I,{value:r.label,onInput:c=>a(n,o.map((f,i)=>i===l?{...f,label:c}:f))})}),_(M,{label:"Address",children:_(I,{value:r.url,placeholder:"https://",onInput:c=>a(n,o.map((f,i)=>i===l?{...f,url:c.trim()}:f))})}),_("button",{class:"link danger",onClick:()=>a(n,o.filter((c,f)=>f!==l)),children:"Remove"})]},l)),_("button",{class:"btn ghost",onClick:()=>a(n,[...o,{type:"link",label:"",url:""}]),children:"Add a link"})]})}function ze({api:e,node:t,initial:n,onSignOut:o}){let[a,r]=T(n),[l,c]=T(!1),[f,i]=T(!1),[d,b]=T(null),s=(p,k)=>b({kind:p,text:k}),u=Le(p=>{r(p),c(!0)},[]);X(()=>{if(!l)return;let p=k=>{k.preventDefault(),k.returnValue=""};return window.addEventListener("beforeunload",p),()=>window.removeEventListener("beforeunload",p)},[l]);let m=(p,k)=>e.putObject(p,k);async function v(){i(!0);try{let p={...a,amply:1,updated:new Date().toISOString()};await e.writeManifest(p),r(p),c(!1),s("ok","Published. Your page is live.")}catch(p){s("error",p.message)}finally{i(!1)}}let h=()=>{let p=We(a);u({...a,releases:[...a.releases||[],{id:Be("release",p),title:"",tracks:[]}]})},g=(a.releases||[]).reduce((p,k)=>p+(k.tracks?.length||0),0);return _(E,{children:[_("header",{class:"bar",children:[_("div",{children:[_("strong",{children:a.artist?.name||t.slug}),_("a",{class:"node-url",href:t.url,target:"_blank",rel:"noopener",children:t.url})]}),_("div",{class:"bar-actions",children:[l&&_("span",{class:"muted",children:"unsaved changes"}),_("button",{class:"btn",disabled:!l||f,onClick:v,children:f?"Publishing\u2026":"Publish"}),_("button",{class:"link",onClick:o,children:"Sign out"})]})]}),_(_e,{kind:d?.kind,onDismiss:()=>b(null),children:d?.text}),_("section",{class:"card",children:[_("h2",{children:"About you"}),_(M,{label:"Name",children:_(I,{value:a.artist?.name,onInput:p=>u({...a,artist:{...a.artist,name:p}})})}),_(M,{label:"Bio",hint:"Plain text.",children:_("textarea",{rows:"3",value:a.artist?.bio||"",onInput:p=>u({...a,artist:{...a.artist,bio:p.target.value||void 0}})})}),_("label",{class:"checkbox",children:[_("input",{type:"checkbox",checked:!!a.content?.explicit,onChange:p=>u({...a,content:{explicit:p.target.checked}})}),_("span",{children:"My music contains explicit content"})]})]}),_(_t,{payment:a.payment||[],onChange:p=>u({...a,payment:p})}),_("section",{class:"card",children:[_("h2",{children:["Music ",_("span",{class:"muted",children:[g," ",g===1?"track":"tracks"]})]}),(a.releases||[]).map((p,k)=>_(lt,{release:p,node:t,manifest:a,upload:m,notify:s,onChange:C=>u({...a,releases:a.releases.map((S,D)=>D===k?C:S)}),onRemove:()=>u({...a,releases:a.releases.filter((C,S)=>S!==k)})},p.id)),!a.releases?.length&&_("p",{class:"muted",children:"Nothing here yet. Add a release to start."}),_("button",{class:"btn ghost",onClick:h,children:"Add a release"})]}),_("footer",{class:"foot",children:_("p",{class:"muted",children:"Everything here lives on your own Cloudflare account. Amply keeps no copy and has no access once you close this tab."})})]})}function it(e){return new Promise((t,n)=>{let o=URL.createObjectURL(e),a=new Audio,r=(l,c)=>{URL.revokeObjectURL(o),l(c)};a.addEventListener("loadedmetadata",()=>{let l=Math.round(a.duration);!Number.isFinite(l)||l<=0?r(n,new Error("Could not read the length of that file.")):r(t,l)}),a.addEventListener("error",()=>r(n,new Error("That file could not be read as audio."))),a.src=o})}function ct(e){let t=e.lastIndexOf("."),n=t>0?e.slice(t+1).toLowerCase().replace(/[^a-z0-9]/g,""):"bin";return`${(t>0?e.slice(0,t):e).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,60)||"track"}-${Date.now().toString(36)}.${n}`}function Ve(){let e=location.origin;async function t(n,o,{body:a,headers:r}={}){let l=await fetch(`${e}/manage${o}`,{method:n,headers:r,body:a,credentials:"same-origin"});if(l.status===401)throw new Error("Your sign-in expired. Reload the page to sign in again.");if(!l.ok){let c=await l.text().catch(()=>"");throw new Error(c.slice(0,200)||`The node returned ${l.status}.`)}return l}return{async whoami(){return(await t("GET","/whoami")).json()},async readManifest(){let n=await fetch(`${e}/manifest.json`,{cache:"no-store"});return n.ok?n.json().catch(()=>null):null},async writeManifest(n){await t("PUT","/manifest",{headers:{"Content-Type":"application/json"},body:JSON.stringify(n,null,2)})},async putObject(n,o){await t("PUT",`/${n}`,{headers:{"Content-Type":o.type||"application/octet-stream"},body:o})},async deleteObject(n){await t("DELETE",`/${n}`)}}}var ie=Ve();function ut(){let[e,t]=T({phase:"loading"});return X(()=>{(async()=>{try{let[n,o]=await Promise.all([ie.whoami(),ie.readManifest()]);t({phase:"ready",who:n,manifest:o||{amply:1,updated:new Date().toISOString(),artist:{name:location.host.split(".")[0]},content:{explicit:!1},payment:[],releases:[]}})}catch(n){t({phase:"error",error:n.message})}})()},[]),e.phase==="loading"?_("p",{class:"lead",children:"Loading your music\u2026"}):e.phase==="error"?_("section",{class:"card",children:[_("h1",{children:"Couldn't load"}),_(_e,{kind:"error",children:e.error}),_("p",{class:"muted",children:["If this keeps happening, your node may need setting up again at"," ",_("a",{href:"https://amply.stream/start",children:"amply.stream/start"}),"."]})]}):_(ze,{api:ie,node:{slug:location.host.split(".")[0],url:location.origin},initial:e.manifest,onSignOut:()=>location.assign("/cdn-cgi/access/logout")})}Pe(_(ut,{}),document.getElementById("app"));
+var kn=Object.defineProperty;var xn=(e,t)=>()=>(e&&(t=e(e=0)),t);var Sn=(e,t)=>{for(var n in t)kn(e,n,{get:t[n],enumerable:!0})};var nn={};Sn(nn,{NETWORKS:()=>Zt,paymentsTo:()=>ls,reconcile:()=>cs});async function tn(e,t){let n=700;for(let a=0;;a++){let o=await fetch(e,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(t)});if(o.ok)return o.json();if(o.status===429&&a<3){let r=Number(o.headers.get("retry-after"));await en(Number.isFinite(r)&&r>0?r*1e3:n),n*=2;continue}throw new Error(o.status===429?"Solana's free endpoint is busy. Try again in a minute.":`The network answered with ${o.status}.`)}}async function os(e,t,n){let a=await tn(e,{jsonrpc:"2.0",id:1,method:t,params:n});if(a.error)throw new Error(a.error.message||"The network refused the question.");return a.result}async function is(e,t){if(!t.length)return[];let n=await tn(e,t.map((o,r)=>({jsonrpc:"2.0",id:r,method:o.method,params:o.params}))),a=[];for(let o of Array.isArray(n)?n:[n])a[o.id]=o.result;return a}async function ls(e,t="devnet",{limit:n=200,mint:a}={}){let o=Zt[t];if(!o)throw new Error("No such network.");if(!e)return{byWallet:{},total:0,count:0};let r=a||o.usdc,l=(await os(o.rpc,"getSignaturesForAddress",[e,{limit:n}])||[]).filter(f=>!f.err).map(f=>f.signature);if(!l.length)return{byWallet:{},total:0,count:0};let d={},u=0,p=0;for(let f=0;f<l.length;f+=10){f&&await en(120);let c=l.slice(f,f+10).map(h=>({method:"getTransaction",params:[h,{encoding:"jsonParsed",maxSupportedTransactionVersion:0}]}));for(let h of await is(o.rpc,c)){if(!h||h.meta?.err)continue;let _=h.transaction?.message?.accountKeys??[],k=g=>typeof _[g]=="string"?_[g]:_[g]?.pubkey,m=new Set([...h.meta?.preTokenBalances??[],...h.meta?.postTokenBalances??[]].filter(g=>g.owner===e&&g.mint===r).map(g=>k(g.accountIndex)).filter(Boolean));if(!m.size)continue;let y=[...h.transaction?.message?.instructions??[],...(h.meta?.innerInstructions??[]).flatMap(g=>g.instructions??[])];for(let g of y){let S=g?.parsed;if(!S||S.type!=="transferChecked"&&S.type!=="transfer")continue;let $=S.info??{};if(!m.has($.destination)||$.mint&&$.mint!==r)continue;let E=Number($.tokenAmount?.amount??$.amount??0);if(!Number.isFinite(E)||E<=0)continue;let D=$.authority||$.multisigAuthority||"unknown",x=d[D]||{micros:0,payments:0,last:0};d[D]={micros:x.micros+E,payments:x.payments+1,last:Math.max(x.last,(h.blockTime||0)*1e3)},u+=E,p+=1}}}return{byWallet:d,total:u,count:p,checked:l.length}}function cs(e,t){return(e||[]).map(n=>{let a=t[n.pubkey];return{...n,paidMicros:a?.micros||0,payments:a?.payments||0,lastPaid:a?.last||0}}).sort((n,a)=>(a.seconds||0)-(n.seconds||0))}var Zt,en,sn=xn(()=>{Zt={devnet:{label:"Test network",rpc:"https://api.devnet.solana.com",usdc:"4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",real:!1},mainnet:{label:"Solana",rpc:"https://solana-rpc.publicnode.com",usdc:"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",real:!0}},en=e=>new Promise(t=>setTimeout(t,e))});var ke,M,ct,$n,Z,rt,ut,dt,Le,ye,oe,pt,Ue,Oe,Re,An,be={},ve=[],En=/acit|ex(?:s|g|n|p|$)|rph|grid|ows|mnc|ntw|ine[ch]|zoo|^ord|itera/i,xe=Array.isArray;function G(e,t){for(var n in t)e[n]=t[n];return e}function De(e){e&&e.parentNode&&e.parentNode.removeChild(e)}function Cn(e,t,n){var a,o,r,i={};for(r in t)r=="key"?a=t[r]:r=="ref"?o=t[r]:i[r]=t[r];if(arguments.length>2&&(i.children=arguments.length>3?ke.call(arguments,2):n),typeof e=="function"&&e.defaultProps!=null)for(r in e.defaultProps)i[r]===void 0&&(i[r]=e.defaultProps[r]);return _e(e,i,a,o,null)}function _e(e,t,n,a,o){var r={type:e,props:t,key:n,ref:a,__k:null,__:null,__b:0,__e:null,__c:null,constructor:void 0,__v:o??++ct,__i:-1,__u:0};return o==null&&M.vnode!=null&&M.vnode(r),r}function L(e){return e.children}function ge(e,t){this.props=e,this.context=t}function ne(e,t){if(t==null)return e.__?ne(e.__,e.__i+1):null;for(var n;t<e.__k.length;t++)if((n=e.__k[t])!=null&&n.__e!=null)return n.__e;return typeof e.type=="function"?ne(e):null}function Pn(e){if(e.__P&&e.__d){var t=e.__v,n=t.__e,a=[],o=[],r=G({},t);r.__v=t.__v+1,M.vnode&&M.vnode(r),je(e.__P,r,t,e.__n,e.__P.namespaceURI,32&t.__u?[n]:null,a,n??ne(t),!!(32&t.__u),o),r.__v=t.__v,r.__.__k[r.__i]=r,_t(a,r,o),t.__e=t.__=null,r.__e!=n&&ht(r)}}function ht(e){if((e=e.__)!=null&&e.__c!=null)return e.__e=e.__c.base=null,e.__k.some(function(t){if(t!=null&&t.__e!=null)return e.__e=e.__c.base=t.__e}),ht(e)}function ot(e){(!e.__d&&(e.__d=!0)&&Z.push(e)&&!we.__r++||rt!=M.debounceRendering)&&((rt=M.debounceRendering)||ut)(we)}function we(){try{for(var e,t=1;Z.length;)Z.length>t&&Z.sort(dt),e=Z.shift(),t=Z.length,Pn(e)}finally{Z.length=we.__r=0}}function ft(e,t,n,a,o,r,i,l,d,u,p){var f,c,h,_,k,m,y=a&&a.__k||ve,g=t.length;for(d=Tn(n,t,y,d,g),f=0;f<g;f++)(h=n.__k[f])!=null&&(c=h.__i!=-1&&y[h.__i]||be,h.__i=f,m=je(e,h,c,o,r,i,l,d,u,p),_=h.__e,h.ref&&c.ref!=h.ref&&(c.ref&&We(c.ref,null,h),p.push(h.ref,h.__c||_,h)),k==null&&_!=null&&(k=_),4&h.__u?(d=mt(h,d,e),c.__e&&(c.__e=null)):typeof h.type=="function"&&m!==void 0?d=m:_&&(d=_.nextSibling),h.__u&=-7);return n.__e=k,d}function Tn(e,t,n,a,o){var r,i,l,d,u,p=n.length,f=p,c=0;for(e.__k=new Array(o),r=0;r<o;r++)(i=t[r])!=null&&typeof i!="boolean"&&typeof i!="function"?(typeof i=="string"||typeof i=="number"||typeof i=="bigint"||i.constructor==String?i=e.__k[r]=_e(null,i,null,null,null):xe(i)?i=e.__k[r]=_e(L,{children:i},null,null,null):i.constructor===void 0&&i.__b>0?i=e.__k[r]=_e(i.type,i.props,i.key,i.ref?i.ref:null,i.__v):e.__k[r]=i,d=r+c,i.__=e,i.__b=e.__b+1,l=null,(u=i.__i=Mn(i,n,d,f))!=-1&&(f--,(l=n[u])&&(l.__u|=2)),l==null||l.__v==null?(u==-1&&(o>p?c--:o<p&&c++),typeof i.type!="function"&&(i.__u|=4)):u!=d&&(u==d-1?c--:u==d+1?c++:(u>d?c--:c++,i.__u|=4))):e.__k[r]=null;if(f)for(r=0;r<p;r++)(l=n[r])!=null&&!(2&l.__u)&&(l.__e==a&&(a=ne(l)),bt(l,l));return a}function mt(e,t,n){var a,o;if(typeof e.type=="function"){for(a=e.__k,o=0;a&&o<a.length;o++)a[o]&&(a[o].__=e,t=mt(a[o],t,n));return t}e.__e!=t&&(t&&e.type&&!t.parentNode&&(t=ne(e)),t=n.insertBefore(e.__e,t||null));do t=t&&t.nextSibling;while(t!=null&&t.nodeType==8);return t}function Mn(e,t,n,a){var o,r,i,l=e.key,d=e.type,u=t[n],p=u!=null&&(2&u.__u)==0;if(u===null&&l==null||p&&l==u.key&&d==u.type)return n;if(a>(p?1:0)){for(o=n-1,r=n+1;o>=0||r<t.length;)if((u=t[i=o>=0?o--:r++])!=null&&!(2&u.__u)&&l==u.key&&d==u.type)return i}return-1}function it(e,t,n){t[0]=="-"?e.setProperty(t,n??""):e[t]=n==null?"":typeof n!="number"||En.test(t)?n:n+"px"}function me(e,t,n,a,o){var r,i;e:if(t=="style")if(typeof n=="string")e.style.cssText=n;else{if(typeof a=="string"&&(e.style.cssText=a=""),a)for(t in a)n&&t in n||it(e.style,t,"");if(n)for(t in n)a&&n[t]==a[t]||it(e.style,t,n[t])}else if(t[0]=="o"&&t[1]=="n")r=t!=(t=t.replace(pt,"$1")),i=t.toLowerCase(),t=i in e||t=="onFocusOut"||t=="onFocusIn"?i.slice(2):t.slice(2),e.l||(e.l={}),e.l[t+r]=n,n?a?n[oe]=a[oe]:(n[oe]=Ue,e.addEventListener(t,r?Re:Oe,r)):e.removeEventListener(t,r?Re:Oe,r);else{if(o=="http://www.w3.org/2000/svg")t=t.replace(/xlink(H|:h)/,"h").replace(/sName$/,"s");else if(t!="width"&&t!="height"&&t!="href"&&t!="list"&&t!="form"&&t!="tabIndex"&&t!="download"&&t!="rowSpan"&&t!="colSpan"&&t!="role"&&t!="popover"&&t in e)try{e[t]=n??"";break e}catch{}typeof n=="function"||(n==null||n===!1&&t[4]!="-"?e.removeAttribute(t):e.setAttribute(t,t=="popover"&&n==1?"":n))}}function lt(e){return function(t){if(this.l){var n=this.l[t.type+e];if(t[ye]==null)t[ye]=Ue++;else if(t[ye]<n[oe])return;return n(M.event?M.event(t):t)}}}function je(e,t,n,a,o,r,i,l,d,u){var p,f,c,h,_,k,m,y,g,S,$,E,D,x,T,O,N=t.type;if(t.constructor!==void 0)return null;128&n.__u&&(d=!!(32&n.__u),r=[l=t.__e=n.__e]),(p=M.__b)&&p(t);e:if(typeof N=="function"){f=i.length;try{if(g=t.props,S=N.prototype&&N.prototype.render,$=(p=N.contextType)&&a[p.__c],E=p?$?$.props.value:p.__:a,n.__c?y=(c=t.__c=n.__c).__=c.__E:(S?t.__c=c=new N(g,E):(t.__c=c=new ge(g,E),c.constructor=N,c.render=In),$&&$.sub(c),c.state||(c.state={}),c.__n=a,h=c.__d=!0,c.__h=[],c._sb=[]),S&&c.__s==null&&(c.__s=c.state),S&&N.getDerivedStateFromProps!=null&&(c.__s==c.state&&(c.__s=G({},c.__s)),G(c.__s,N.getDerivedStateFromProps(g,c.__s))),_=c.props,k=c.state,c.__v=t,h)S&&N.getDerivedStateFromProps==null&&c.componentWillMount!=null&&c.componentWillMount(),S&&c.componentDidMount!=null&&c.__h.push(c.componentDidMount);else{if(S&&N.getDerivedStateFromProps==null&&g!==_&&c.componentWillReceiveProps!=null&&c.componentWillReceiveProps(g,E),t.__v==n.__v||!c.__e&&c.shouldComponentUpdate!=null&&c.shouldComponentUpdate(g,c.__s,E)===!1){t.__v!=n.__v&&(c.props=g,c.state=c.__s,c.__d=!1),t.__e=n.__e,t.__k=n.__k,t.__k.some(function(F){F&&(F.__=t)}),ve.push.apply(c.__h,c._sb),c._sb=[],c.__h.length&&i.push(c),l=ne(n);break e}c.componentWillUpdate!=null&&c.componentWillUpdate(g,c.__s,E),S&&c.componentDidUpdate!=null&&c.__h.push(function(){c.componentDidUpdate(_,k,m)})}if(c.context=E,c.props=g,c.__P=e,c.__e=!1,D=M.__r,x=0,S)c.state=c.__s,c.__d=!1,D&&D(t),p=c.render(c.props,c.state,c.context),ve.push.apply(c.__h,c._sb),c._sb=[];else do c.__d=!1,D&&D(t),p=c.render(c.props,c.state,c.context),c.state=c.__s;while(c.__d&&++x<25);c.state=c.__s,c.getChildContext!=null&&(a=G(G({},a),c.getChildContext())),S&&!h&&c.getSnapshotBeforeUpdate!=null&&(m=c.getSnapshotBeforeUpdate(_,k)),T=p!=null&&p.type===L&&p.key==null?gt(p.props.children):p,l=ft(e,xe(T)?T:[T],t,n,a,o,r,i,l,d,u),c.base=t.__e,t.__u&=-161,c.__h.length&&i.push(c),y&&(c.__E=c.__=null)}catch(F){if(i.length=f,t.__v=null,d||r!=null){if(F.then){for(t.__u|=d?160:128;l&&l.nodeType==8&&l.nextSibling;)l=l.nextSibling;r!=null&&(r[r.indexOf(l)]=null),t.__e=l}else if(r!=null)for(O=r.length;O--;)De(r[O])}else t.__e=n.__e;t.__k==null&&(t.__k=n.__k||[]),F.then||yt(t),M.__e(F,t,n)}}else r==null&&t.__v==n.__v?(t.__k=n.__k,t.__e=n.__e):l=t.__e=Nn(n.__e,t,n,a,o,r,i,d,u);return(p=M.diffed)&&p(t),128&t.__u?void 0:l}function yt(e){e&&(e.__c&&(e.__c.__e=!0),e.__k&&e.__k.some(yt))}function _t(e,t,n){for(var a=0;a<n.length;a++)We(n[a],n[++a],n[++a]);M.__c&&M.__c(t,e),e.some(function(o){try{e=o.__h,o.__h=[],e.some(function(r){r.call(o)})}catch(r){M.__e(r,o.__v)}})}function gt(e){return typeof e!="object"||e==null||e.__b>0?e:xe(e)?e.map(gt):e.constructor!==void 0?null:G({},e)}function Nn(e,t,n,a,o,r,i,l,d){var u,p,f,c,h,_,k,m=n.props||be,y=t.props,g=t.type;if(g=="svg"?o="http://www.w3.org/2000/svg":g=="math"?o="http://www.w3.org/1998/Math/MathML":o||(o="http://www.w3.org/1999/xhtml"),r!=null){for(u=0;u<r.length;u++)if((h=r[u])&&"setAttribute"in h==!!g&&(g?h.localName==g:h.nodeType==3)){e=h,r[u]=null;break}}if(e==null){if(g==null)return document.createTextNode(y);e=document.createElementNS(o,g,y.is&&y),l&&(M.__m&&M.__m(t,r),l=!1),r=null}if(g==null)m===y||l&&e.data==y||(e.data=y);else{if(r=g=="textarea"&&y.defaultValue!=null?null:r&&ke.call(e.childNodes),!l&&r!=null)for(m={},u=0;u<e.attributes.length;u++)m[(h=e.attributes[u]).name]=h.value;for(u in m)h=m[u],u=="dangerouslySetInnerHTML"?f=h:u=="children"||u in y||u=="value"&&"defaultValue"in y||u=="checked"&&"defaultChecked"in y||me(e,u,null,h,o);for(u in y)h=y[u],u=="children"?c=h:u=="dangerouslySetInnerHTML"?p=h:u=="value"?_=h:u=="checked"?k=h:l&&typeof h!="function"||m[u]===h||me(e,u,h,m[u],o);if(p)l||f&&(p.__html==f.__html||p.__html==e.innerHTML)||(e.innerHTML=p.__html),t.__k=[];else if(f&&(e.innerHTML=""),ft(t.type=="template"?e.content:e,xe(c)?c:[c],t,n,a,g=="foreignObject"?"http://www.w3.org/1999/xhtml":o,r,i,r?r[0]:n.__k&&ne(n,0),l,d),r!=null)for(u=r.length;u--;)De(r[u]);l&&g!="textarea"||(u="value",g=="progress"&&_==null?e.removeAttribute("value"):_!=null&&(_!==e[u]||g=="progress"&&!_||g=="option"&&_!=m[u])&&me(e,u,_,m[u],o),u="checked",k!=null&&k!=e[u]&&me(e,u,k,m[u],o))}return e}function We(e,t,n){try{if(typeof e=="function"){var a=typeof e.__u=="function";a&&e.__u(),a&&t==null||(e.__u=e(t))}else e.current=t}catch(o){M.__e(o,n)}}function bt(e,t,n){var a,o;if(M.unmount&&M.unmount(e),(a=e.ref)&&(a.current&&a.current!=e.__e||We(a,null,t)),(a=e.__c)!=null){if(a.componentWillUnmount)try{a.componentWillUnmount()}catch(r){M.__e(r,t)}a.base=a.__P=a.__n=null}if(a=e.__k)for(o=0;o<a.length;o++)a[o]&&bt(a[o],t,n||typeof e.type!="function");n||De(e.__e),e.__c=e.__=e.__e=void 0}function In(e,t,n){return this.constructor(e,n)}function vt(e,t,n){var a,o,r,i;t==document&&(t=document.documentElement),M.__&&M.__(e,t),o=(a=typeof n=="function")?null:n&&n.__k||t.__k,r=[],i=[],je(t,e=(!a&&n||t).__k=Cn(L,null,[e]),o||be,be,t.namespaceURI,!a&&n?[n]:o?null:t.firstChild?ke.call(t.childNodes):null,r,!a&&n?n:o?o.__e:t.firstChild,a,i),_t(r,e,i),e.props.children=null}ke=ve.slice,M={__e:function(e,t,n,a){for(var o,r,i;t=t.__;)if((o=t.__c)&&!o.__)try{if((r=o.constructor)&&r.getDerivedStateFromError!=null&&(o.setState(r.getDerivedStateFromError(e)),i=o.__d),o.componentDidCatch!=null&&(o.componentDidCatch(e,a||{}),i=o.__d),i)return o.__E=o}catch(l){e=l}throw e}},ct=0,$n=function(e){return e!=null&&e.constructor===void 0},ge.prototype.setState=function(e,t){var n;n=this.__s!=null&&this.__s!=this.state?this.__s:this.__s=G({},this.state),typeof e=="function"&&(e=e(G({},n),this.props)),e&&G(n,e),e!=null&&this.__v&&(t&&this._sb.push(t),ot(this))},ge.prototype.forceUpdate=function(e){this.__v&&(this.__e=!0,e&&this.__h.push(e),ot(this))},ge.prototype.render=L,Z=[],ut=typeof Promise=="function"?Promise.prototype.then.bind(Promise.resolve()):setTimeout,dt=function(e,t){return e.__v.__b-t.__v.__b},we.__r=0,Le=Math.random().toString(8),ye="__d"+Le,oe="__a"+Le,pt=/(PointerCapture)$|Capture$/i,Ue=0,Oe=lt(!1),Re=lt(!0),An=0;var ie,U,Fe,wt,le=0,Pt=[],j=M,kt=j.__b,xt=j.__r,St=j.diffed,$t=j.__c,At=j.unmount,Et=j.__;function Be(e,t){j.__h&&j.__h(U,e,le||t),le=0;var n=U.__H||(U.__H={__:[],__h:[]});return e>=n.__.length&&n.__.push({}),n.__[e]}function C(e){return le=1,Ln(Mt,e)}function Ln(e,t,n){var a=Be(ie++,2);if(a.t=e,!a.__c&&(a.__=[n?n(t):Mt(void 0,t),function(l){var d=a.__N?a.__N[0]:a.__[0],u=a.t(d,l);d!==u&&(a.__N=[u,a.__[1]],a.__c.setState({}))}],a.__c=U,!U.__f)){var o=function(l,d,u){if(!a.__c.__H)return!0;var p=!1,f=a.__c.props!==l;if(a.__c.__H.__.some(function(h){if(h.__N){p=!0;var _=h.__[0];h.__=h.__N,h.__N=void 0,_!==h.__[0]&&(f=!0)}}),r){var c=r.call(this,l,d,u);return p?c||f:c}return!p||f};U.__f=!0;var r=U.shouldComponentUpdate,i=U.componentWillUpdate;U.componentWillUpdate=function(l,d,u){if(this.__e){var p=r;r=void 0,o(l,d,u),r=p}i&&i.call(this,l,d,u)},U.shouldComponentUpdate=o}return a.__N||a.__}function B(e,t){var n=Be(ie++,3);!j.__s&&Tt(n.__H,t)&&(n.__=e,n.u=t,U.__H.__h.push(n))}function se(e){return le=5,ae(function(){return{current:e}},[])}function ae(e,t){var n=Be(ie++,7);return Tt(n.__H,t)&&(n.__=e(),n.__H=t,n.__h=e),n.__}function ze(e,t){return le=8,ae(function(){return e},t)}function On(){for(var e;e=Pt.shift();){var t=e.__H;if(e.__P&&t)try{t.__h.some(Se),t.__h.some(He),t.__h=[]}catch(n){t.__h=[],j.__e(n,e.__v)}}}j.__b=function(e){U=null,kt&&kt(e)},j.__=function(e,t){e&&t.__k&&t.__k.__m&&(e.__m=t.__k.__m),Et&&Et(e,t)},j.__r=function(e){xt&&xt(e),ie=0;var t=(U=e.__c).__H;t&&(Fe===U?(t.__h=[],U.__h=[],t.__.some(function(n){n.__N&&(n.__=n.__N),n.u=n.__N=void 0})):(t.__h.some(Se),t.__h.some(He),t.__h=[],ie=0)),Fe=U},j.diffed=function(e){St&&St(e);var t=e.__c;t&&t.__H&&(t.__H.__h.length&&(Pt.push(t)!==1&&wt===j.requestAnimationFrame||((wt=j.requestAnimationFrame)||Rn)(On)),t.__H.__.some(function(n){n.u&&(n.__H=n.u,n.u=void 0)})),Fe=U=null},j.__c=function(e,t){t.some(function(n){try{n.__h.some(Se),n.__h=n.__h.filter(function(a){return!a.__||He(a)})}catch(a){t.some(function(o){o.__h&&(o.__h=[])}),t=[],j.__e(a,n.__v)}}),$t&&$t(e,t)},j.unmount=function(e){At&&At(e);var t,n=e.__c;n&&n.__H&&(n.__H.__.some(function(a){try{Se(a)}catch(o){t=o}}),n.__H=void 0,t&&j.__e(t,n.__v))};var Ct=typeof requestAnimationFrame=="function";function Rn(e){var t,n=function(){clearTimeout(a),Ct&&cancelAnimationFrame(t),setTimeout(e)},a=setTimeout(n,35);Ct&&(t=requestAnimationFrame(n))}function Se(e){var t=U,n=e.__c;typeof n=="function"&&(e.__c=void 0,n()),U=t}function He(e){var t=U;e.__c=e.__(),U=t}function Tt(e,t){return!e||e.length!==t.length||t.some(function(n,a){return n!==e[a]})}function Mt(e,t){return typeof t=="function"?t(e):t}var Un=/^[a-z0-9-]{1,64}$/,Nt=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/,qe=["solana","devnet"],$e=[3,6,12],It=2,Dn=/^\d{4}-\d{2}-\d{2}$/,Lt=.5,Ot=1e3;function Rt(e,t,n){if(!H(e))return w(t,"must be an object");if((typeof e.price!="number"||!(e.price>=Lt)||e.price>Ot)&&w(`${t}.price`,`must be a number from ${Lt} to ${Ot} (dollars)`),e.currency!==void 0&&e.currency!=="usd"&&w(`${t}.currency`,"must be usd (or absent)"),e.url!==void 0&&Y(e.url,`${t}.url`)){let o=new URL(e.url).host;o!=="buy.stripe.com"&&!o.endsWith(".stripe.com")&&w(`${t}.url`,"must be a Stripe payment link (buy.stripe.com)")}let a=(n.payment||[]).some(o=>H(o)&&o.type==="solana-usdc");e.url===void 0&&!a&&re(t,"no way to pay: add a Stripe link or a Solana payment method")}var Ye=[],Ve=[],w=(e,t)=>Ye.push(`${e}: ${t}`),re=(e,t)=>Ve.push(`${e}: ${t}`),H=e=>e!==null&&typeof e=="object"&&!Array.isArray(e);function W(e,t,{required:n=!1,min:a=1,max:o=1/0}={}){return e===void 0?(n&&w(t,"required"),!1):typeof e!="string"?(w(t,`must be a string, got ${typeof e}`),!1):e.length<a?(w(t,`must be at least ${a} character(s)`),!1):e.length>o?(w(t,`must be at most ${o} characters (got ${e.length})`),!1):!0}function Y(e,t,{required:n=!1}={}){if(e===void 0)return n&&w(t,"required"),!1;if(typeof e!="string")return w(t,"must be a string URL"),!1;let a;try{a=new URL(e)}catch{return w(t,`not a valid absolute URL: ${JSON.stringify(e)}`),!1}return a.protocol!=="https:"?(w(t,`must be https, got ${a.protocol.replace(":","")}`),!1):!0}function Ut(e,t,n){if(W(e,t,{required:!0})){if(!Un.test(e)){w(t,`must match [a-z0-9-], 1-64 chars (got ${JSON.stringify(e)})`);return}n.has(e)&&w(t,`duplicate id ${JSON.stringify(e)} \u2014 ids must be unique across the manifest`),n.add(e)}}function jn(e){if(!H(e)){w("$","manifest must be a JSON object");return}if(e.amply===void 0?w("amply","required"):e.amply!==1&&w("amply",`unsupported spec version ${e.amply} (this validator knows 1)`),W(e.updated,"updated",{required:!0})&&Number.isNaN(Date.parse(e.updated))&&w("updated","not a parseable ISO 8601 timestamp"),!H(e.artist))w("artist","required, must be an object");else{if(W(e.artist.name,"artist.name",{required:!0,max:200}),e.artist.bio!==void 0&&W(e.artist.bio,"artist.bio",{max:2e3}),e.artist.image!==void 0&&Y(e.artist.image,"artist.image"),e.artist.banner!==void 0&&Y(e.artist.banner,"artist.banner"),e.artist.domain!==void 0&&W(e.artist.domain,"artist.domain",{max:253})&&(/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(e.artist.domain)||w("artist.domain","must be a bare domain in lower case, like yourname.com")),e.artist.contact!==void 0&&W(e.artist.contact,"artist.contact",{max:320})){let n=e.artist.contact,a=/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(n),o=/^https:\/\/\S+$/.test(n);!a&&!o&&w("artist.contact","must be an email address or an https link")}e.artist.links!==void 0&&(Array.isArray(e.artist.links)?(e.artist.links.length>20&&w("artist.links","at most 20 links"),e.artist.links.forEach((n,a)=>{let o=`artist.links[${a}]`;if(!H(n))return w(o,"must be an object");W(n.label,`${o}.label`,{required:!0,max:40}),Y(n.url,`${o}.url`,{required:!0})})):w("artist.links","must be an array"))}e.content!==void 0&&(H(e.content)?e.content.explicit!==void 0&&typeof e.content.explicit!="boolean"&&w("content.explicit","must be a boolean"):w("content","must be an object")),e.licence!==void 0?H(e.licence)?(W(e.licence.type,"licence.type",{required:!0,max:64})&&(["amply-personal-1","custom"].includes(e.licence.type)||re("licence.type",`unrecognised licence ${JSON.stringify(e.licence.type)} \u2014 clients will treat it as granting no redistribution rights`),e.licence.type==="custom"&&e.licence.url===void 0&&w("licence.url",'required when type is "custom" \u2014 otherwise the terms cannot be read')),e.licence.url!==void 0&&Y(e.licence.url,"licence.url"),e.licence.notice!==void 0&&W(e.licence.notice,"licence.notice",{max:300})):w("licence","must be an object"):re("licence","absent \u2014 clients must assume no redistribution rights were granted"),e.payment!==void 0&&(Array.isArray(e.payment)?(e.payment.length===0&&re("payment","empty \u2014 this artist cannot be paid"),e.payment.forEach((n,a)=>{let o=`payment[${a}]`;if(!H(n))return w(o,"must be an object");if(W(n.type,`${o}.type`,{required:!0}))if(n.type==="solana-usdc"){if(n.recipients!==void 0)if(n.address!==void 0&&w(`${o}.address`,"must be absent when recipients is present, the split names every payee"),!Array.isArray(n.recipients))w(`${o}.recipients`,"must be an array");else if(n.recipients.length===0)w(`${o}.recipients`,"must name at least one payee");else if(n.recipients.length>10)w(`${o}.recipients`,"at most 10 payees");else{let r=0;n.recipients.forEach((i,l)=>{let d=`${o}.recipients[${l}]`;if(!H(i))return w(d,"must be an object");i.name!==void 0&&W(i.name,`${d}.name`,{max:200}),W(i.address,`${d}.address`,{required:!0})&&!Nt.test(i.address)&&w(`${d}.address`,"not a plausible base58 Solana address (32-44 chars)"),typeof i.split!="number"?w(`${d}.split`,"required, must be a number (percent)"):i.split>0?r+=i.split:w(`${d}.split`,"must be greater than 0")}),Math.abs(r-100)>.01&&w(`${o}.recipients`,`splits must total 100%, got ${r.toFixed(2)}%`)}else W(n.address,`${o}.address`,{required:!0})&&!Nt.test(n.address)&&w(`${o}.address`,"not a plausible base58 Solana address (32-44 chars)");typeof n.ratePerMinute!="number"?w(`${o}.ratePerMinute`,"required, must be a number"):n.ratePerMinute>0?n.ratePerMinute>1&&w(`${o}.ratePerMinute`,`must be at most 1 USD/min (got ${n.ratePerMinute})`):w(`${o}.ratePerMinute`,"must be greater than 0"),n.settleAt!==void 0&&(typeof n.settleAt!="number"?w(`${o}.settleAt`,"must be a number"):(n.settleAt<.01||n.settleAt>100)&&w(`${o}.settleAt`,"must be between 0.01 and 100 USD")),n.network!==void 0&&!qe.includes(n.network)&&w(`${o}.network`,`must be one of ${qe.join(", ")} (absent means ${qe[0]})`)}else if(n.type==="stripe-subscription")if(!Array.isArray(n.plans)||n.plans.length===0)w(`${o}.plans`,"must list at least one plan");else{n.plans.length>$e.length&&w(`${o}.plans`,`at most ${$e.length} plans`);let r=new Set;n.plans.forEach((i,l)=>{let d=`${o}.plans[${l}]`;if(!H(i))return w(d,"must be an object");if($e.includes(i.months)?r.has(i.months)&&w(`${d}.months`,"each length may appear once"):w(`${d}.months`,`must be one of ${$e.join(", ")}`),r.add(i.months),(typeof i.price!="number"||!(i.price>=It)||i.price>1e3)&&w(`${d}.price`,`must be a number from ${It} to 1000`),i.currency!==void 0&&!/^[a-z]{3}$/.test(i.currency)&&w(`${d}.currency`,"must be a three-letter currency code in lower case"),Y(i.url,`${d}.url`,{required:!0})){let u=new URL(i.url).host;u!=="buy.stripe.com"&&!u.endsWith(".stripe.com")&&w(`${d}.url`,"must be a Stripe payment link (buy.stripe.com)")}})}else n.type==="link"?(W(n.label,`${o}.label`,{required:!0,max:40}),Y(n.url,`${o}.url`,{required:!0})):re(o,`unknown payment type ${JSON.stringify(n.type)} \u2014 clients will skip it`)})):w("payment","must be an array"));let t=new Set;if(!Array.isArray(e.releases)){w("releases","required, must be an array");return}e.releases.length===0&&re("releases","empty \u2014 valid, but nothing to listen to"),e.releases.forEach((n,a)=>{let o=`releases[${a}]`;if(!H(n))return w(o,"must be an object");if(Ut(n.id,`${o}.id`,t),W(n.title,`${o}.title`,{required:!0,max:300}),n.date!==void 0&&!Dn.test(String(n.date))&&w(`${o}.date`,"must be YYYY-MM-DD"),n.art!==void 0&&Y(n.art,`${o}.art`),n.colors!==void 0)if(!H(n.colors))w(`${o}.colors`,"must be an object");else for(let r of["accent","deep"])n.colors[r]!==void 0&&!/^#[0-9a-f]{6}$/.test(String(n.colors[r]))&&w(`${o}.colors.${r}`,"must be a colour like #e0652c");if(n.sale!==void 0&&Rt(n.sale,`${o}.sale`,e),!Array.isArray(n.tracks)||n.tracks.length===0)return w(`${o}.tracks`,"required, must be a non-empty array");n.tracks.forEach((r,i)=>{let l=`${o}.tracks[${i}]`;if(!H(r))return w(l,"must be an object");Ut(r.id,`${l}.id`,t),W(r.title,`${l}.title`,{required:!0,max:300}),Number.isInteger(r.duration)?r.duration<=0&&w(`${l}.duration`,"must be greater than 0"):w(`${l}.duration`,"required, must be an integer (seconds)"),Y(r.url,`${l}.url`,{required:!0}),r.waves!==void 0&&Y(r.waves,`${l}.waves`),r.explicit!==void 0&&typeof r.explicit!="boolean"&&w(`${l}.explicit`,"must be a boolean"),r.needsWallet!==void 0&&typeof r.needsWallet!="boolean"&&w(`${l}.needsWallet`,"must be a boolean"),r.free!==void 0&&typeof r.free!="boolean"&&w(`${l}.free`,"must be a boolean"),r.sale!==void 0&&Rt(r.sale,`${l}.sale`,e)})})}function Dt(e){return Ye=[],Ve=[],jn(e),{errors:Ye,warnings:Ve}}function Wn(e){return(e?.payment||[]).some(t=>t&&t.type==="solana-usdc"&&Number(t.ratePerMinute)>0)}function Fn(e){let t=(e?.payment||[]).find(n=>n&&n.type==="stripe-subscription");return Array.isArray(t?.plans)?t.plans.filter(n=>n&&n.url&&n.months&&n.price>0):[]}function jt(e){return Wn(e)||Fn(e).length>0}var Hn="_amply",Xe="amply=",Bn=[e=>[`https://1.1.1.1/dns-query?name=${encodeURIComponent(e)}&type=TXT`,{headers:{accept:"application/dns-json"}}],e=>[`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(e)}&type=TXT`,{headers:{accept:"application/dns-json"}}],e=>[`https://dns.google/resolve?name=${encodeURIComponent(e)}&type=TXT`,{}]];var Ge=e=>`${Xe}${e}`;function Ae(e){let t=String(e||"").trim().toLowerCase();return t=t.replace(/^https?:\/\//,"").replace(/\/+$/,""),!t||t.includes("/")||!/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/.test(t)||/\.(workers|pages)\.dev$/.test(t)?null:t}function zn(e){let t=(e?.Answer||[]).filter(n=>n.type===16);for(let n of t){let a=[...String(n.data||"").matchAll(/"((?:[^"\\]|\\.)*)"/g)].map(r=>r[1]).join("")||String(n.data||"");if(!a.startsWith(Xe))continue;let o=a.slice(Xe.length).trim();if(!(o.length>500))try{let r=new URL(o);if(r.protocol==="https:")return r.href}catch{}}return null}async function Je(e,t=fetch){let n=Ae(e);if(!n)return null;let a=`${Hn}.${n}`;for(let o of Bn)try{let[r,i]=o(a),l=typeof AbortSignal<"u"&&AbortSignal.timeout?AbortSignal.timeout(4e3):void 0,d=await t(r,{...i,signal:l});if(!d.ok)continue;return zn(await d.json())}catch{}return null}async function Wt(e,t,n=fetch){let a=await Je(e,n);if(!a)return!1;let o=r=>{try{let i=new URL(r);return`${i.origin}${i.pathname}`.replace(/\/+$/,"")}catch{return""}};return o(a)===o(t)}var Ht="waves";var qn=[[0,60],[60,150],[150,400],[400,1e3],[1e3,2e3],[2e3,4e3],[4e3,6e3],[6e3,8e3]],Bt=16e3,Yn=[65,77,80,87],ce=12,Vn=.97;function Ft(e,t,n,a=Math.SQRT1_2){let o=2*Math.PI*t/n,r=Math.cos(o),i=Math.sin(o)/(2*a),l=1+i,d=e==="lowpass"?[(1-r)/2,1-r,(1-r)/2]:[(1+r)/2,-(1+r),(1+r)/2];return{b0:d[0]/l,b1:d[1]/l,b2:d[2]/l,a1:-2*r/l,a2:(1-i)/l,x1:0,x2:0,y1:0,y2:0}}function Xn(e,t,{bands:n=qn,fps:a=30}={}){let o=Math.max(1,Math.ceil(t*a));return{rate:e,fps:a,bands:n,frames:o,filters:n.map(([r,i])=>[...r>0?[Ft("highpass",r,e)]:[],...i<e/2?[Ft("lowpass",i,e)]:[]]),rms:new Float32Array(o*n.length),sums:new Float64Array(n.length),sample:0,count:0,frame:0}}function Gn(e,t,n=t.length){let a=e.bands.length,o=Math.round((e.frame+1)*e.rate/e.fps);for(let r=0;r<n;r++){let i=t[r];for(let l=0;l<a;l++){let d=i;for(let u of e.filters[l]){let p=u.b0*d+u.b1*u.x1+u.b2*u.x2-u.a1*u.y1-u.a2*u.y2;u.x2=u.x1,u.x1=d,u.y2=u.y1,u.y1=p,d=p}e.sums[l]+=d*d}if(e.count++,++e.sample>=o){if(e.frame<e.frames)for(let l=0;l<a;l++)e.rms[e.frame*a+l]=Math.sqrt(e.sums[l]/e.count);e.sums.fill(0),e.count=0,e.frame++,o=Math.round((e.frame+1)*e.rate/e.fps)}}}function Jn(e){let t=e.bands.length,n=e.frames;if(e.count&&e.frame<n)for(let l=0;l<t;l++)e.rms[e.frame*t+l]=Math.sqrt(e.sums[l]/e.count);let a=e.bands.map((l,d)=>{let u=[];for(let p=0;p<n;p++)u.push(e.rms[p*t+d]);return u.sort((p,f)=>p-f),u[Math.min(n-1,Math.floor(n*Vn))]||0}),o=new Uint8Array(ce+8*t+n*t),r=new DataView(o.buffer);o.set(Yn,0),r.setUint8(4,1),r.setUint8(5,t),r.setUint16(6,e.fps,!0),r.setUint32(8,n,!0),e.bands.forEach(([l,d],u)=>{r.setUint16(ce+4*u,l,!0),r.setUint16(ce+4*u+2,d,!0),r.setFloat32(ce+4*t+4*u,a[u],!0)});let i=ce+8*t;for(let l=0;l<n;l++)for(let d=0;d<t;d++){let u=a[d],p=u>0?Math.sqrt(Math.min(1,e.rms[l*t+d]/u)):0;o[i+l*t+d]=Math.round(p*255)}return o}async function zt(e,{pause:t=()=>new Promise(n=>setTimeout(n,0))}={}){let n=e.sampleRate,a=Array.from({length:e.numberOfChannels},(l,d)=>e.getChannelData(d)),o=Xn(n,e.length/n),r=n*2,i=new Float32Array(r);for(let l=0;l<e.length;l+=r){let d=Math.min(r,e.length-l);for(let u=0;u<d;u++){let p=0;for(let f of a)p+=f[l+u];i[u]=p/a.length}Gn(o,i,d),await t()}return Jn(o)}var Kn=30*60;async function qt(e,t){if(t>Kn)throw new Error("too long to analyse");let n=await e.arrayBuffer(),a=window.OfflineAudioContext||window.webkitOfflineAudioContext;if(!a)throw new Error("this browser can't analyse audio");let o;for(let i of[Bt,22050,44100])try{o=new a(1,1,i);break}catch{}if(!o)throw new Error("this browser can't analyse audio");let r=await new Promise((i,l)=>{o.decodeAudioData(n,i,l)?.then?.(i,l)});return zt(r)}var Yt=e=>e.replace(/\.[^./]+$/,"")+`.${Ht}`;var Vt=[.5,.66],Qn=.55,Zn=.13,es=.45;function Ee(e,t,n){let a=Math.max(e,t,n),o=Math.min(e,t,n),r=a-o,i=(a+o)/2,l=0;r&&(a===e?l=(t-n)/r%6:a===t?l=(n-e)/r+2:l=(e-t)/r+4,l=(l*60+360)%360);let d=r?r/(1-Math.abs(2*i-1)):0;return{h:l,s:d,l:i,c:r}}function Xt(e,t,n){let a=i=>(i+e/30)%12,o=t*Math.min(n,1-n),r=i=>n-o*Math.max(-1,Math.min(a(i)-3,9-a(i),1));return"#"+[0,8,4].map(i=>Math.round(r(i)*255).toString(16).padStart(2,"0")).join("")}function Gt(e){let t=Array.from({length:24},()=>({score:0,n:0,r:0,g:0,b:0})),n=Array.from({length:24},()=>({n:0,r:0,g:0,b:0})),a=0,o=0,r=0,i=0;for(let c=0;c+3<e.length;c+=4){if(e[c+3]<128)continue;let h=e[c]/255,_=e[c+1]/255,k=e[c+2]/255,m=Ee(h,_,k);a++,o+=h,r+=_,i+=k;let y=Math.floor(m.h/(360/24))%24;if(m.c>=.12/2){let S=n[y];S.n++,S.r+=h,S.g+=_,S.b+=k}if(m.c<.12||m.l<.08||m.l>.95)continue;let g=t[y];g.score+=m.c*m.c,g.n++,g.r+=h,g.g+=_,g.b+=k}if(!a)return null;let l={},d=(c,h,_)=>c[(h+24-1)%24][_]*.5+c[h][_]+c[(h+1)%24][_]*.5,u=-1;if(t.forEach((c,h)=>{c.n&&(u<0||d(t,h,"score")>d(t,u,"score"))&&(u=h)}),u>=0&&t[u].n>=a*.01){let c=t[u],h=Ee(c.r/c.n,c.g/c.n,c.b/c.n);l.accent=Xt(h.h,Math.max(Qn,h.s),Math.min(Vt[1],Math.max(Vt[0],h.l)))}let p=-1;n.forEach((c,h)=>{c.n&&(p<0||d(n,h,"n")>d(n,p,"n"))&&(p=h)});let f=p>=0&&n[p].n>=a*.05?Ee(n[p].r/n[p].n,n[p].g/n[p].n,n[p].b/n[p].n):{...Ee(o/a,r/a,i/a),s:0};return l.deep=Xt(f.h,Math.min(es,f.s),Zn),l}var J=48;async function ts(e){let t=document.createElement("canvas");t.width=t.height=J;let n=t.getContext("2d",{willReadFrequently:!0});try{let a=await createImageBitmap(e,{resizeWidth:J,resizeHeight:J,resizeQuality:"medium"});n.drawImage(a,0,0,J,J),a.close?.()}catch{let a=await new Promise((r,i)=>{let l=new FileReader;l.onload=()=>r(l.result),l.onerror=i,l.readAsDataURL(e)}),o=new Image;await new Promise((r,i)=>{o.onload=r,o.onerror=i,o.src=a}),n.drawImage(o,0,0,J,J)}return n.getImageData(0,0,J,J).data}async function Jt(e){try{return Gt(await ts(e))}catch{return null}}async function Kt(e,t=1200){let n;try{n=await createImageBitmap(e,{imageOrientation:"from-image"})}catch{return e}let{width:a,height:o}=n,r=Math.min(1,t/Math.max(a,o));if(r===1&&e.size<=409600)return n.close?.(),e;let i=Math.round(a*r),l=Math.round(o*r),d=document.createElement("canvas");d.width=i,d.height=l;let u=d.getContext("2d");u.imageSmoothingQuality="high",u.drawImage(n,0,0,i,l),n.close?.();let p=e.type==="image/png"||e.type==="image/webp"||e.type==="image/gif"?as(u,i,l):!1,f=p?"image/png":"image/jpeg",c=await new Promise(_=>d.toBlob(_,f,.85));if(!c||c.size>=e.size)return e;if(!p){let _=ns(new Uint8Array(await e.arrayBuffer()));_&&(c=new Blob([ss(new Uint8Array(await c.arrayBuffer()),_)],{type:f}))}let h=e.name.replace(/\.[^.]+$/,"")+(p?".png":".jpg");return new File([c],h,{type:f})}var Ke=315,Qt=33432;function ns(e){if(e[0]!==255||e[1]!==216)return null;let t=2;for(;t+4<=e.length&&e[t]===255;){let n=e[t+1],a=e[t+2]<<8|e[t+3];if(n===218)break;if(n===225&&String.fromCharCode(...e.subarray(t+4,t+10))==="Exif\0\0"){let r=e.subarray(t+10,t+2+a),i=new DataView(r.buffer,r.byteOffset,r.byteLength),l=r[0]===73,d=h=>i.getUint16(h,l),u=h=>i.getUint32(h,l),p=u(4),f=d(p),c={};for(let h=0;h<f;h++){let _=p+2+12*h,k=d(_);if(k!==Ke&&k!==Qt||d(_+2)!==2)continue;let m=u(_+4),y=m>4?u(_+8):_+8,g=new TextDecoder().decode(r.subarray(y,y+m)).replace(/\0+$/,"").trim();g&&(c[k===Ke?"artist":"copyright"]=g)}return Object.keys(c).length?c:null}t+=2+a}return null}function ss(e,{artist:t,copyright:n}){let a=[[Ke,t],[Qt,n]].filter(([,c])=>c).map(([c,h])=>[c,new TextEncoder().encode(h+"\0")]),r=8+(2+12*a.length+4),i=r+a.reduce((c,[,h])=>c+(h.length>4?h.length:0),0),l=new Uint8Array(i),d=new DataView(l.buffer);l.set([77,77,0,42,0,0,0,8]),d.setUint16(8,a.length),a.forEach(([c,h],_)=>{let k=10+12*_;d.setUint16(k,c),d.setUint16(k+2,2),d.setUint32(k+4,h.length),h.length>4?(d.setUint32(k+8,r),l.set(h,r),r+=h.length):l.set(h,k+8)}),d.setUint32(10+12*a.length,0);let u=8+l.length,p=new Uint8Array(2+u);p.set([255,225,u>>8,u&255,69,120,105,102,0,0]),p.set(l,10);let f=new Uint8Array(e.length+p.length);return f.set(e.subarray(0,2)),f.set(p,2),f.set(e.subarray(2),2+p.length),f}function as(e,t,n){let a=e.getImageData(0,0,t,n).data;for(let o=3;o<a.length;o+=4*7)if(a[o]<250)return!0;return!1}var rs=0,ua=Array.isArray;function s(e,t,n,a,o,r){t||(t={});var i,l,d=t;if("ref"in d)for(l in d={},t)l=="ref"?i=t[l]:d[l]=t[l];var u={type:e,props:d,key:n,ref:i,__k:null,__:null,__b:0,__e:null,__c:null,constructor:void 0,__v:--rs,__i:-1,__u:0,__source:o,__self:r};if(typeof e=="function"&&(i=e.defaultProps))for(l in i)d[l]===void 0&&(d[l]=i[l]);return M.vnode&&M.vnode(u),u}var an=90*1024*1024,dn=[".mp3",".m4a",".mp4",".aac",".ogg",".oga",".opus",".flac",".wav",".wave",".aiff",".aif","audio/mpeg","audio/mp4","audio/aac","audio/ogg","audio/flac","audio/wav","audio/x-wav","audio/aiff","audio/x-aiff"].join(","),rn=8*1024*1024,ue=4;function pn(e){let t=Math.round(Number(String(e).replace(/[$,\s]/g,""))*100)/100;return Number.isFinite(t)&&t>0?t:null}function hs(e){let t=[];for(let n of e.releases||[])if(n.tracks?.length){n.sale?.price&&t.push({item:n.id,title:n.title||"Untitled",price:n.sale.price});for(let a of n.tracks)a.sale?.price&&t.push({item:a.id,title:a.title||"Untitled",price:a.sale.price})}return t}function fs(e,t){let n=a=>{if(!a.sale)return a;let{url:o,...r}=a.sale;return{...a,sale:t[a.id]?{...r,url:t[a.id]}:r}};return{...e,releases:(e.releases||[]).map(a=>({...n(a),tracks:(a.tracks||[]).map(n)}))}}function hn(e,t){let n=(e||"").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,48)||"untitled",a=n,o=2;for(;t.has(a);)a=`${n}-${o++}`;return a}function fn(e){let t=new Set;for(let n of e.releases||[]){t.add(n.id);for(let a of n.tracks||[])t.add(a.id)}return t}var Te=e=>Number.isFinite(e)?`${Math.floor(e/60)}:${String(Math.floor(e)%60).padStart(2,"0")}`:"\u2013";function ee(e){let t=e*100;return t===0?"free":t<10?`${Number(t.toFixed(2))}\xA2`:`${Math.round(t)}\xA2`}var ms=400,mn=256;function Qe(e,t){if(!(e>0)||!(t>0))return null;let n=e*8/t/1e3;if(n<=ms)return null;let a=o=>o/1e6>=10?Math.round(o/1e6):(o/1e6).toFixed(1);return{kbps:Math.round(n),now:a(e),after:a(t*mn*1e3/8)}}var K=({label:e,hint:t,children:n})=>s("label",{class:"field",children:[s("span",{class:"field-label",children:[e,t&&s(L,{children:[" ",s(z,{about:String(e).toLowerCase(),children:t})]})]}),n]}),V=({value:e,onInput:t,...n})=>s("input",{type:"text",value:e??"",onInput:a=>t(a.target.value),...n});function Ne({kind:e,children:t,onDismiss:n,action:a}){return t?s("div",{class:`banner ${e}`,role:e==="error"?"alert":"status",children:[s("span",{children:t}),a&&s("button",{class:"link",onClick:a.run,children:a.label}),n&&s("button",{class:"link",onClick:n,children:"dismiss"})]}):null}function z({about:e,at:t,children:n}){let[a,o]=C(!1);return s(L,{children:[s("button",{type:"button",class:`why${a?" on":""}`,"aria-expanded":a,"aria-label":a?"Hide this explanation":`What's this? ${e}`,onClick:r=>{r.preventDefault(),r.stopPropagation(),o(i=>!i)},children:"?"}),a&&s("span",{class:"help",role:"note",children:[n||s(L,{children:[e.charAt(0).toUpperCase(),e.slice(1),"."]}),t&&s(L,{children:[" ",s("a",{href:`https://amply.stream/why#${t}`,target:"_blank",rel:"noopener",children:"Read more \u2197"})]})]})]})}function Me({text:e,label:t,className:n="quiet-link"}){let[a,o]=C(!1);return B(()=>{if(!a)return;let r=setTimeout(()=>o(!1),2e3);return()=>clearTimeout(r)},[a]),s("button",{class:`${n}${a?" done":""}`,onClick:async()=>{try{await navigator.clipboard.writeText(e),o(!0)}catch{window.prompt("Copy this link:",e)}},children:a?"Copied":t})}function tt({url:e,onPick:t,cls:n,children:a,alt:o}){let r=se(null);return s(L,{children:[s("input",{ref:r,type:"file",accept:"image/*",hidden:!0,onChange:i=>{let l=i.target.files[0];i.target.value="",l&&t(l)}}),s("button",{type:"button",class:`${n}${e?" set":""}`,onClick:()=>r.current.click(),children:e?s("img",{src:e,alt:o||""}):a})]})}function ys({advice:e,duration:t}){return s("div",{class:"track-warn",children:s("div",{class:"what",children:[s("strong",{children:"This file is too large to stream properly"}),s("p",{children:["It is ",e.now,"MB for ",Te(t)," of music. Listeners will wait for it to load, and it may stop partway through while the rest catches up, which breaks the listening experience. Saved as an MP3 at ",mn,"kbps it would be about"," ",e.after,"MB and sound the same to them."]}),s("p",{children:["Use a tool like"," ",s("a",{href:"https://www.audacityteam.org/download/",target:"_blank",rel:"noopener",children:"Audacity"})," ","to make it smaller. It is free: open the file, then choose File, Export Audio, and MP3. Then use Replace audio here, and the track keeps its place and its listeners."]})]})})}function _s({track:e,first:t,last:n,playing:a,onPlay:o,onChange:r,onMove:i,onRemove:l,onReplace:d,heavy:u,warnOpen:p,onWarn:f,charging:c}){let h=e.free===!0,_=()=>{let{free:$,needsWallet:E,...D}=e;r(h?D:{...D,free:!0})},k=()=>{let{sale:$,...E}=e;r(e.sale?E:{...E,sale:{price:1}})},m=se(null),[y,g]=C(!1),S=e.title||"this track";return s("div",{class:`track-block${y?" open":""}`,children:[s("div",{class:"track-row",children:[s("div",{class:"track-order",children:[s("button",{class:"icon stack2",disabled:t,onClick:()=>i(-1),"aria-label":"Move up",children:"\u25B2"}),s("button",{class:"icon stack2",disabled:n,onClick:()=>i(1),"aria-label":"Move down",children:"\u25BC"})]}),s("button",{class:`play${a?" on":""}`,onClick:o,disabled:!e.url,"aria-label":a?`Pause ${e.title}`:`Play ${e.title}`,children:a?"\u275A\u275A":"\u25B6"}),s(V,{value:e.title,class:"track-title",placeholder:"Untitled",onInput:$=>r({...e,title:$})}),s("span",{class:"track-tags",children:[s("span",{class:"track-dur",children:Te(e.duration)}),c&&h&&s("span",{class:"track-mark",title:"Anyone can play this, with or without a wallet",children:"free"}),e.sale?.price>0&&s("span",{class:"track-mark sale",title:"What it costs to buy and keep",children:["$",e.sale.price.toFixed(2)]}),u&&s("button",{class:"warn-toggle","aria-expanded":p,onClick:f,"aria-label":`${e.title||"This track"} is too large to stream properly. ${p?"Hide":"Show"} why.`,title:"Too large to stream properly",children:"!"})]}),s("button",{class:`track-edit-btn${y?" on":""}`,"aria-expanded":y,"aria-label":`${y?"Close":"Edit"} ${S}`,onClick:()=>g($=>!$),children:[s("span",{class:"edit-word",children:y?"Done":"Edit"}),s("span",{class:"edit-icon","aria-hidden":"true",children:y?"\u2713":"\u270E"})]}),s("input",{ref:m,type:"file",accept:dn,hidden:!0,onChange:$=>{let E=$.target.files[0];$.target.value="",E&&d(E)}})]}),y&&s("div",{class:"track-panel",role:"group","aria-label":`Options for ${S}`,children:[e.sale?s("div",{class:"panel-sale",children:[s("label",{class:"track-price",children:[s("span",{class:"label",children:"Price to keep"}),s("span",{class:"money",children:["$",s("input",{type:"number",min:"0.5",max:"1000",step:"0.01",value:e.sale.price??"","aria-label":`Price to buy ${S}, in dollars`,onInput:$=>r({...e,sale:{...e.sale,price:pn($.target.value)??void 0}})})]})]}),s("button",{class:"btn ghost",onClick:k,children:"Stop selling"})]}):s("button",{class:"btn ghost",onClick:k,children:"Sell this song"}),c&&s("button",{class:"btn ghost",title:h?"Charge for this track at your price, like the rest":"Let anyone play this for nothing, even without a wallet",onClick:_,children:h?"Charge for this":"Make free"}),s("button",{class:"btn ghost",onClick:()=>m.current.click(),children:"Replace audio"}),s("button",{class:"btn ghost danger",onClick:l,children:"Remove"})]})]})}function gs({release:e,node:t,manifest:n,art:a,player:o,onChange:r,onRemove:i,upload:l,notify:d,sizeOf:u,charging:p}){let[f,c]=C([]),[h,_]=C(!1),[k,m]=C(0),[y,g]=C({}),[S,$]=C(null),E=se(new Set),D=se(null),x=e.tracks||[],T=(b,P)=>g(v=>({...v,[b]:P}));B(()=>{if(u)for(let b of x)!b.url||b.url in y||E.current.has(b.url)||(E.current.add(b.url),u(b.url).then(P=>P&&T(b.url,P)).catch(()=>{}))},[x.map(b=>b.url).join("|")]);let O=b=>r({...e,tracks:b});async function N(b,P){let v=`audio/${vn(b.name)}`,[,A]=await Promise.all([l(v,b),qt(b,P).then(async I=>{let R=Yt(v);return await l(R,new Blob([I],{type:"application/octet-stream"})),`${t.url}/${R}`}).catch(()=>null)]);return T(`${t.url}/${v}`,b.size),{url:`${t.url}/${v}`,...A?{waves:A}:{}}}async function F(b,P){if(b.size>an)throw new Error(`It is larger than ${Math.round(an/1048576)}MB, which is the most your streaming service accepts in one go.`);let v=await cn(b),A=await N(b,v),I=b.name.replace(/\.[^.]+$/,"").replace(/[_-]+/g," ").trim(),R=hn(I,P);return P.add(R),{id:R,title:I,duration:v,...A}}async function te(b){let P=fn(n),v=[],A=[];m(b.length);for(let I of Array.from(b))try{v.push(await F(I,P))}catch(R){A.push({key:`${I.name}-${Date.now()}`,file:I,message:R.message})}finally{m(R=>R-1)}v.length&&O([...x,...v]),A.length&&c(I=>[...I,...A])}async function pe(b){c(P=>P.filter(v=>v!==b)),await te([b.file])}async function he(b,P){try{m(I=>I+1);let v=await cn(P),A=await N(P,v);O(x.map((I,R)=>{if(R!==b)return I;let{waves:Q,...X}=I;return{...X,duration:v,...A}})),d("ok",`Replaced the audio on \u201C${x[b].title}\u201D.`)}catch(v){d("error",`Could not replace that audio: ${v.message}`)}finally{m(v=>v-1)}}let Ie=(b,P)=>{let v=[...x],A=b+P;A<0||A>=v.length||([v[b],v[A]]=[v[A],v[b]],O(v))};return s("section",{class:"card release",children:[s("div",{class:"release-head",children:[s(tt,{cls:"release-art",url:e.art,alt:`${e.title} cover`,onPick:b=>a(b,async P=>{let{colors:v,...A}=e,I=await Jt(b);r({...A,art:P,...I?{colors:I}:{}})}),children:[s("svg",{width:"19",height:"19",viewBox:"0 0 18 18",fill:"none",stroke:"currentColor","stroke-width":"1.4","aria-hidden":"true",children:[s("rect",{x:"1",y:"1",width:"16",height:"16",rx:"2.5"}),s("rect",{x:"5.4",y:"5.4",width:"7.2",height:"7.2",rx:"1",fill:"currentColor",stroke:"none"})]}),s("span",{children:"add artwork"})]}),s("div",{class:"release-fields",children:[s(V,{value:e.title,class:"release-title",placeholder:"Name this release",onInput:b=>r({...e,title:b})}),s("span",{class:"count",children:k>0?`uploading ${k} file${k===1?"":"s"}\u2026`:`${x.length} track${x.length===1?"":"s"} ready`})]}),s("div",{class:"release-side",children:[s("label",{class:"side-field",children:[s("span",{class:"label",children:"Released"}),s("input",{type:"date",value:e.date||"",onInput:b=>r({...e,date:b.target.value||void 0})})]}),s("label",{class:"side-field",children:[s("span",{class:"label",children:["Price ",s(z,{about:"the album's price",children:"What the whole album costs to buy and keep. Leave it empty if it isn't for sale."})]}),s("span",{class:"release-price",children:[s("span",{children:"$"}),s("input",{type:"number",min:"0.5",max:"1000",step:"0.01",placeholder:"\u2014",value:e.sale?.price??"","aria-label":"Price to buy this album, in dollars",onInput:b=>{let P=pn(b.target.value),{sale:v,...A}=e;r(P?{...A,sale:{...e.sale||{},price:P}}:A)}})]})]})]})]}),!x.length&&!k&&s("p",{class:"release-draft",children:"Add a track, then publish."}),s("ul",{class:"tracks",children:[x.map((b,P)=>s("li",{class:"track",children:[s(_s,{track:b,first:P===0,last:P===x.length-1,charging:p,playing:o.current===b.id&&o.playing,onPlay:()=>o.toggle(b),onMove:v=>Ie(P,v),onReplace:v=>he(P,v),onChange:v=>O(x.map((A,I)=>I===P?v:A)),onRemove:()=>{o.stopIf(b.id),O(x.filter((v,A)=>A!==P))},heavy:!!Qe(y[b.url],b.duration),warnOpen:S===b.id,onWarn:()=>$(v=>v===b.id?null:b.id)}),S===b.id&&Qe(y[b.url],b.duration)&&s(ys,{advice:Qe(y[b.url],b.duration),duration:b.duration})]},b.id)),f.map(b=>s("li",{class:"track",children:[s("div",{class:"track-row",children:[s("div",{class:"track-order"}),s("button",{class:"play",disabled:!0,"aria-hidden":"true",children:"\u25B6"}),s("span",{class:"track-title",style:"opacity:.55",children:b.file.name}),s("span",{class:"track-dur",children:"\u2013"})]}),s("div",{class:"track-problem",children:[s("div",{class:"what",children:[s("strong",{children:"This one didn't finish uploading"}),s("p",{children:[b.message," Nothing else was affected, the file is still on your computer."]})]}),s("button",{class:"btn sm dark",onClick:()=>pe(b),children:"Try again"})]})]},b.key))]}),s("input",{ref:D,type:"file",accept:dn,multiple:!0,hidden:!0,onChange:b=>{te(b.target.files),b.target.value=""}}),s("button",{type:"button",class:`dropzone${h?" over":""}`,onClick:()=>D.current.click(),onDragOver:b=>{b.preventDefault(),_(!0)},onDragLeave:()=>_(!1),onDrop:b=>{b.preventDefault(),_(!1),te(b.dataTransfer.files)},children:"+ Add tracks"}),s("div",{class:"release-foot",children:s("button",{class:"link",onClick:i,children:"Delete this release"})})]})}function bs({manifest:e,node:t,update:n,upload:a,art:o,notify:r,player:i,sizeOf:l,charging:d}){let u=(e.releases||[]).reduce((f,c)=>f+(c.tracks?.length||0),0),p=()=>{let f=fn(e);n({...e,releases:[...e.releases||[],{id:hn("release",f),title:"",tracks:[]}]})};return s(L,{children:[s("div",{class:"page-head",children:[s("h1",{children:["Your music",s("span",{class:"count",children:[u," track",u===1?"":"s"," in your storage"]})]}),s("button",{class:"btn sm",onClick:p,children:"+ Add a release"})]}),s("div",{class:"stack",children:[(e.releases||[]).map((f,c)=>s(gs,{release:f,node:t,manifest:e,charging:d,upload:a,art:o,notify:r,player:i,sizeOf:l,onChange:h=>n({...e,releases:e.releases.map((_,k)=>k===c?h:_)}),onRemove:()=>n({...e,releases:e.releases.filter((h,_)=>_!==c)})},f.id)),!e.releases?.length&&s("section",{class:"card nothing",children:[s("h2",{children:["Nothing here yet. ",s(z,{about:"releases",children:"A release is an album, an EP or a single. Make one, add your audio, and publish."})]}),s("button",{class:"btn sm",onClick:p,children:"+ Add a release"})]})]})]})}var Pe=.05,nt=1e4,yn=Math.round(Pe*nt),vs=e=>Math.round(e)/nt,ws=e=>Math.min(Math.max(Math.round((Number(e)||0)*nt),0),yn),_n=[1,5,10],st=5,ks=.01,xs=100;function de(e,t){let n=Math.round(e*t*ue*100)/100;return Math.min(Math.max(n,ks),xs)}function gn(e){let t=(e.ratePerMinute??0)*ue;if(!(t>0)||!(e.settleAt>0))return st;let n=e.settleAt/t;return _n.reduce((a,o)=>Math.abs(Math.log(o/n))<Math.abs(Math.log(a/n))?o:a)}function on(e,t){let n={...e,ratePerMinute:t};return t>0&&(n.settleAt=de(gn(e),t)),n}function Ss({wallet:e,onChange:t,hasAddress:n,subscribing:a}){let o=e.ratePerMinute??.01,r=o*ue;return s("section",{class:"card",children:[s("h2",{children:["Your price ",s(z,{at:"price",about:"your price",children:"Listeners pay by the minute, so a long piece is worth more than a short one."})]}),!n&&(e.ratePerMinute??.01)>0&&s("p",{class:"price-pending",children:"Your price isn't on your page yet, because there's nowhere for the money to go. Add a payment address under Who gets paid and it will publish with it. Until then your music is free to listen to."}),s("div",{class:"price-grid",children:[s("div",{class:"price-set",children:[s("div",{class:"price-now",children:[s("input",{type:"number",class:"price-input",min:"0",max:Pe*100,step:"0.01",value:Number((o*100).toFixed(2)),"aria-label":"Price per minute, in cents",onInput:i=>{let l=Number(i.target.value);if(!Number.isFinite(l))return;let d=Math.min(Math.max(l,0),Pe*100);t(on(e,Math.round(d*100)/1e4))}}),s("span",{class:"unit",children:"\xA2"}),s("span",{children:"a minute"})]}),s("input",{type:"range",min:"0",max:yn,step:"1",value:ws(o),"aria-label":"Price per minute","aria-valuetext":`${ee(o)} a minute`,onInput:i=>t(on(e,vs(Number(i.target.value))))}),s("div",{class:"scale",children:[s("span",{children:"free"}),s("span",{children:ee(Pe)})]})]}),s("div",{class:"price-says",children:[s("b",{children:o===0?a?"Not charged by the minute.":"Free to listen to.":`About ${ee(r)} for a ${ue}-minute song.`}),s("p",{children:o===0?a?"Listeners pay by subscription only. Set a price here to offer both.":"Nobody is charged. You can change this at any time.":`Ten songs comes to about ${ee(r*10)}.`})]})]})]})}var Ce=null,Ze=[{months:12,price:10,label:"Yearly"},{months:6,price:6,label:"Every 6 months"},{months:3,price:3,label:"Every 3 months"}];function $s({manifest:e,update:t,api:n}){let[a,o]=C(null),[r,i]=C(!1),[l,d]=C(""),[u,p]=C(!1),[f,c]=C(!1),[h,_]=C(null),[k,m]=C(()=>Object.fromEntries(Ze.map(x=>[x.months,{on:x.months===12,price:x.price}])));B(()=>{n?.stripeStatus?.().then(o).catch(()=>o({connected:!1}))},[]);let y=(e.payment||[]).find(x=>x.type==="stripe-subscription"),g=x=>{let T=(e.payment||[]).filter(O=>O.type!=="stripe-subscription");t({...e,payment:x?.length?[...T,{type:"stripe-subscription",plans:x.map(({months:O,price:N,currency:F,url:te})=>({months:O,price:N,currency:F,url:te}))}]:T})};async function S(){let x=Ze.filter(T=>k[T.months].on).map(T=>({months:T.months,price:Number(k[T.months].price)}));if(!x.length)return _({bad:!0,text:"Choose at least one plan."});if(x.some(T=>!(T.price>=2)))return _({bad:!0,text:"Each price needs to be at least $2 \u2014 below that, card fees take too much of it."});if((!a?.connected||u)&&!l.trim())return _({bad:!0,text:"Paste your Stripe key first."});c(!0),_(null);try{let T=await n.connectStripe(l.trim(),x);o(T),g(T.plans),d(""),p(!1),i(!1),_({text:T.live?"Connected. Publish your changes to start selling.":"Connected in test mode. Publish, then try it \u2014 steps below."})}catch(T){_({bad:!0,text:T.message})}finally{c(!1)}}async function $(){if(!l.trim())return _({bad:!0,text:"Paste your Stripe key first."});c(!0),_(null);try{await n.stripeSales(l.trim(),[]),o(await n.stripeStatus()),d(""),_({text:"Connected. Put a price on an album or a song, under Music, then publish."})}catch(x){_({bad:!0,text:x.message})}finally{c(!1)}}async function E(){if(window.confirm("Stop selling subscriptions? Nobody new can subscribe. People already subscribed keep listening, and keep being renewed by Stripe, until they cancel \u2014 you can cancel or refund them in Stripe.")){c(!0),_(null);try{await n.disconnectStripe(),o(await n.stripeStatus().catch(()=>({connected:!1}))),g(null),_({text:"Stopped. Publish your changes to take subscriptions off your page."})}catch(x){_({bad:!0,text:x.message})}finally{c(!1)}}}let D=s(L,{children:[s("div",{class:"plans",children:Ze.map(x=>s("label",{class:"plan",children:[s("input",{type:"checkbox",checked:k[x.months].on,onChange:T=>m({...k,[x.months]:{...k[x.months],on:T.target.checked}})}),s("span",{class:"plan-name",children:x.label}),s("span",{class:"plan-price",children:["$",s("input",{type:"number",min:"2",max:"1000",step:"1",value:k[x.months].price,disabled:!k[x.months].on,"aria-label":`${x.label} price in dollars`,onInput:T=>m({...k,[x.months]:{...k[x.months],price:T.target.value}})})]})]},x.months))}),a?.connected&&!u&&s("p",{class:"muted",children:["Using your ",a.live?"live":"test-mode"," key."," ",s("button",{class:"link",onClick:()=>p(!0),children:a.live?"Use a different key":"Switch to a live key"})]}),(!a?.connected||u)&&s(L,{children:[Ce&&s("ol",{class:"stripe-steps",children:[s("li",{children:s("a",{class:"btn sm",href:Ce,target:"_blank",rel:"noopener",children:"Install Amply for Artists \u2197"})}),s("li",{children:["In Stripe, choose ",s("strong",{children:"View API keys"})," and copy the key it made."]}),s("li",{children:"Paste it here."})]}),s(K,{label:u?"Your new Stripe key":"Your Stripe key",hint:s(L,{children:["Kept on your streaming service, never shown again; Amply never sees it. Start with a test key (",s("code",{children:"rk_test_"}),"): nothing real is charged, and you can switch to a live one later.",u&&" Saving replaces your checkout links; people already subscribed stay subscribed."," ","No Stripe account? ",s("a",{href:"https://dashboard.stripe.com/register",target:"_blank",rel:"noopener",children:"Make one \u2197"})]}),children:s("input",{type:"password",value:l,placeholder:"rk_test_\u2026 or rk_live_\u2026",autocomplete:"off",spellcheck:!1,onInput:x=>d(x.target.value)})}),/^pk_/.test(l.trim())&&s("p",{class:"warn",children:["That's the ",s("strong",{children:"publishable key"}),". Copy the ",s("strong",{children:"secret key"})," shown with it, which starts ",s("code",{children:"rk_"})," (Stripe may hide it behind ",s("em",{children:"Reveal"}),")."]}),/^(pk|rk|sk)_live_/.test(l.trim())&&!a?.live&&!u&&s("p",{class:"muted",children:["That's a ",s("strong",{children:"live"})," key: real payments, and Stripe's test card won't work."]}),/^sk_/.test(l.trim())&&s("p",{class:"warn",children:["That's Stripe's ",s("strong",{children:"standard secret key"}),", which can do anything in your account, including paying money out. Please use ",Ce?"the Amply for Artists key":"a key with only the permissions below"," instead."]}),s("details",{class:"where-dns",children:[s("summary",{children:Ce?"Or make the key by hand":"How do I make a key?"}),s("ol",{children:[s("li",{children:["Open ",s("a",{href:u||a?.live===!1?"https://dashboard.stripe.com/apikeys":"https://dashboard.stripe.com/test/apikeys",target:"_blank",rel:"noopener",children:"API keys \u2197"})," and create a restricted key, choosing",s("strong",{children:" Building your own integration"}),"."]}),s("li",{children:["Set exactly these, everything else ",s("em",{children:"None"}),":",s("table",{class:"perms",children:s("tbody",{children:[s("tr",{children:[s("td",{children:"Products"}),s("td",{children:"Write"})]}),s("tr",{children:[s("td",{children:"Payment Links"}),s("td",{children:"Write"})]}),s("tr",{children:[s("td",{children:"Prices"}),s("td",{children:"Write"})]}),s("tr",{children:[s("td",{children:"Customer portal"}),s("td",{children:"Write"})]}),s("tr",{children:[s("td",{children:"Subscriptions"}),s("td",{children:"Read"})]}),s("tr",{children:[s("td",{children:"Checkout Sessions"}),s("td",{children:"Read"})]})]})})]}),s("li",{children:["Create it, copy it (it starts ",s("code",{children:"rk_"}),") and paste it above. Missed a permission? Connecting says which."]})]})]})]}),!a?.connected&&s("p",{class:"muted",children:["Only selling songs and albums?"," ",s("button",{class:"link",disabled:f,onClick:$,children:"Connect for music only"})]}),s("div",{class:"row-actions",children:[s("button",{class:"btn sm",disabled:f,onClick:S,children:f?"Connecting\u2026":a?.connected?"Save plans":"Connect Stripe"}),a?.connected&&s("button",{class:"link",onClick:()=>{i(!1),p(!1)},children:"Cancel"})]})]});return s("section",{class:"card",children:[s("h2",{children:["Subscriptions ",s("span",{class:"note",children:"optional"}),s(z,{at:"subscriptions",about:"subscriptions",children:["Fans pay by card, through your own Stripe account, for a year or for six or three months of everything you charge for. Subscribers aren't charged by the minute and need no crypto wallet. Offer it instead of your per-minute price (set that to free) or alongside it. Stripe pays you directly and takes its usual fee; Amply takes nothing."," ",s("a",{href:"https://amply.stream/stripe",target:"_blank",rel:"noopener",children:"Step-by-step guide \u2197"})]})]}),a===null?s("p",{class:"muted",children:"Checking\u2026"}):a.connected&&!r?s(L,{children:[!a.plans?.length&&s("p",{class:"muted",children:"Connected for selling songs and albums. You can add subscription plans too."}),s("ul",{class:"plain",children:a.plans.map(x=>s("li",{children:[s("strong",{children:["$",x.price]})," ",x.months===12?"a year":`every ${x.months} months`]},x.months))}),!a.live&&s("details",{class:"try-it",children:[s("summary",{children:"Try it with Stripe's test card"}),s("ol",{children:[s("li",{children:"Publish, so the plans are on your page."}),s("li",{children:"Open your page in the Amply app and tap a plan."}),s("li",{children:["Pay with Stripe's test card: ",s("code",{children:"4242 4242 4242 4242"}),", any future date, any three digits."]}),s("li",{children:"You land back in the app, subscribed. Here, under Listeners, you'll see them as a subscriber."})]}),s("p",{class:"muted",children:["Happy with it? ",s("button",{class:"link",onClick:()=>{i(!0),p(!0)},children:"Switch to a live key"})," ","\u2014 Stripe will ask you to finish setting up your account first. ",s("a",{href:"https://amply.stream/stripe#live",target:"_blank",rel:"noopener",children:"How \u2197"})]})]}),s("p",{class:"muted",children:[a.live?"Taking real payments.":"Stripe test mode \u2014 nothing real is charged.",!a.cancellable&&" Your key couldn't set up Stripe's cancellation page; give it Customer portal permission and save again, because subscribers must be able to cancel."]}),!y&&a.plans?.length>0&&s("p",{class:"warn",children:["These aren't on your page yet."," ",s("button",{class:"link",onClick:()=>g(a.plans),children:"Add them"}),", then publish."]}),s("div",{class:"row-actions",children:[s("button",{class:"btn ghost sm",onClick:()=>i(!0),children:"Change plans"}),s("button",{class:"link danger",disabled:f,onClick:E,children:"Stop selling subscriptions"})]})]}):D,a?.winding&&!r&&s("p",{class:"muted",children:"You've stopped selling subscriptions. Your streaming service still follows the people who subscribed before, so their renewals and cancellations count, and lets go of your Stripe key once the last one ends."}),h&&s("p",{class:h.bad?"warn":"muted",role:"status",children:h.text})]})}function As({wallet:e,onChange:t,subscribing:n}){let a=e.ratePerMinute??.01,o=gn(e),r=de(o,a);return s("section",{class:"card",children:[s("h2",{children:["How often listeners pay ",s(z,{at:"batching",about:"how often listeners pay",children:"Each payment goes straight from the listener to you, and Amply never touches it. Their app pays as they listen without asking each time, so this is about the cost of sending money, not interruptions. Anything smaller is paid within a week, the next time they open Amply."})]}),s("div",{class:"choices",children:_n.map(i=>s("button",{class:"choice","aria-pressed":o===i,onClick:()=>t({...e,settleAt:de(i,a)}),children:i===1?"Every song":`Every ${i} songs`},i))}),s("p",{class:"payout-says",children:a===0?n?"You don't charge by the minute, so there's nothing here to pay in batches.":"Your music is free, so listeners never pay.":o===1?`You are paid after each song, about ${ee(r)} each time.`:`You are paid about ${ee(r)} every ${o} songs.`}),s(Es,{wallet:e,onChange:t})]})}function Es({wallet:e,onChange:t}){let n=e.network==="devnet";return s("div",{class:"test-money",children:[s("label",{children:[s("input",{type:"checkbox",checked:n,onChange:a=>{let{network:o,...r}=e;t(a.target.checked?{...r,network:"devnet"}:r)}}),s("span",{children:"Pay me in play money, for testing"})]}),n&&s("p",{class:"warn",children:"Test network: nothing anyone sends you is worth anything, and apps set to real money pay you nothing. Turn this off before you release."})]})}function Cs({onAddress:e}){let t=typeof window<"u"?window.phantom?.solana:null,[n,a]=C(null);if(!t?.isPhantom)return null;async function o(){a(null);try{let{publicKey:r}=await t.connect();e(r.toString()),a("Filled in from Phantom.")}catch{a("Phantom didn't share an address. You can paste it instead.")}}return s("span",{class:"from-phantom",children:[s("button",{type:"button",class:"link",onClick:o,children:"Use my Phantom address"}),n&&s("span",{class:"muted",children:[" ",n]})]})}function Ps({payees:e,rate:t,onChange:n}){let a=e.reduce((d,u)=>d+(Number(u.split)||0),0),o=Math.abs(a-100)<=.01,r=t*ue,i=(d,u)=>n(e.map((p,f)=>f===d?u:p)),l=()=>{let d=Math.floor(100/e.length*100)/100;n(e.map((u,p)=>({...u,split:p===e.length-1?Math.round((100-d*(e.length-1))*100)/100:d})))};return s("section",{class:"card",children:[s("h2",{children:["Who gets paid ",s("span",{class:"note",children:"split every payment"}),s(z,{at:"wallet",about:"who gets paid",children:["Each payment is divided the moment it's made and sent straight to these Solana addresses; it never passes through Amply. No address yet? ",s("strong",{children:"Phantom"})," is free and takes a couple of minutes. Use your own wallet, not an exchange's deposit address."]})]}),s("div",{class:"split-bar",children:e.map((d,u)=>s("i",{style:`width:${Math.max(0,Math.min(100,Number(d.split)||0))}%`},u))}),s("p",{class:`split-sum ${o?"ok":"off"}`,children:[s("b",{children:[Number(a.toFixed(2)),"% of every payment"]}),s("em",{children:o?"adds up, ready to publish":`needs to add up to 100%, ${a>100?"that is too much":"that leaves some unclaimed"}`})]}),e.map((d,u)=>s("div",{class:"payee",children:[s("div",{class:"payee-top",children:[s("span",{class:`swatch${u%2?" two":""}`,"aria-hidden":"true"}),s(V,{value:d.name,placeholder:u===0?"You":"Their name",onInput:p=>i(u,{...d,name:p})}),s("button",{class:"icon",disabled:e.length===1,"aria-label":"Remove this person",onClick:()=>n(e.filter((p,f)=>f!==u)),children:"\xD7"})]}),s("div",{class:"payee-split",children:[s("div",{class:"where",children:[s(K,{label:"Where their share goes",children:s(V,{value:d.address,class:"mono",placeholder:"their payment address",onInput:p=>i(u,{...d,address:p.trim()})})}),u===0&&s(Cs,{onAddress:p=>i(0,{...d,address:p})})]}),s("div",{class:"share",children:s(K,{label:"Their share",children:s("div",{class:"pct",children:[s("input",{type:"number",min:"0",max:"100",step:"0.01",value:d.split,onInput:p=>i(u,{...d,split:Number(p.target.value)})}),s("span",{children:"%"})]})})})]}),r>0&&s("p",{class:"payee-earns",children:[d.name||(u===0?"You":"They")," get about"," ",ee(r*(Number(d.split)||0)/100)," of every ",ee(r)," song."]})]},u)),s("div",{class:"choices",children:[s("button",{class:"btn ghost",onClick:()=>n([...e,{name:"",address:"",split:0}]),children:"+ Add someone"}),e.length>1&&s("button",{class:"btn ghost",onClick:l,children:"Split evenly"})]})]})}function Ts({manifest:e,update:t}){let n=e.artist||{},[a,o]=C(n.domain||""),[r,i]=C(null),l=`${typeof location>"u"?"":location.origin}/manifest.json`,d=Ae(a),u=f=>{o(f),i(null);let c=Ae(f);t({...e,artist:{...n,domain:c||void 0}})};async function p(){if(d){i("looking");try{if(await Wt(d,l))return i("ok");i(await Je(d)?"elsewhere":"missing")}catch{i("error")}}}return s("section",{class:"card",children:[s("h2",{children:["Your own domain ",s("span",{class:"note",children:"recommended"}),s(z,{about:"linking your domain",children:"Listeners can add you by typing your domain, and see it next to your name, which is how they know it's really you. Your website doesn't change."})]}),s(K,{label:"Your website's domain",children:s(V,{value:a,placeholder:"yourname.com",onInput:u})}),d&&s(L,{children:[s("p",{children:["Add this record wherever you manage ",s("strong",{children:d}),":"]}),s("div",{class:"dns-record",children:[s("div",{children:[s("span",{class:"k",children:"Type"}),s("code",{children:"TXT"})]}),s("div",{children:[s("span",{class:"k",children:"Name / Host"}),s("code",{children:"_amply"}),s(Me,{text:"_amply",label:"Copy"})]}),s("div",{children:[s("span",{class:"k",children:"Value"}),s("code",{class:"v",children:Ge(l)}),s(Me,{text:Ge(l),label:"Copy"})]})]}),s("details",{class:"where-dns",children:[s("summary",{children:"Where do I add it?"}),s("ul",{children:[s("li",{children:[s("strong",{children:"Squarespace:"})," Settings \u2192 Domains \u2192 your domain \u2192 DNS \u2192 Add record."]}),s("li",{children:[s("strong",{children:"Wix:"})," Domains \u2192 \u22EF next to your domain \u2192 Manage DNS records \u2192 TXT \u2192 Add record."]}),s("li",{children:[s("strong",{children:"GoDaddy:"})," My Products \u2192 your domain \u2192 DNS \u2192 Add new record."]}),s("li",{children:[s("strong",{children:"Namecheap:"})," Domain List \u2192 Manage \u2192 Advanced DNS \u2192 Add new record."]}),s("li",{children:[s("strong",{children:"Cloudflare:"})," your domain \u2192 DNS \u2192 Records \u2192 Add record. Or, if it's on Cloudflare, you can ",s("a",{href:"https://amply.stream/domain",target:"_blank",rel:"noopener",children:["host your whole page at listen.",d]})," instead."]})]}),s("p",{class:"muted",children:["Some hosts want the name as ",s("code",{children:"_amply"}),", some as",s("code",{children:["_amply.",d]}),". If one is refused, try the other."]})]}),s("div",{class:"dns-check",children:[s("button",{class:"btn ghost sm",disabled:r==="looking",onClick:p,children:r==="looking"?"Checking\u2026":"Check it's working"}),s("span",{class:`dns-said ${r==="ok"?"ok":""}`,role:"status",children:[r==="ok"&&`Linked. Listeners can add you as ${d}.`,r==="missing"&&"Not found yet. New records can take up to an hour to appear \u2014 publish, then check again later.",r==="elsewhere"&&`${d} has an Amply record, but it points somewhere else. Check the value matches exactly.`,r==="error"&&"Couldn't check just now. Try again in a minute."]})]}),s("p",{class:"muted",children:"Publish your changes too, so your page says which domain is yours."})]})]})}function Ms({manifest:e,payees:t,setPayees:n,update:a,art:o,everPublished:r,dirty:i,saving:l,onPublish:d,api:u,onSignOut:p}){let f=e.artist||{},c=(e.payment||[]).find(y=>y.type==="solana-usdc")||{type:"solana-usdc",ratePerMinute:.01,settleAt:de(st,.01)},h=f.links||[],_=y=>a({...e,artist:{...f,...y}}),k=y=>{let g=(e.payment||[]).filter(S=>S.type!=="solana-usdc");a({...e,payment:[y,...g]})},m=y=>_({links:y.length?y:void 0});return s(L,{children:[s("div",{class:"page-head",children:s("h1",{children:"Settings"})}),s("div",{class:"stack",children:[s("section",{class:"card profile",children:[s(tt,{cls:"banner-art",url:f.banner,alt:"",onPick:y=>o(y,g=>_({banner:g}),1800),children:"+ Banner"}),s("div",{class:"avatar-wrap",children:s(tt,{cls:"avatar",url:f.image,alt:"",onPick:y=>o(y,g=>_({image:g})),children:["your",s("br",{}),"photo"]})}),s("div",{class:"profile-fields",children:[s(K,{label:"Your name",children:s(V,{value:f.name,placeholder:"The name you release under",onInput:y=>_({name:y})})}),s(K,{label:"A line about you",children:s("textarea",{value:f.bio||"",placeholder:"Where you're from, what this is. Two sentences is plenty.",onInput:y=>_({bio:y.target.value||void 0})})}),s("span",{class:"field-label",children:"Links"}),h.map((y,g)=>s("div",{class:"link-row",children:[s("div",{class:"what",children:s(V,{value:y.label,placeholder:"What it is",onInput:S=>m(h.map(($,E)=>E===g?{...$,label:S}:$))})}),s("div",{class:"where",children:s(V,{value:y.url,placeholder:"Paste the address",onInput:S=>m(h.map(($,E)=>E===g?{...$,url:S.trim()}:$))})}),s("button",{class:"icon","aria-label":"Remove this link",onClick:()=>m(h.filter((S,$)=>$!==g)),children:"\xD7"})]},g)),s("button",{class:"btn ghost",onClick:()=>m([...h,{label:"",url:""}]),children:"+ Add a link"}),s(K,{label:"Contact for listeners' data",hint:s(L,{children:["An email address or a web page, shown on your"," ",s("a",{href:"/privacy",target:"_blank",rel:"noopener",children:"privacy page"}),". If you charge, you hold a record of who listens, and they must be able to reach you about it."," ",s("a",{href:"https://amply.stream/why#gdpr",target:"_blank",rel:"noopener",children:"Read more \u2197"})]}),children:s(V,{value:f.contact,placeholder:"you@example.com",onInput:y=>_({contact:y.trim()||void 0})})}),s("label",{class:"checkbox",children:[s("input",{type:"checkbox",checked:!!e.content?.explicit,onChange:y=>a({...e,content:{explicit:y.target.checked}})}),s("span",{children:"My music contains explicit content"})]})]})]}),s(Ts,{manifest:e,update:a}),s(Ss,{wallet:c,onChange:k,hasAddress:t.some(y=>y.address),subscribing:(e.payment||[]).some(y=>y.type==="stripe-subscription")}),s($s,{manifest:e,update:a,api:u}),s(As,{wallet:c,onChange:k,subscribing:(e.payment||[]).some(y=>y.type==="stripe-subscription")}),s(Ps,{payees:t,rate:c.ratePerMinute??0,onChange:n}),s("section",{class:"card",children:[s("h2",{children:["Your terms ",s(z,{at:"free",about:"your terms",children:["What you allow others to do with your recordings: your licence. The recommended one lets anyone listen with any player, free, which is what makes your link work, and withholds ",s("strong",{children:"rebuilding a service"})," out of your music: rehosting it, listing it in a catalogue, serving it to an audience. Amply isn't a party to it; only you can enforce it."," ",s("a",{href:"https://amply.stream/protect",target:"_blank",rel:"noopener",children:"If someone reposts your music \u2197"})]})]}),s(K,{label:"Licence",children:s("select",{value:e.licence?.type||"none",onChange:y=>a({...e,licence:y.target.value==="none"?void 0:{type:y.target.value}}),children:[s("option",{value:"amply-personal-1",children:"Listen freely, no redistribution (recommended)"}),s("option",{value:"custom",children:"My own terms"}),s("option",{value:"none",children:"Don't state any terms"})]})}),e.licence?.type==="custom"&&s(K,{label:"Where your terms are published",children:s(V,{value:e.licence.url,placeholder:"https://",onInput:y=>a({...e,licence:{...e.licence,url:y.trim()}})})})]}),s("section",{class:"card publish-card",children:[s("div",{children:[s("h2",{children:r?i?"You have changes that aren't live":"Everything here is live":"Nothing is on your page yet"}),s("p",{class:"muted",children:"Changes stay here until you publish."})]}),s("button",{class:"btn",disabled:!i||l,onClick:d,children:l?"Publishing\u2026":"Publish changes"})]}),p&&s("div",{class:"sign-out",children:s("button",{class:"btn ghost",onClick:p,children:"Sign out"})})]})]})}var Ns="amply.payments.v1";function Is(e,t){let n=t==="devnet"?"devnet":"mainnet",a=(e||[]).map(d=>d.address).filter(Boolean),o=`${Ns}.${a.join(",")}`,[r,i]=C(()=>{try{return{...JSON.parse(localStorage.getItem(o)),busy:!1}}catch{return{busy:!1}}});async function l(d=n){if(a.length){i(u=>({...u,busy:!0,error:null}));try{let{paymentsTo:u}=await Promise.resolve().then(()=>(sn(),nn)),p={},f=0;for(let h of a){let _=await u(h,d);f+=_.total;for(let[k,m]of Object.entries(_.byWallet)){let y=p[k]||{micros:0,payments:0,last:0};p[k]={micros:y.micros+m.micros,payments:Math.max(y.payments,m.payments),last:Math.max(y.last,m.last)}}}let c={byWallet:p,total:f,at:Date.now(),network:d};try{localStorage.setItem(o,JSON.stringify(c))}catch{}i({...c,busy:!1})}catch(u){i(p=>({...p,busy:!1,error:u.message}))}}}return B(()=>{a.length&&!(r.at>Date.now()-5*6e4)&&l()},[o]),{...r,network:n,look:()=>l(),addresses:a}}var et=e=>`$${(e/1e6).toFixed(e<1e6?4:2)}`;function Ls(e,t,n){let a=(Number(n)>0?Number(n):1)*1e6;return e-t>a*1.5}var Os=864e5;function Rs(e,t,n,a=Date.now()){let o=e-t,r=Math.max(5e3,e*.1);return o>r&&a-Number(n)>8*Os}function Us(e,t){let n=a=>a.overdue?2:a.short?1:0;return n(t)-n(e)}function Ds({api:e,payees:t,rate:n,network:a,settleAt:o}){let[r,i]=C(null),[l,d]=C(null),[u,p]=C(null),f=()=>e.listeners().then(i).catch(m=>d(m.message));B(()=>{f()},[]);let c=Is(t,a);function h(m){let y={controller:location.host,wallet:m.pubkey,held:{plays:m.plays,seconds:m.seconds,firstSeen:m.first_seen?new Date(m.first_seen).toISOString():null,lastSeen:m.last_seen?new Date(m.last_seen).toISOString():null,servingStopped:!!m.blocked},notHeld:"Which tracks were played, and when. This server never records that.",keptFor:"A year after the wallet was last heard from, then deleted automatically.",exported:new Date().toISOString()},g=new Blob([JSON.stringify(y,null,2)],{type:"application/json"}),S=document.createElement("a");S.href=URL.createObjectURL(g),S.download=`listener-${m.pubkey.slice(0,8)}.json`,document.body.appendChild(S),S.click(),S.remove(),setTimeout(()=>URL.revokeObjectURL(S.href),1e3)}async function _(m){let y=m.blocked?" It is barred now, and deleting lifts the bar too.":"";if(window.confirm(`Delete everything held about ${m.pubkey.slice(0,6)}\u2026${m.pubkey.slice(-4)}?${y} This can't be undone.`)){p(m.pubkey);try{await e.removeListener(m.pubkey),i(g=>g.filter(S=>S.pubkey!==m.pubkey))}catch(g){d(g.message)}finally{p(null)}}}async function k(m,y){p(m.pubkey);try{await e.setBlocked(m.pubkey,y),i(g=>g.map(S=>S.pubkey===m.pubkey?{...S,blocked:y?1:0}:S))}catch(g){d(g.message)}finally{p(null)}}return l?s(Ne,{kind:"error",children:l}):r?r.length?s("section",{class:"card",children:[s("h2",{children:["Your listeners ",s("span",{class:"note",children:r.length}),s(z,{at:"banning",about:"your listeners",children:["One line per wallet: how much they listened, never what or when.",s("strong",{children:" Paid"})," is read from the chain in this browser; a figure in red owes more than one payment's worth. ",s("strong",{children:"Overdue"})," means listening more than a week old is unpaid, often just because they haven't opened Amply since. ",s("strong",{children:"Stop serving"})," takes your paid tracks away within half an hour. If someone asks what you hold about them, or to delete it, use ",s("strong",{children:"Export"})," or",s("strong",{children:" Delete"}),". Records go a year after a wallet was last heard from."]})]}),s("div",{class:"reconcile",children:[s("span",{class:"muted",children:c.addresses.length?c.busy?"Reading payments from the chain\u2026":c.error?c.error:c.at?`Payments read ${new Date(c.at).toLocaleTimeString()}. ${et(c.total||0)} in total.`:"Payments not read yet.":"Add a payment address in Settings and this will show who has paid."}),s("span",{class:"reconcile-do",children:[c.network==="devnet"&&s("span",{class:"note",children:"play money"}),s("button",{class:`icon refresh${c.busy?" turning":""}`,disabled:c.busy||!c.addresses.length,onClick:c.look,"aria-label":"Read payments again",title:"Read payments again",children:s("svg",{width:"18",height:"18",viewBox:"0 0 24 24",fill:"none",stroke:"currentColor","stroke-width":"2","stroke-linecap":"round","stroke-linejoin":"round","aria-hidden":"true",children:[s("path",{d:"M20 12a8 8 0 1 1-2.34-5.66"}),s("path",{d:"M20 4v5h-5"})]})})]})]}),s("table",{class:"listeners",children:[s("thead",{children:s("tr",{children:[s("th",{children:"Wallet"}),s("th",{children:"Plays"}),s("th",{children:"Listened"}),s("th",{children:"Paid"}),s("th",{children:"Last heard"}),s("th",{})]})}),s("tbody",{children:r.map(m=>{let y=(c.byWallet||{})[m.pubkey],g=n>0?(m.seconds||0)/60*n*1e6:0,S=m.subscribed_until&&m.subscribed_until>Date.now(),$=!S&&c.at,E=$&&Ls(g,y?.micros||0,o),D=$&&Rs(g,y?.micros||0,m.last_seen);return{r:m,got:y,owed:g,subscribed:S,short:E,overdue:D}}).sort(Us).map(({r:m,got:y,owed:g,subscribed:S,short:$,overdue:E})=>s("tr",{class:`${m.blocked?"blocked":""}${E?" late":""}`,children:[s("td",{class:"mono","data-k":"Wallet",title:m.pubkey,children:[m.pubkey.slice(0,6),"\u2026",m.pubkey.slice(-4)]}),s("td",{"data-k":"Plays",children:m.plays}),s("td",{"data-k":"Listened",children:[Math.round((m.seconds||0)/60)," min"]}),s("td",{"data-k":"Paid",class:$?"short":"",title:y?.payments?`${y.payments} payments, last ${new Date(y.last).toLocaleDateString()}`:"",children:[S?`subscriber to ${new Date(m.subscribed_until).toLocaleDateString()}`:c.at?y?et(y.micros):"nothing":"\u2014",E&&s("span",{class:"overdue",title:"Owes for listening more than a week old. Their app pays the next time it's opened.",children:["overdue \xB7 owes ",et(Math.max(0,g-(y?.micros||0)))]})]}),s("td",{"data-k":"Last heard",children:new Date(m.last_seen).toLocaleDateString()}),s("td",{class:"row-do",children:[s("button",{class:"link",disabled:u===m.pubkey,onClick:()=>k(m,!m.blocked),children:m.blocked?"Serve again":"Stop serving"}),s("button",{class:"link quiet",onClick:()=>h(m),title:"Everything held about this wallet, as a file you can send them",children:"Export"}),s("button",{class:"link quiet danger",disabled:u===m.pubkey,onClick:()=>_(m),title:"Delete this wallet's record entirely",children:"Delete"})]})]},m.pubkey))})]})]}):s("section",{class:"card nothing",children:s("h2",{children:["No listeners yet. ",s(z,{at:"free",about:"listeners",children:"Every wallet that plays your paid tracks appears here, next to what it has paid you, and you can stop serving anyone who hasn't. Tracks you've made free play for anyone and are never counted."})]})}):s("p",{class:"muted",children:"Looking\u2026"})}function js({node:e,published:t,api:n,payees:a,rate:o,network:r,settleAt:i}){return s(L,{children:[s("div",{class:"page-head",children:s("h1",{children:"Earnings"})}),s("div",{class:"stack",children:[s(Ds,{api:n,payees:a,rate:o,network:r,settleAt:i}),s("section",{class:"card nothing",children:[s("h2",{children:"Getting started"}),s("ol",{class:"steps",children:[s("li",{children:[s("span",{class:"n",children:"1"}),s("span",{class:"t",children:"Your music is up and published"}),s("span",{class:"s",children:t?"done":"not yet"})]}),s("li",{children:[s("span",{class:"n",children:"2"}),s("span",{class:"t",children:"Send your link to people who already listen"}),s("span",{class:"s",children:"up to you"})]})]}),s("div",{class:"copy-row",children:[s(Me,{text:e.url,label:"Copy your link",className:"btn sm"}),s("code",{children:e.url.replace(/^https:\/\//,"")})]})]})]})]})}function Ws(){let e=se(null),[t,n]=C(null),[a,o]=C(!1),[r,i]=C(0),[l,d]=C(0);B(()=>{let f=new Audio;f.preload="none",e.current=f;let c=()=>{i(f.currentTime),d(f.duration||0)};return f.addEventListener("timeupdate",c),f.addEventListener("loadedmetadata",c),f.addEventListener("ended",()=>{o(!1),i(0)}),f.addEventListener("pause",()=>o(!1)),f.addEventListener("play",()=>o(!0)),()=>{f.pause(),f.src=""}},[]);let u=f=>{let c=e.current;if(!(!c||!f.url)){if(t?.id===f.id){c.paused?c.play().catch(()=>{}):c.pause();return}c.src=f.url,n(f),i(0),c.play().catch(()=>{})}},p=()=>{e.current?.pause(),n(null)};return{current:t?.id??null,track:t,playing:a,at:r,of:l,toggle:u,stop:p,stopIf:f=>{t?.id===f&&p()}}}function Fs({player:e}){if(!e.track)return null;let t=e.of?e.at/e.of*100:0;return s("div",{class:"player",children:[s("div",{class:"player-track",children:s("i",{style:`width:${t}%`})}),s("div",{class:"player-in",children:[s("button",{class:`play${e.playing?" on":""}`,onClick:()=>e.toggle(e.track),"aria-label":e.playing?"Pause":"Play",children:e.playing?"\u275A\u275A":"\u25B6"}),s("div",{class:"what",children:[s("b",{children:e.track.title||"Untitled"}),s("span",{children:"only you can hear this, it is not a listen anyone paid for"})]}),s("span",{class:"time",children:[Te(e.at)," / ",Te(e.of||e.track.duration)]}),s("button",{class:"close",onClick:e.stop,"aria-label":"Close the player",children:"\xD7"})]})]})}function Hs(e){let t=(e.payment||[]).find(n=>n.type==="solana-usdc");return t?.recipients?.length?t.recipients.map(n=>({name:n.name||"",address:n.address||"",split:n.split})):[{name:e.artist?.name||"",address:t?.address||"",split:100}]}function Bs(e,t){let n=t.filter(i=>i.address),{address:a,recipients:o,...r}=e;return n.length===0||!(Number(e.ratePerMinute)>0)?null:n.length===1?{...r,address:n[0].address}:{...r,recipients:n.map(i=>({...i.name?{name:i.name}:{},address:i.address,split:Number(i.split)||0}))}}function zs(e,t){let n=0,a=(o,r)=>{if(o===r)return;if(!(o&&r&&typeof o=="object"&&typeof r=="object")||Array.isArray(o)!==Array.isArray(r)){n++;return}if(Array.isArray(o)){n+=Math.abs(o.length-r.length);for(let l=0;l<Math.min(o.length,r.length);l++)a(o[l],r[l]);return}for(let l of new Set([...Object.keys(o),...Object.keys(r)]))l!=="updated"&&a(o[l],r[l])};return a(e,t),n}function ln(e,t){let n=(e.payment||[]).filter(r=>r.type!=="solana-usdc"),a=(e.payment||[]).find(r=>r.type==="solana-usdc")||{type:"solana-usdc",ratePerMinute:.01,settleAt:de(st,.01)},o=Bs(a,t);return{...e,amply:1,updated:new Date().toISOString(),payment:o?[o,...n]:n,releases:(e.releases||[]).filter(r=>r.tracks?.length)}}function qs(e,t){let[n,a=""]=e.split(/: (.*)/s),o=n.match(/^releases\[(\d+)\]/),r=o?t.releases?.[Number(o[1])]:null,i=r?.title?`\u201C${r.title}\u201D`:`release ${o?Number(o[1])+1:""}`.trim(),l=n.match(/tracks\[(\d+)\]/),d=l&&r?r.tracks?.[Number(l[1])]:null,u=d?.title?`\u201C${d.title}\u201D`:`track ${l?Number(l[1])+1:""}`.trim();return/^releases\[\d+\]\.title$/.test(n)?`A release needs a name. Give ${i} a title.`:/tracks\[\d+\]\.title$/.test(n)?`Every track needs a name. ${u} on ${i} has none.`:/tracks\[\d+\]\.duration$/.test(n)?`The length of ${u} on ${i} could not be read. Try Replace audio with the same file.`:/tracks\[\d+\]\.sale\.price$/.test(n)?`${u} on ${i} needs a price from $0.50 to $1000 to sell, or choose Stop selling.`:/^releases\[\d+\]\.sale\.price$/.test(n)?`The price of ${i} needs to be from $0.50 to $1000, or empty if it isn't for sale.`:/^artist\.name$/.test(n)?"Add the name you release under, in Settings.":/^artist\.links\[(\d+)\]\.url$/.test(n)?`Link ${Number(n.match(/links\[(\d+)\]/)[1])+1} in Settings needs a full address, starting with https://`:/^artist\.links\[(\d+)\]\.label$/.test(n)?`Link ${Number(n.match(/links\[(\d+)\]/)[1])+1} in Settings needs a label, like Bandcamp or Instagram.`:/address$/.test(n)?"A payment address in Settings doesn't look right. It should be a Solana address: 32 to 44 letters and numbers.":/recipients$/.test(n)&&/total/.test(a)?`The shares in Settings ${a.replace(/^splits must total 100%, got /,"add up to ").replace(/$/,", not 100%")}.`:/^licence\.url$/.test(n)?"Your own terms need the address where they are published, in Settings.":`Something isn't valid yet: ${e}`}function Ys(e){let[t,n]=C(null);return B(()=>{if(!e)return;let a=!1;return fetch("https://amply.stream/node-version.json",{cache:"no-store"}).then(o=>o.ok?o.json():null).then(o=>{!a&&o?.version&&n(o.version)}).catch(()=>{}),()=>{a=!0}},[e]),t&&t!==e?t:null}function Vs(e,t){if(!e||!t)return!1;let n=String(e).split(".").map(Number),a=String(t).split(".").map(Number);for(let o=0;o<Math.max(n.length,a.length);o++){let r=n[o]||0,i=a[o]||0;if(r!==i)return r>i}return!1}function bn({api:e,node:t,initial:n,published:a=!0,initialTab:o="music",version:r=null,onSignOut:i}){let[l,d]=C(n),[u,p]=C(()=>Hs(n)),[f,c]=C(()=>a?n:null),[h,_]=C(!1),[k,m]=C(o),[y,g]=C(null),S=Ws(),$=Ys(r),E=ae(()=>ln(l,u),[l,u]),D=ae(()=>jt(E),[E]),x=((f||l).payment||[]).find(v=>v.type==="solana-usdc"),T=ae(()=>f?zs(f,E):0,[f,E]),O=f===null||T>0,N=(v,A,I=null)=>g({kind:v,text:A,action:I}),F=ze(v=>d(v),[]);B(()=>{if(!O)return;let v=A=>{A.preventDefault(),A.returnValue=""};return window.addEventListener("beforeunload",v),()=>window.removeEventListener("beforeunload",v)},[O]);let te=(v,A)=>e.putObject(v,A),pe=ze(async(v,A,I=1200)=>{let R=await Kt(v,I);if(R.size>rn){N("error",`That picture is larger than ${Math.round(rn/1048576)}MB. A smaller one will load faster for everyone anyway.`);return}try{let Q=`art/${vn(R.name)}`;await e.putObject(Q,R),A(`${t.url}/${Q}`),R!==v&&N("ok",`Resized for faster loading \xB7 ${un(v.size)} \u2192 ${un(R.size)}`,{label:"Use original",run:async()=>{try{await e.putObject(Q,v),N("ok","Using the original picture.")}catch(X){N("error",`Could not upload the original: ${X.message}`)}}})}catch(Q){N("error",`Could not upload that picture: ${Q.message}`)}},[e,t.url]);async function he(){let v=ln(l,u),A=hs(v),I=e?.stripeStatus?await e.stripeStatus().catch(()=>null):null,R={};if(I?.connected&&(A.length||I.sales?.length)){_(!0);try{let q=await e.stripeSales("",A);R=Object.fromEntries((q.sales||[]).map(fe=>[fe.item,fe.url]))}catch(q){_(!1),N("error",`Nothing was published. Setting up your sales in Stripe didn't work: ${q.message}`);return}_(!1)}v=fs(v,R);let Q=(v.payment||[]).some(q=>q.type==="solana-usdc");if(A.length&&!Q&&!Object.keys(R).length){m("settings"),N("error","Nothing was published. To sell songs and albums, connect Stripe (for cards) or add a payment address (for USDC), in Settings.");return}let{errors:X}=Dt(v);if(X.length){let q=X[0];/^(artist|payment|licence)/.test(q)?m("settings"):m("music");let fe=X.length>1?` (and ${X.length-1} more thing${X.length>2?"s":""} to fix)`:"";N("error",`Nothing was published. ${qs(q,v)}${fe}`);return}_(!0);try{await e.writeManifest(v),c(v),N("ok","Published. Your page will show the change within a few minutes.")}catch(q){N("error",q.message)}finally{_(!1)}}let Ie=!!f&&(f.releases||[]).some(v=>v.tracks?.length),b=[["music","Music"],["settings","Settings"],["earnings","Earnings"]],P=s(L,{children:[s(Me,{text:`${t.url}/`,label:"Copy your link"}),s("a",{class:"quiet-link",href:t.url,target:"_blank",rel:"noopener",children:"Your page \u2197"})]});return s(L,{children:[s("header",{class:"top",children:[s("div",{class:"top-in",children:[s("span",{class:"top-mark",children:[s("span",{class:"mark",children:[s("svg",{viewBox:"0 0 24 24",fill:"currentColor","aria-hidden":"true",children:[s("rect",{x:"7.93",y:"1.2",width:"1.01",height:"17.99",rx:"0.51"}),s("rect",{x:"7.93",y:"18.18",width:"1.01",height:"1.01"}),s("rect",{x:"10.44",y:"2.42",width:"1.01",height:"9.22",rx:"0.51"}),s("rect",{x:"12.59",y:"4.12",width:"1.08",height:"6.7",rx:"0.54"}),s("rect",{x:"15.71",y:"0.35",width:"0.89",height:"12.06",rx:"0.45"}),s("rect",{x:"17.82",y:"2.4",width:"1.13",height:"8.45",rx:"0.56"}),s("rect",{x:"20.94",y:"1.18",width:"1.03",height:"10.57",rx:"0.52"}),s("rect",{x:"22.96",y:"4.91",width:"1.03",height:"13.72",rx:"0.52"}),s("rect",{x:"22.96",y:"17.6",width:"1.03",height:"1.03"}),s("circle",{cx:"4.47",cy:"19.19",r:"4.47"}),s("circle",{cx:"19.49",cy:"18.63",r:"4.5"})]}),"amply"]}),s("span",{class:"where",children:"your workspace"})]}),s("div",{class:"top-right",children:[s("span",{class:`state${O?"":" clean"}`,children:[s("span",{class:"dot","aria-hidden":"true"}),s("span",{class:"long",children:f===null?"Nothing published yet":O?`${T} change${T===1?"":"s"} not live yet`:"Everything is live"}),s("span",{class:"short",children:f===null?"Not live":O?`${T} not live`:"Live"})]}),s("button",{class:"btn sm publish",disabled:!O||h,onClick:he,children:[s("span",{class:"long",children:h?"Publishing\u2026":"Publish changes"}),s("span",{class:"short",children:h?"\u2026":"Publish"})]})]})]}),s("nav",{class:"tabs-in","aria-label":"Sections",children:[s("div",{class:"tablist",role:"tablist",children:b.map(([v,A])=>s("button",{class:"tab",role:"tab","aria-selected":k===v,onClick:()=>m(v),children:A},v))}),s("div",{class:"tabs-right",children:P})]})]}),s("main",{class:"page",children:[s("div",{class:"page-links",children:P}),s(Ne,{kind:y?.kind,action:y?.action,onDismiss:()=>g(null),children:y?.text}),Vs($,r)&&s("div",{class:"banner update",role:"status",children:[s("span",{children:["There's a newer version of Amply (",$,"; you have ",r,"). Updates aren't automatic, because nobody at Amply can reach your streaming service."]}),s("a",{class:"link",href:"https://amply.stream/repair",target:"_blank",rel:"noopener",children:"Update mine"})]}),k==="music"&&s(bs,{manifest:l,node:t,update:F,upload:te,art:pe,notify:N,player:S,sizeOf:e.sizeOf,charging:D}),k==="settings"&&s(Ms,{manifest:l,payees:u,setPayees:p,update:F,art:pe,everPublished:f!==null,api:e,dirty:O,saving:h,onPublish:he,onSignOut:i}),k==="earnings"&&s(js,{node:t,published:Ie,api:e,payees:u,rate:x?.ratePerMinute??0,network:x?.network||"solana",settleAt:x?.settleAt??1})]}),s(Fs,{player:S})]})}function cn(e){return new Promise((t,n)=>{let a=URL.createObjectURL(e),o=new Audio,r=(i,l)=>{URL.revokeObjectURL(a),i(l)};o.addEventListener("loadedmetadata",()=>{let i=Math.round(o.duration);!Number.isFinite(i)||i<=0?r(n,new Error("Its length could not be read.")):r(t,i)}),o.addEventListener("error",()=>r(n,new Error("It could not be read as audio."))),o.src=a})}var un=e=>e>=1048576?`${(e/1048576).toFixed(1)} MB`:`${Math.max(1,Math.round(e/1024))} KB`;function vn(e){let t=e.lastIndexOf("."),n=t>0?e.slice(t+1).toLowerCase().replace(/[^a-z0-9]/g,""):"bin";return`${(t>0?e.slice(0,t):e).toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,60)||"track"}-${Date.now().toString(36)}.${n}`}function wn(){let e=location.origin;async function t(n,a,{body:o,headers:r}={}){let i=await fetch(`${e}/manage${a}`,{method:n,headers:r,body:o,credentials:"same-origin"});if(i.status===401)throw new Error("Your sign-in expired. Reload the page to sign in again.");if(!i.ok){let l=await i.text().catch(()=>""),d=l;try{d=JSON.parse(l)?.error||l}catch{}throw new Error(String(d).slice(0,300)||`Your streaming service returned ${i.status}.`)}return i}return{async whoami(){return(await t("GET","/whoami")).json()},async readManifest(){let n=await fetch(`${e}/manifest.json`,{cache:"no-store"});return n.ok?n.json().catch(()=>null):null},async writeManifest(n){await t("PUT","/manifest",{headers:{"Content-Type":"application/json"},body:JSON.stringify(n,null,2)})},async putObject(n,a){await t("PUT",`/${n}`,{headers:{"Content-Type":a.type||"application/octet-stream"},body:a})},async sizeOf(n){let a=await fetch(n,{method:"HEAD",credentials:"same-origin"});return a.ok&&Number(a.headers.get("Content-Length"))||null},async listeners(){return(await t("GET","/listeners")).json()},async setBlocked(n,a){await t("POST","/block",{headers:{"Content-Type":"application/json"},body:JSON.stringify({pubkey:n,blocked:a})})},async stripeStatus(){return(await t("GET","/stripe")).json()},async connectStripe(n,a){return(await t("POST","/stripe/connect",{headers:{"Content-Type":"application/json"},body:JSON.stringify({key:n||void 0,plans:a})})).json()},async stripeSales(n,a){return(await t("POST","/stripe/sales",{headers:{"Content-Type":"application/json"},body:JSON.stringify({key:n||void 0,items:a})})).json()},async disconnectStripe(){await t("POST","/stripe/disconnect",{headers:{"Content-Type":"application/json"},body:"{}"})},async removeListener(n){await t("POST","/remove",{headers:{"Content-Type":"application/json"},body:JSON.stringify({pubkey:n})})},async deleteObject(n){await t("DELETE",`/${n}`)}}}var at=wn();function Xs(){let[e,t]=C({phase:"loading"});return B(()=>{(async()=>{try{let[n,a]=await Promise.all([at.whoami(),at.readManifest()]);t({phase:"ready",who:n,published:a!==null,manifest:a||{amply:1,updated:new Date().toISOString(),artist:{name:location.host.split(".")[0]},content:{explicit:!1},payment:[],releases:[]}})}catch(n){t({phase:"error",error:n.message})}})()},[]),e.phase==="loading"?s("p",{class:"lead",children:"Loading your music\u2026"}):e.phase==="error"?s("section",{class:"card",children:[s("h1",{children:"Couldn't load"}),s(Ne,{kind:"error",children:e.error}),s("p",{class:"muted",children:["If this keeps happening, your streaming service may need setting up again at"," ",s("a",{href:"https://amply.stream/start",children:"amply.stream/start"}),"."]})]}):s(bn,{api:at,node:{slug:location.host.split(".")[0],url:e.who?.home||location.origin},initial:e.manifest,published:e.published,version:e.who?.version||null,onSignOut:()=>location.assign("/cdn-cgi/access/logout")})}vt(s(Xs,{}),document.getElementById("app"));
 
 </script>
 </body>

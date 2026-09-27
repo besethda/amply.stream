@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Amply Personal Listening Licence 1.0 - Amply</title>
+<meta name="description" content="The standard terms an artist can grant for their own recordings: listen freely with any player, no redistribution.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<style>
+  .licence { padding-top: clamp(40px, 5vw, 72px); }
+  .licence h1 { font-size: clamp(34px, 4.6vw, 56px); line-height: 1.02; margin-bottom: 26px; }
+  .licence h2 { font-size: clamp(22px, 2.2vw, 28px); letter-spacing: -0.025em; margin: 44px 0 14px; }
+  .licence p, .licence li { font-size: 18px; max-width: 40em; }
+  .licence ol { padding-left: 1.3em; margin: 0 0 18px; color: var(--ink2); }
+  .licence li { margin-bottom: 10px; }
+  .licence hr { border: 0; border-top: 1px solid var(--line); margin: 36px 0; }
+  .licence code { font-family: var(--mono); font-size: 0.88em; background: var(--bg2); padding: 1px 6px; border-radius: 6px; }
+  .licence pre { background: var(--bg2); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; overflow-x: auto; }
+  .licence pre code { background: none; padding: 0; font-size: 15px; }
+  .source { font-family: var(--mono); font-size: 14px; color: var(--ink3); margin-top: 44px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-in">
+    <a class="mark" href="/"><img src="/amply.svg" alt="" width="26" height="26">amply</a>
+    <div class="topbar-actions"><a class="btn sm" href="/start">Set up my streaming service</a></div>
+  </div>
+</div>
+<main>
+<section class="licence">
+<div class="col narrow">
+<h1>Amply Personal Listening Licence 1.0</h1>
+<p><strong>Identifier:</strong> <code>amply-personal-1</code></p>
+<p>This is a licence <strong>an artist grants</strong>, covering their own recordings. Amply is not a party to it, cannot enforce it, and gains nothing under it. It is published here for the same reason Creative Commons publishes licence texts: so that a short, shared, unambiguous set of terms exists and each artist does not have to write their own.</p>
+<hr>
+<h2>What the artist permits</h2>
+<p><strong>Listening.</strong> Anyone may stream or download these recordings to listen to them personally, using any software they choose. No payment is required to listen.</p>
+<p><strong>Using any player.</strong> Any client may fetch this manifest and play these recordings for the person operating it. Clients that meter listening are expected to honour the rate and payment destination declared in the manifest, and to send payment to the artist — but a client that does not meter is still permitted to play, for personal listening.</p>
+<p><strong>Linking and sharing.</strong> Anyone may link to, share, embed or quote the address of this manifest or of any page the artist publishes.</p>
+<h2>What the artist does not permit</h2>
+<p>The following require the artist's separate, express permission. Without it, they are infringements of the artist's copyright in the sound recording:</p>
+<ol><li><strong>Redistributing the recordings.</strong> Hosting, mirroring or serving copies to other people.</li><li><strong>Including them in a catalogue, library, directory or index</strong> presented to other people, whether or not the audio is served from the artist's own infrastructure.</li><li><strong>Operating a service</strong> that provides access to these recordings for others — including any service supported by advertising, subscription or any other revenue.</li><li><strong>Transmitting them to the public</strong> by any means, including broadcast, public performance and inclusion in a stream reaching more than the operator of the client.</li><li><strong>Training machine learning models</strong> on the recordings.</li></ol>
+<h2>Why item 2 is worded that way</h2>
+<p>A service can present an artist's work to the public while the bytes still come from the artist's own server. That is still building an audience on someone else's recordings without permission, and it still imposes the running costs on the artist. Whether the audio passes through the operator's infrastructure makes no difference to what is being done.</p>
+<h2>No warranty, and no agency</h2>
+<p>The artist provides these recordings as-is. Amply publishes this text and nothing more: it does not host the recordings, does not enforce these terms, has no standing to enforce them, and receives nothing under them. Only the artist can act on a breach.</p>
+<h2>Scope</h2>
+<p>This licence covers the <strong>sound recordings</strong> listed in the manifest that references it. It says nothing about the underlying musical works, which may be administered separately — for example by a performing rights organisation the artist belongs to.</p>
+<h2>Using it</h2>
+<p>Reference it from a manifest:</p>
+<pre><code>"licence": { "type": "amply-personal-1" }</code></pre>
+<p>An artist who wants different terms should publish their own and point to them instead, with <code>"type": "custom"</code> and the address of their terms in <code>"url"</code>.</p>
+<p class="source">amply.stream/licence/personal-1. This address is permanent: manifests refer to it.</p>
+</div>
+</section>
+</main>
+<footer><div class="footer-in"><span>amply</span><div class="footer-links">
+<a href="/">Home</a><a href="/protect">Protecting your music</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a>
+</div></div></footer>
+</body>
+</html>

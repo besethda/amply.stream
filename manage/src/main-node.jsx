@@ -23,6 +23,9 @@ function App() {
         setState({
           phase: "ready",
           who,
+          // A node with no manifest has never published. The editor says so
+          // rather than claiming everything is live.
+          published: manifest !== null,
           manifest: manifest || {
             amply: 1,
             updated: new Date().toISOString(),
@@ -46,7 +49,7 @@ function App() {
         <h1>Couldn't load</h1>
         <Banner kind="error">{state.error}</Banner>
         <p class="muted">
-          If this keeps happening, your node may need setting up again at{" "}
+          If this keeps happening, your streaming service may need setting up again at{" "}
           <a href="https://amply.stream/start">amply.stream/start</a>.
         </p>
       </section>
@@ -56,8 +59,12 @@ function App() {
   return (
     <Editor
       api={api}
-      node={{ slug: location.host.split(".")[0], url: location.origin }}
+      // Shared as the artist's own domain once they have attached one; the
+      // editor itself always lives at the workers.dev address.
+      node={{ slug: location.host.split(".")[0], url: state.who?.home || location.origin }}
       initial={state.manifest}
+      published={state.published}
+      version={state.who?.version || null}
       onSignOut={() => location.assign("/cdn-cgi/access/logout")}
     />
   );

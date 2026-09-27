@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "stream.amply.app",
+      "sha256_cert_fingerprints": [
+        "67:43:69:6F:3A:51:3C:C5:07:6E:0B:87:03:B8:92:25:87:FF:27:B9:0F:39:AA:7A:D8:37:F5:98:4F:59:E5:3B"
+      ]
+    }
+  }
+]

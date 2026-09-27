@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="amply.svg" alt="Amply logo" width="72">
+  <img src="site/amply.svg" alt="Amply logo" width="72">
 </p>
 
 <h1 align="center">Amply</h1>
@@ -46,7 +46,7 @@ architecture and the trust model, and directed and reviewed the implementation.
 
 | Area | Tools |
 |---|---|
-| Artist node and relay | Cloudflare Workers, R2, KV, Cloudflare Access, TypeScript |
+| Artist node and relay | Cloudflare Workers, R2, D1, Cloudflare Access, TypeScript |
 | Editor and listener app | Preact, esbuild, PWA (service worker, installable) |
 | Setup flow | OAuth 2.0 with PKCE, Cloudflare API |
 | Spec | JSON manifest with a zero-dependency validator |

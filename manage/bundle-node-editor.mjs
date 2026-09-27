@@ -25,6 +25,11 @@ const html = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Your music</title>
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="/studio.webmanifest">
+<link rel="apple-touch-icon" href="/studio/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Your music">
 <style>
 ${base}
 ${editor}

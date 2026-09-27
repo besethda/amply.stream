@@ -40,13 +40,16 @@ prevent. Access lasts for the seconds of one provisioning flow and is then gone 
 | `POST /revoke` | Kill the token the moment provisioning finishes |
 | `/api/*` | Forwarded to `api.cloudflare.com/client/v4/*`, allowlisted |
 
-The `/api/*` allowlist is exact — method plus a path regex, with account and namespace IDs
+The `/api/*` allowlist is exact — method plus a path regex, with account and resource IDs
 pattern-matched. An open proxy to the Cloudflare API would be a genuinely dangerous thing to
 leave running on the internet.
 
-Currently permitted: list accounts; create and list R2 buckets; create and list KV
-namespaces; write a KV value; upload and read a Worker script; read the account's
-`workers.dev` subdomain and enable one for a script. Nothing else.
+Currently permitted: list accounts; create and list R2 buckets, and put, read and delete
+objects in them; create and list D1 databases and run queries in them; upload and read a
+Worker script; read or claim the account's `workers.dev` subdomain and enable it for a
+script; attach a Worker to a hostname; and read and create the Zero Trust organisation,
+one-time PIN sign-in, Access application and its policies. The full list is `ALLOWED` in
+`src/index.ts`. Nothing else.
 
 ## Origins
 

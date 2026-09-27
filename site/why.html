@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why it works this way - Amply</title>
+<meta name="description" content="The decisions behind Amply, explained: which wallet to use, what happens if someone doesn't pay, why crypto rather than a card, and what asking who is listening actually does.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<style>
+  .prose h2 { scroll-margin-top: 90px; }
+  .prose h2:target { color: var(--orange); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="topbar-in">
+    <a class="mark" href="/"><img src="/amply.svg" alt="" width="26" height="26">amply</a>
+    <div class="topbar-actions"><a class="btn sm" href="/start">Set up my streaming service</a></div>
+  </div>
+</div>
+
+<main>
+<header class="page-head">
+  <div class="col narrow">
+    <p class="eyebrow">Why it works this way</p>
+    <h1>The awkward questions.</h1>
+    <p class="lead">Amply makes some unusual choices. Here is the reasoning behind each one,
+    including where the choice is a trade rather than a win.</p>
+  </div>
+</header>
+
+<div class="prose"><div class="col narrow">
+
+<h2 id="free">What happens if someone doesn't pay?</h2>
+
+<p><strong>If you set a price, your music is paid for. Someone who won't pay doesn't get to
+listen.</strong></p>
+
+<p>Here is exactly how that works.</p>
+
+<p><strong>No wallet, no paid music.</strong> Once you charge, every track you publish is
+paid for, except the ones you choose to make free. Your streaming service refuses to play a
+paid track to anyone whose app can't prove which wallet it holds. That is enforced by your
+server, not left to the listener's honesty: someone without a wallet hears your free tracks,
+and nothing else.</p>
+
+<p><strong>Listeners with a wallet pay as they listen.</strong> The Amply app pays for every
+minute of paid music automatically, without asking each time. Nobody has to remember to pay
+you.</p>
+
+<p><strong>Anyone who listens without paying loses your music.</strong> Your Earnings tab
+lists every wallet that has played your paid tracks, next to what that wallet has actually
+paid you, read straight off the public ledger — so nobody has to be taken at their word.
+Choose <em>Stop serving</em> on a wallet and your paid tracks stop playing for it within
+half an hour. Their app tells them why.</p>
+
+<p><strong>Free is your choice, track by track.</strong> Use <em>Make free</em> on any track
+and it plays for anyone, with or without a wallet — a single to share, a demo, a way in for
+someone who has never heard of you. Everything else is paid.</p>
+
+<p><strong>No money, no paid music either.</strong> An empty wallet is no better than none,
+so the Amply app won't play a paid track from a wallet that has nothing in it to pay with.
+A new wallet has to be funded before it hears anything you charge for.</p>
+
+<p><strong>Honest limits.</strong> Your server can check that a listener has a wallet, but
+not that they have paid — Solana blocks it from reading the ledger, so that check happens in
+your editor, in your browser, when you open it. Someone who builds their own app to skip
+paying can therefore listen until you notice and stop serving them. A barred listener can
+make a new wallet, and it appears in your Earnings like any other. And anything already
+downloaded stays downloaded.</p>
+
+<h2 id="crypto">Why crypto, and not PayPal or Stripe?</h2>
+
+<p>Because of what a four-cent payment costs to make. A card payment carries a fixed fee of
+around 20 to 30 cents plus a percentage, so a small payment is eaten entirely by the fee.
+Stripe and PayPal are built for buying things, not for paying a musician as their song plays.
+A transfer on Solana costs a fraction of a cent, which is what makes paying per minute
+possible at all.</p>
+
+<p>There is a second reason, and it matters more. Card payments need an account holding
+money, which needs a company, which needs someone to trust and someone to take a cut. The
+moment Amply holds your money, Amply can lose it, freeze it, take a percentage of it, or be
+made to hand it over. <strong>A wallet-to-wallet transfer has no middle</strong>, which is
+why nobody takes 30% and why Amply can honestly say it takes nothing.</p>
+
+<p><strong>The trade, plainly:</strong> your listeners need a wallet with some USDC in it,
+and that is harder than typing a card number. So there is a card option too, for paying in
+one go rather than by the minute — see the next question.</p>
+
+<h2 id="subscriptions">Can listeners subscribe by card instead?</h2>
+
+<p>Yes, if you want them to. Under <strong>Subscriptions</strong> in your editor you connect
+your own Stripe account and set a price for a year, six months and three months (we suggest
+$10, $6 and $3). A subscriber hears all your paid music for that time and is never charged by
+the minute. Card fees are fine here because the payment is a few dollars, not a few cents.</p>
+
+<p><a href="/stripe">The step-by-step guide to connecting Stripe</a> takes about fifteen
+minutes, and you can try it all with pretend money first.</p>
+
+<p><strong>You choose.</strong> Per-minute only, subscriptions only, or both — in which case
+each listener picks. Subscriptions never replace the per-minute price; turning them on just
+adds a second way in.</p>
+
+<p><strong>It's your Stripe account, not ours.</strong> Stripe pays you directly, takes its
+usual fee (around 3% plus 30¢ in the US), and Amply takes nothing and never sees the money.
+Your Stripe key is stored on your streaming service, used only to set up your plans and check
+who has subscribed, and never shown again — not to you, and not to Amply. You can use a
+<em>restricted</em> key, which can do only those things.</p>
+
+<p><strong>How your streaming service knows who subscribed.</strong> The listener's app sends
+its wallet's address to Stripe with the payment. Afterwards, your streaming service asks Stripe
+about that payment, and checks each subscription again when it's due to renew, and once a day,
+so renewals and cancellations are noticed. The wallet is only used as a name here:
+a subscriber doesn't need any money in it. That's also why they should keep its backup key —
+it's what carries the subscription to a new phone.</p>
+
+<p><strong>Cancelling and refunds</strong> happen on Stripe's own page, which listeners open
+from your page in the app. Refunds are up to you, in your Stripe dashboard. Selling
+subscriptions makes you a seller in the ordinary sense: in the EU that usually means a
+14-day right to cancel and VAT on what you sell, which Stripe Tax can work out for you. We
+can't give you tax or legal advice.</p>
+
+<h2 id="setup-wallet">Which wallet should I use?</h2>
+
+<p><strong>Phantom.</strong> It's free, it works on your phone or in your browser, and
+setting it up takes a couple of minutes. Copy the address it gives you into <em>Who gets
+paid</em> in your editor, and you're done. You don't need to put anything in it to start
+receiving.</p>
+
+<p>Any Solana wallet works — Solflare and others are fine — and your listeners don't need to
+use the same one as you. Money goes from any Solana wallet to any Solana address.</p>
+
+<p><strong>The one rule that matters: USDC on Solana.</strong> USDC is the digital dollar
+Amply uses, and it exists on several different blockchains that can't reach each other.
+USDC sent over Ethereum, Base or any other network will not arrive at a Solana address, and
+usually can't be recovered. Whenever an app or an exchange asks which network, the answer is
+<strong>Solana</strong>.</p>
+
+<p><strong>Don't use an exchange's deposit address as your payment address.</strong>
+Coinbase, Kraken and others will give you an address, but they are built for occasional
+large deposits, not a steady trickle of small ones, and many have a minimum below which a
+deposit isn't credited. Receive into your own wallet, and move money to an exchange when you
+want to cash out.</p>
+
+<p><strong>Getting it into your bank.</strong> Send USDC from your wallet to an exchange that
+operates where you live — choosing Solana as the network — sell it for your own currency,
+and withdraw. Doing that occasionally, in larger amounts, keeps the fees down.</p>
+
+<p><strong>Your recovery phrase is the money.</strong> When you set up your wallet it will
+show you a list of words. Anyone who has them can take everything in it, and if you lose
+them and your phone, it's gone. Write them down on paper and keep them somewhere safe.
+Amply can't recover them. Nobody can.</p>
+
+<h2 id="batching">Why do payments arrive in batches?</h2>
+
+<p>Because a transfer costs a fraction of a cent even when the amount is tiny, and one per
+song would spend more on postage than it needs to.</p>
+
+<p><strong>Your listener is not approving these.</strong> The app carries its own small
+wallet, kept on their phone, so it pays as they listen: no popup, no confirmation, nothing
+to tap. They agree your price once, the first time they play you, and after that it simply
+happens. Batching is about the cost of a transfer, not about how often they are interrupted.</p>
+
+<p>The app keeps a running total of what it owes you and sends it when it reaches the amount
+you chose: every song, every five, or every ten. Nobody is holding that money in the
+meantime, and there is no account it sits in. The tally lives on the listener's own device,
+and the payment goes straight from their wallet to yours.</p>
+
+<p>Anything below your amount is sent <strong>within seven days</strong> at the latest, so
+somebody who plays four songs and never comes back still pays for four songs — the next time
+they open the app. It isn't sent the moment they pause: that would mean payments of a cent,
+when you asked for ten. Your editor only marks a listener as behind once they owe well past
+your amount.</p>
+
+<p>Choosing "every ten songs" does not mean waiting for ten songs. It means at most ten.</p>
+
+<h2 id="price">How should I choose a price?</h2>
+
+<p>For reference, a stream on Spotify pays an artist somewhere around a third of a cent,
+before anyone else takes their share. A cent a minute on Amply is about four cents for a
+four-minute song, and all of it is yours.</p>
+
+<p>So the honest framing is not "how do I match Spotify" but "what would a listener who
+actually likes me be glad to pay". Most artists should start at a cent a minute and ignore
+the slider afterwards.</p>
+
+<h2 id="identity">Why does a listener need a wallet?</h2>
+
+<p>Because it is how your streaming service knows who is listening, so it can refuse the
+people who don't pay.</p>
+
+<p>The wallet does two jobs at once: it pays you, and it identifies the listener. There is no
+account, no password and no email. The listener's app proves which wallet it holds by
+signing a one-off challenge from your server, and your server issues it a pass for half an
+hour.</p>
+
+<p><strong>What it costs you:</strong> a record of each wallet that plays your paid music
+becomes your responsibility under data protection law. Your streaming service keeps totals
+only — how much, not what or when — which keeps that responsibility as small as it can be,
+and any listener can erase their own record without asking you.</p>
+
+<h2 id="gdpr">What does data protection ask of me?</h2>
+
+<p><strong>Less than you'd fear, and most of it is already done.</strong> But you should
+know what it is, because it's yours.</p>
+
+<p>If you charge, your streaming service keeps a small record for each wallet that plays
+your paid music. Under GDPR that makes you the record's <em>controller</em>: the person
+responsible for it. Amply isn't — it holds nothing and can't see your server.</p>
+
+<p><strong>What you hold:</strong> a wallet address, how many tracks and minutes it has
+played, when it first and last listened, and whether you've stopped serving it.
+<strong>What you don't:</strong> which tracks anyone played, or when, or any name, email or
+account. Nothing at all for tracks you've made free.</p>
+
+<p><strong>Already done for you:</strong></p>
+<ul>
+  <li><strong>A privacy notice.</strong> Your streaming service writes one at
+  <em>your-address</em>/privacy, from what it actually keeps, so it can't be wrong or out of
+  date. Your page links to it.</li>
+  <li><strong>Seeing and erasing.</strong> A listener can see what you hold about them,
+  download it, or erase it, straight from the Amply app. Their app proves the record is
+  theirs by signing for it. You don't have to do anything.</li>
+  <li><strong>Not keeping it forever.</strong> A record is deleted automatically a year
+  after that wallet was last heard from.</li>
+  <li><strong>Your hosting.</strong> Cloudflare runs your server in your own account, and
+  its data processing terms are part of the agreement you accepted when you opened it.</li>
+</ul>
+
+<p><strong>Still yours to do:</strong></p>
+<ul>
+  <li><strong>Add a contact address</strong> in Settings. A controller has to be reachable,
+  and it goes on your privacy page.</li>
+  <li><strong>Answer anyone who writes to you</strong> about their data, within a month.
+  Your Earnings tab has <em>Export</em> and <em>Delete</em> on every listener, which is
+  everything a request needs.</li>
+  <li><strong>Look after your Cloudflare account</strong> — a strong password and two-step
+  sign-in. If it were broken into in a way likely to put listeners at risk, you might have
+  to tell your data protection authority within 72 hours.</li>
+</ul>
+
+<p>This is how the software is built, not legal advice. If your circumstances are unusual —
+a label, staff, listeners in the thousands — it's worth an hour with someone who does this
+for a living.</p>
+
+<h2 id="reconciliation">How do you know who has paid me?</h2>
+
+<p>We don't. Your editor works it out, in your browser, while you are looking at it.</p>
+
+<p>Payments to you are public: they are transfers on a public ledger, and anyone can read
+them, including you. Your editor reads every payment ever sent to the addresses in your
+Settings, groups them by the wallet that sent them, and puts that column next to the
+listening your streaming service recorded. The two line up because they are keyed by the same
+thing: the wallet is the identity, so nobody has to report anything for the match to work.</p>
+
+<p>Nothing is stored as a result. Your streaming service keeps no ledger of who paid, because
+the chain is already that ledger and it cannot be lost or tampered with. Close the editor
+and the figures are simply read again next time.</p>
+
+<p><strong>Two honest limits.</strong> The "paid" figure is everything that wallet has ever
+sent you, while "listened" counts only your paid tracks, so the comparison is rough —
+and if you raised your price, old listening looks underpaid when it was not. Treat a
+red figure as something to look at, not a verdict.</p>
+
+<h2 id="banning">What happens when I stop serving someone?</h2>
+
+<p>That wallet stops being able to play your paid tracks, within about half an hour. Your
+free tracks keep playing for them, because free means free.</p>
+
+<p>They can make a new wallet in under a minute. The Amply app won't play your paid music
+from it until it has money in it, and it shows up in your Earnings like any other. And
+anything already downloaded stays downloaded: you cannot un-hear music.</p>
+
+<p>What it does survive is being asked to be forgotten. A listener can erase their record
+from your streaming service at any time, and if you have barred them, the erasure takes
+every number with it and leaves the bar standing. Your decision is not undone by their
+right.</p>
+
+<p>There is no shared blocklist. The list lives on your own streaming service, nobody else
+can see it, and Amply holds nothing.</p>
+
+<h2 id="wallet">Where does the money actually go?</h2>
+
+<p>From the listener's wallet to the address in your manifest, in one transaction, with
+nothing in between. Amply is not a recipient and not a router; there is no account for it
+to rest in, which is the same reason we cannot take a cut even if we wanted to.</p>
+
+<p>If you have named collaborators, the split happens inside that single transaction, so
+either everybody is paid or nobody is. It cannot half-happen.</p>
+
+<h2 id="tax">Do I have to pay tax on this?</h2>
+
+<p>We cannot advise you, and would be wrong to try. What we can tell you is roughly where
+the lines are, so nothing arrives as a surprise.</p>
+
+<p>In Sweden you do not have to register for VAT until your turnover passes 120,000 kr a
+year. Selling digital things to buyers in other EU countries has its own threshold of
+€10,000 a year, below which you charge your own country's rate. Both of those arrive at a
+point where you can afford an accountant, which is the right moment to get one.</p>
+
+<p>Money reaching your wallet is income wherever you live. Amply sends no forms and files
+nothing on your behalf, because Amply is not part of the transaction.</p>
+
+<h2 id="updates">Why do I have to rebuild my streaming service?</h2>
+
+<p>Because it runs in your Cloudflare account, and we have no way in. That is the point of
+the design: nobody at Amply holds a key to your music.</p>
+
+<p>The cost is that improvements do not arrive by themselves. Your editor notices when
+there is a newer version and offers a rebuild, which takes about a minute and does not touch
+your music, your page or your price.</p>
+
+<p><a href="/repair">Rebuild yours now →</a></p>
+
+</div></div>
+</main>
+
+<footer><div class="footer-in"><span>amply</span><div class="footer-links">
+<a href="/">Home</a><a href="/protect">Protecting your music</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a>
+</div></div></footer>
+</body>
+</html>

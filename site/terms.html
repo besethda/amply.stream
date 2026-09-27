@@ -3,26 +3,37 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Terms — Amply</title>
+<title>Terms - Amply</title>
 <meta name="description" content="Amply is software, not a service. What that means for artists and listeners.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="/amply.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<div class="wrap">
-<header>
-  <a class="mark" href="/">ampl<span>y</span></a>
-  <h1>Terms</h1>
-  <p class="updated">Last updated 18 September 2026</p>
-</header>
-
-<p class="lead">Amply is software, not a service. Nobody signs up, nothing is sold, and there
+<div class="topbar">
+  <div class="topbar-in">
+    <a class="mark" href="/"><img src="/amply.svg" alt="" width="26" height="26">amply</a>
+    <div class="topbar-actions"><a class="btn sm" href="/start">Start</a></div>
+  </div>
+</div>
+<main>
+<header class="page-head">
+  <div class="col narrow">
+    <p class="eyebrow">Terms</p>
+    <h1>Software, not a service.</h1>
+    <p class="lead">Amply is software, not a service. Nobody signs up, nothing is sold, and there
 is no account we could suspend. This page explains what that actually means, because it
-changes what you can expect from us — in both directions.</p>
+changes what you can expect from us, in both directions.</p>
+  </div>
+</header>
+<div class="prose"><div class="col narrow">
 
 <h2>The licence is the agreement</h2>
 
 <p>Amply is released under the
-<a href="https://github.com/besethda/amply-stream/blob/main/LICENSE">Apache License 2.0</a>.
+<a href="https://www.apache.org/licenses/LICENSE-2.0">Apache License 2.0</a>.
 That licence is the real legal agreement covering your use of the software; everything else
 here describes how the thing works.</p>
 
@@ -35,7 +46,7 @@ one they meant to trust.</p>
 <div class="box">
   <p><strong>There is no warranty.</strong> The software is provided as-is. We do not promise
   it works, that your music stays online, or that payments arrive. This is the standard term
-  in the licence and we mean it literally — there is no company on call and no support desk.</p>
+  in the licence and we mean it literally, there is no company on call and no support desk.</p>
 </div>
 
 <h2>What Amply does not do</h2>
@@ -65,12 +76,17 @@ responsibilities:</p>
   exclusive distribution agreement can prevent self-hosting a recording you fully own. Check
   your own agreements. We cannot check for you and we will not try.</li>
   <li><strong>Originals only.</strong> No covers, no uncleared samples.</li>
+  <li><strong>Pictures are resized for display.</strong> When you add a cover, a photo or a
+  banner, your editor scales it down in your own browser before it goes to your streaming
+  service, so it loads quickly for listeners. The photographer's credit and copyright stay in
+  the file; its location and camera details are left out. Nothing passes through Amply, and you
+  can use the original instead. As with your music, use only pictures you have the right to
+  publish.</li>
   <li><strong>Complaints come to you.</strong> You are the host, so a copyright notice reaches
   you or Cloudflare. We have no copy of your music and no ability to take anything down.</li>
   <li><strong>Your Cloudflare account is yours.</strong> Their terms apply to it, any costs
   are yours, and if that account goes away so does your music.</li>
-  <li><strong>If you are a member of a performing rights organisation</strong> — ASCAP, BMI,
-  STIM, PRS or similar — your performance rights sit with them, including for your own songs.
+  <li><strong>If you are a member of a performing rights organisation</strong> (ASCAP, BMI, STIM, PRS or similar), your performance rights sit with them, including for your own songs.
   Streaming from your own site has gone untroubled for decades, but it is your relationship
   to manage, not ours.</li>
   <li><strong>You set your own price</strong>, and you can change it whenever you like.</li>
@@ -80,7 +96,7 @@ responsibilities:</p>
 
 <ul>
   <li><strong>Payments are direct and final.</strong> They go from your wallet to the artist's,
-  with no intermediary. There is no refund, no chargeback, and no reversal — not because we
+  with no intermediary. There is no refund, no chargeback, and no reversal, not because we
   refuse, but because we are not in the transaction and could not undo it.</li>
   <li><strong>Your wallet key lives on your device.</strong> Lose it with no backup and the
   balance is gone permanently. We cannot recover it. Keep balances small.</li>
@@ -95,13 +111,13 @@ responsibilities:</p>
 <p>There is no account, so there is nothing to close and nothing we could take away. Stop
 using the app and it stops. Delete it and any accrued payments settle first.</p>
 
-<p>An artist's node belongs to the artist. If this project ends tomorrow, every node keeps
-serving and every listener keeps listening.</p>
+<p>An artist's streaming service belongs to that artist. If this project ends tomorrow,
+every one of them keeps serving and every listener keeps listening.</p>
 
 <h2>Changes</h2>
 
 <p>Changes to this page appear in
-<a href="https://github.com/besethda/amply-stream">the public repository's history</a>, dated
+<a href="https://github.com/besethda/amply.stream">the public repository's history</a>, dated
 and diffable. We cannot revise it quietly.</p>
 
 <h2>Governing law</h2>
@@ -109,10 +125,9 @@ and diffable. We cannot revise it quietly.</p>
 <p>Amply is maintained from Sweden, and Swedish law applies to these terms to the extent any
 law does. Nothing here removes rights you have under mandatory consumer law where you live.</p>
 
-<footer>
-  <a href="/">Amply</a> · <a href="/privacy">Privacy</a> ·
-  <a href="https://github.com/besethda/amply-stream">Source</a>
-</footer>
-</div>
+</div></div></main>
+<footer><div class="footer-in"><span>amply</span><div class="footer-links">
+<a href="/">Home</a><a href="/protect">Protecting your music</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a>
+</div></div></footer>
 </body>
 </html>

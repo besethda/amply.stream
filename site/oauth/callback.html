@@ -21,8 +21,8 @@
  *
  * This page holds a live, single-use authorization code. If it fails to run,
  * the artist is stranded at a URL they cannot do anything with, and has to
- * start over. An earlier version imported a module to read where to resume;
- * one stale cached copy of that module broke exactly this way.
+ * start over. Importing a module to read where to resume would let one stale
+ * cached copy of it break exactly this way.
  *
  * So: read sessionStorage directly, validate, forward. Nothing to fail.
  */

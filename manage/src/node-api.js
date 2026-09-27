@@ -23,7 +23,10 @@ export function nodeApi() {
     }
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      throw new Error(detail.slice(0, 200) || `The node returned ${res.status}.`);
+      // The server says why in {"error": "..."}; show the words, not the JSON.
+      let said = detail;
+      try { said = JSON.parse(detail)?.error || detail; } catch { /* plain text */ }
+      throw new Error(String(said).slice(0, 300) || `Your streaming service returned ${res.status}.`);
     }
     return res;
   }
@@ -49,6 +52,61 @@ export function nodeApi() {
         body: file,
       });
     },
+    /** A published file's size in bytes, or null. Same origin, so the
+     *  Access cookie rides along and every header is readable. */
+    async sizeOf(url) {
+      const res = await fetch(url, { method: "HEAD", credentials: "same-origin" });
+      if (!res.ok) return null;
+      return Number(res.headers.get("Content-Length")) || null;
+    },
+    /** Who has been listening, and how much. A ledger, never a history. */
+    async listeners() {
+      return (await req("GET", "/listeners")).json();
+    },
+
+    /** Stop serving a wallet, or start again. */
+    async setBlocked(pubkey, blocked) {
+      await req("POST", "/block", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pubkey, blocked }),
+      });
+    },
+
+    /** What subscriptions this service sells, if any. Never the Stripe key. */
+    async stripeStatus() {
+      return (await req("GET", "/stripe")).json();
+    },
+
+    /** Connect the artist's Stripe account, or change the plans. The key may
+     *  be left out when changing plans: the server keeps the one it has. */
+    async connectStripe(key, plans) {
+      return (await req("POST", "/stripe/connect", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: key || undefined, plans }),
+      })).json();
+    },
+
+    /** Links in the artist's Stripe for the songs and albums they sell; the
+     *  key only when connecting for this alone. Returns { sales: [{ item, url }] }. */
+    async stripeSales(key, items) {
+      return (await req("POST", "/stripe/sales", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: key || undefined, items }),
+      })).json();
+    },
+
+    async disconnectStripe() {
+      await req("POST", "/stripe/disconnect", { headers: { "Content-Type": "application/json" }, body: "{}" });
+    },
+
+    /** Delete a wallet's record outright, including any bar on it. */
+    async removeListener(pubkey) {
+      await req("POST", "/remove", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pubkey }),
+      });
+    },
+
     async deleteObject(key) {
       await req("DELETE", `/${key}`);
     },
