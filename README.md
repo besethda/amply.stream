@@ -20,27 +20,24 @@ There is no company in the middle, and nothing to sell, acquire, or shut down.
 
 ## About this project
 
-I came up with the idea for Amply about two years ago, before I knew how to code. Streaming
-platforms pay artists a fraction of a cent per play, and I wanted to see if the platform could
-be removed from the equation entirely.
+I studied music in university, and I always thought it was impossible to work as a musician. A huge 
+part of thatis that musicians make hardly any money from streaming their music. A huge part of that 
+is spotify.I wanted to make something where artists could host their own streaming service, be in 
+charge of their own content, and make their own money for it. That's what amply is.
 
-This is the third version. The first was a conventional backend on AWS (Lambda, S3, DynamoDB),
-with the platform storing every artist's music. Building it made the problem obvious: whoever
-hosts the music is in control of it, and can always take a cut. The second iteration moved
-toward artists owning their storage. This version goes all the way, and most of my work went
-into the architecture:
+It took me 2 years and 3 repos to make a version that actually worked. I ran into problems with money.
+I started with AWS S3, cognito, and lambda. I realized that AWS isn't the cheapest or the easiest to
+use for a non-technical person. Then I started using cloudflare for a different project, and realized
+that It would be much better for Amply. 
 
-- **Every artist runs their own node** in their own Cloudflare account. Amply never holds their
-  audio, their credentials, or their money.
-- **A manifest format** (think RSS for music) is the only contract between an artist's node and
-  any listener app, so anyone can build a client.
-- **Setup without standing access.** Onboarding uses OAuth with PKCE for a single flow and never
-  keeps a token. A stateless relay handles the one CORS problem this creates.
-- **Sign-in on the artist's node** goes through Cloudflare Access with an emailed one-time code,
-  verified inside the Worker rather than trusted from the edge.
+A huge part of this was the licensing. I wanted to make a free tool for artists, which meant that I
+had to keep costs for myself down. So I had several months where I gave up, with Amply in the back
+of my mind, and then one evening I had a great idea- artists can have their own links on their own
+social media, in order for listeners to 'install' the artists manifest.json files to their local 
+app. This avoids Amply needing to have any kind of database, or host anything at all other than a 
+website.
 
-The implementation was written with heavy use of Claude Code. I designed the product, the
-architecture and the trust model, and directed and reviewed the implementation.
+This project is close to my heart, and I hope it can be used one day to help musicians.
 
 ## Tech stack
 
