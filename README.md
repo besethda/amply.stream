@@ -21,9 +21,9 @@ There is no company in the middle, and nothing to sell, acquire, or shut down.
 ## About this project
 
 I studied music in university, and I always thought it was impossible to work as a musician. A huge 
-part of thatis that musicians make hardly any money from streaming their music. A huge part of that 
-is spotify.I wanted to make something where artists could host their own streaming service, be in 
-charge of their own content, and make their own money for it. That's what amply is.
+part of thatis that musicians make hardly any money from streaming their music. I wanted to make 
+something where artists could host their own streaming service, be in charge of their own content, 
+and make their own money for it. That's what amply is.
 
 It took me 2 years and 3 repos to make a version that actually worked. I ran into problems with money.
 I started with AWS S3, cognito, and lambda. I realized that AWS isn't the cheapest or the easiest to
