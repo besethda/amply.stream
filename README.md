@@ -25,10 +25,10 @@ part of thatis that musicians make hardly any money from streaming their music. 
 something where artists could host their own streaming service, be in charge of their own content, 
 and make their own money for it. That's what amply is.
 
-It took me 2 years and 3 repos to make a version that actually worked. I ran into problems with money.
-I started with AWS S3, cognito, and lambda. I realized that AWS isn't the cheapest or the easiest to
-use for a non-technical person. Then I started using cloudflare for a different project, and realized
-that It would be much better for Amply. 
+It took me 2 years and 3 repos to make a version that actually worked. I ran into problems with money,
+tech, and my own knowledge of how systems worked. I started with AWS S3, cognito, and lambda. I 
+realized that AWS isn't the cheapest or the easiest to use for a non-technical person. Then I started 
+using cloudflare for a different project, and realized that It would be much better for Amply. 
 
 A huge part of this was the licensing. I wanted to make a free tool for artists, which meant that I
 had to keep costs for myself down. So I had several months where I gave up, with Amply in the back
