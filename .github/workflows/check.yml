@@ -1,0 +1,33 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Each part keeps its own lockfile; the root has no node_modules.
+      - run: npm ci --prefix node
+      - run: npm ci --prefix manage
+      - run: npm ci --prefix app
+      - run: npm ci --prefix relay
+
+      - run: npm run check
+
+      # site/ serves files compiled from node/, manage/ and app/. If building
+      # changed any of them, the committed copies are stale, and deploying them
+      # would ship artists an old node. node-version.json carries today's date
+      # and changes on every build, so it is left out.
+      - name: Compiled files in site/ are up to date
+        run: git diff --exit-code -- . ':!site/node-version.json'
