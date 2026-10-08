@@ -124,7 +124,7 @@ Three files in `site/` are compiled from elsewhere in the repo; see [BUILD.md](B
 Deploying without building ships stale copies, including, once, a Worker that would have
 left artists with an editor that could not save.
 
-To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see
+For what's planned, see [ROADMAP.md](ROADMAP.md). To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see
 [SECURITY.md](SECURITY.md).
 
 ## For artists
