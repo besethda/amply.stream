@@ -21,19 +21,19 @@ There is no company in the middle, and nothing to sell, acquire, or shut down.
 ## About this project
 
 I studied music in university, and I always thought it was impossible to work as a musician. A huge 
-part of thatis that musicians make hardly any money from streaming their music. I wanted to make 
+part of that is that musicians make hardly any money from streaming their music. I wanted to make 
 something where artists could host their own streaming service, be in charge of their own content, 
-and make their own money for it. That's what amply is.
+and make their own money for it. That's what Amply is.
 
 It took me 2 years and 3 repos to make a version that actually worked. I ran into problems with money,
-tech, and my own knowledge of how systems worked. I started with AWS S3, cognito, and lambda. I 
+tech, and my own knowledge of how systems worked. I started with AWS S3, Cognito, and Lambda. I 
 realized that AWS isn't the cheapest or the easiest to use for a non-technical person. Then I started 
-using cloudflare for a different project, and realized that It would be much better for Amply. 
+using Cloudflare for a different project, and realized that it would be much better for Amply. 
 
 A huge part of this was the licensing. I wanted to make a free tool for artists, which meant that I
 had to keep costs for myself down. So I had several months where I gave up, with Amply in the back
-of my mind, and then one evening I had a great idea- artists can have their own links on their own
-social media, in order for listeners to 'install' the artists manifest.json files to their local 
+of my mind, and then one evening I had a great idea: artists can have their own links on their own
+social media, in order for listeners to 'install' the artist's manifest.json files to their local 
 app. This avoids Amply needing to have any kind of database, or host anything at all other than a 
 website.
 
@@ -123,6 +123,9 @@ npm run test:node <url>   # 16 conformance checks against any node
 Three files in `site/` are compiled from elsewhere in the repo; see [BUILD.md](BUILD.md).
 Deploying without building ships stale copies, including, once, a Worker that would have
 left artists with an editor that could not save.
+
+To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md). To report a vulnerability, see
+[SECURITY.md](SECURITY.md).
 
 ## For artists
 
