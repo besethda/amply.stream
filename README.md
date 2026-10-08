@@ -18,18 +18,6 @@ There is no company in the middle, and nothing to sell, acquire, or shut down.
 
 ---
 
-## Tech stack
-
-| Area | Tools |
-|---|---|
-| Artist node and relay | Cloudflare Workers, R2, D1, Cloudflare Access, TypeScript |
-| Editor and listener app | Preact, esbuild, PWA (service worker, installable) |
-| Setup flow | OAuth 2.0 with PKCE, Cloudflare API |
-| Spec | JSON manifest with a zero-dependency validator |
-| Hosting | Cloudflare Pages |
-
----
-
 ## How it works
 
 An artist connects their **own** Cloudflare account at [amply.stream](https://amply.stream).
@@ -80,6 +68,16 @@ They are only worth something if you can check them, so here is where to look:
 | Only a one-time PIN provider can be created | Same file: the request body is inspected, not just the path |
 | The node has no write path without Access | [`node/src/index.ts`](node/src/index.ts), and it fails closed with no configuration |
 | Sign-in cannot be forged | [`node/src/access.ts`](node/src/access.ts): the assertion is verified in the Worker, not assumed from the edge |
+
+## Tech stack
+
+| Area | Tools |
+|---|---|
+| Artist node and relay | Cloudflare Workers, R2, D1, Cloudflare Access, TypeScript |
+| Editor and listener app | Preact, esbuild, PWA (service worker, installable) |
+| Setup flow | OAuth 2.0 with PKCE, Cloudflare API |
+| Spec | JSON manifest with a zero-dependency validator |
+| Hosting | Cloudflare Pages |
 
 ## Repository layout
 
