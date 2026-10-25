@@ -15,7 +15,23 @@
  * account, the resources and the music are the artist's.
  */
 
+import { solve, supported } from "./pow.js";
+
 const PROGRESS_KEY = "amply.provision";
+/**
+ * A temporary account's token and claim link, while setup needs them.
+ *
+ * In sessionStorage, not with the rest of the progress: both are bearer
+ * credentials, so they go when the tab does, and they are never written
+ * anywhere that outlives the hour Cloudflare gives them.
+ */
+const PREVIEW_KEY = "amply.preview";
+
+/** Cloudflare's terms for a temporary account, which the artist accepts on the setup page. */
+export const TEMPORARY_TERMS = {
+  termsOfService: "https://www.cloudflare.com/terms/",
+  privacyPolicy: "https://www.cloudflare.com/privacypolicy/",
+};
 
 /** Where the highest applied schema change is recorded, in the artist's own
  *  settings table. Matches SCHEMA_VERSION in node/src/store.ts. */
@@ -87,6 +103,26 @@ function saveProgress(p) {
 }
 export function clearProgress() {
   try { localStorage.removeItem(PROGRESS_KEY); } catch {}
+  try { sessionStorage.removeItem(PREVIEW_KEY); } catch {}
+}
+
+/** The setup started in a temporary account, if this browser has one going. */
+export function pendingPreview() {
+  const p = loadProgress();
+  return p.preview ? { url: p.url || null, accountId: p.accountId, workerName: p.workerName } : null;
+}
+
+function loadPreview() {
+  try {
+    const p = JSON.parse(sessionStorage.getItem(PREVIEW_KEY) || "null");
+    return p && Date.parse(p.expiresAt) > Date.now() + 60_000 ? p : null;
+  } catch { return null; }
+}
+
+/** The claim link for this browser's temporary account, while it still works. */
+export function claimLink() {
+  const p = loadPreview();
+  return p && Date.parse(p.claimExpiresAt) > Date.now() ? { url: p.claimUrl, expiresAt: p.claimExpiresAt } : null;
 }
 
 /**
@@ -154,6 +190,19 @@ async function api(ctx, method, path, { body, headers } = {}) {
  * them risks creating their music node inside an employer's account.
  */
 async function stepAccount(ctx) {
+  // Finishing a node that started in a temporary account: it has to be on
+  // this login now, which is what claiming it does.
+  if (ctx.progress.preview && ctx.progress.accountId && !ctx.preview) {
+    const accounts = await api(ctx, "GET", "/accounts");
+    if (!(accounts || []).some((a) => a.id === ctx.progress.accountId)) {
+      throw new ProvisionError(
+        "not_claimed",
+        "Your new account isn't on this Cloudflare login yet.",
+        "Open the claim link, sign up or sign in, and finish claiming it. Then come back and lock your editor.",
+      );
+    }
+    return ctx.progress.accountId;
+  }
   if (ctx.progress.accountId) return ctx.progress.accountId;
 
   const accounts = await api(ctx, "GET", "/accounts");
@@ -173,9 +222,33 @@ async function stepAccount(ctx) {
   return id;
 }
 
+/**
+ * Somewhere for audio: R2, or KV for a node that started without it.
+ *
+ * A node set up in a temporary account keeps its files in KV, because those
+ * accounts can't use R2. When the artist later finishes setup with their own
+ * login, this finds that KV namespace and keeps using it, rather than making
+ * an R2 bucket and rebinding the node to an empty one.
+ */
 async function stepBucket(ctx) {
   const { accountId, bucketName } = ctx.progress;
   if (ctx.progress.bucketDone) return;
+
+  if (ctx.progress.storage !== "r2") {
+    const kv = await findKv(ctx).catch((e) => {
+      // A temporary account has nothing else to fall back to.
+      if (ctx.progress.storage === "kv") throw e;
+      return null;
+    });
+    if (kv || ctx.progress.storage === "kv") {
+      ctx.progress.kvId = kv || await makeKv(ctx);
+      ctx.progress.storage = "kv";
+      ctx.progress.bucketDone = true;
+      saveProgress(ctx.progress);
+      return;
+    }
+  }
+  ctx.progress.storage = "r2";
 
   const existing = await api(ctx, "GET", `/accounts/${accountId}/r2/buckets`);
   const found = (existing?.buckets || []).some((b) => b.name === bucketName);
@@ -187,6 +260,22 @@ async function stepBucket(ctx) {
   }
   ctx.progress.bucketDone = true;
   saveProgress(ctx.progress);
+}
+
+/** The node's KV namespace, if it has one: named like its bucket would be. */
+async function findKv(ctx) {
+  const { accountId, bucketName } = ctx.progress;
+  const list = await api(ctx, "GET", `/accounts/${accountId}/storage/kv/namespaces?per_page=100`);
+  return (list || []).find((n) => n.title === bucketName)?.id || null;
+}
+
+async function makeKv(ctx) {
+  const { accountId, bucketName } = ctx.progress;
+  const made = await api(ctx, "POST", `/accounts/${accountId}/storage/kv/namespaces`, {
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: bucketName }),
+  });
+  return made.id;
 }
 
 /**
@@ -294,7 +383,7 @@ async function query(ctx, sql, params = []) {
  * separate "bind" call — the script arrives already wired to its storage.
  */
 async function stepWorker(ctx) {
-  const { accountId, workerName, bucketName, dbId } = ctx.progress;
+  const { accountId, workerName, bucketName, dbId, storage, kvId } = ctx.progress;
   if (ctx.progress.workerDone) return;
 
   // Cloudflare rejects the upload itself when the account has no workers.dev
@@ -307,7 +396,9 @@ async function stepWorker(ctx) {
   });
 
   const base = [
-    { type: "r2_bucket", name: "MEDIA", bucket_name: bucketName },
+    storage === "kv"
+      ? { type: "kv_namespace", name: "MEDIA_KV", namespace_id: kvId }
+      : { type: "r2_bucket", name: "MEDIA", bucket_name: bucketName },
     { type: "d1", name: "DB", id: dbId },
   ];
   // Cloudflare's rate limiters, so nobody can run the service into the
@@ -337,9 +428,9 @@ async function stepWorker(ctx) {
   saveProgress(ctx.progress);
 }
 
-/** Upload the editor into the artist's own bucket, under a non-public prefix. */
+/** Upload the editor into the artist's own storage, under a non-public prefix. */
 async function stepEditor(ctx) {
-  const { accountId, bucketName } = ctx.progress;
+  const { accountId, bucketName, storage, kvId } = ctx.progress;
   if (ctx.progress.editorDone) return;
 
   const html = await fetch(ctx.editorUrl).then((r) => {
@@ -347,10 +438,10 @@ async function stepEditor(ctx) {
     return r.text();
   });
 
-  await api(ctx, "PUT", `/accounts/${accountId}/r2/buckets/${bucketName}/objects/manage/index.html`, {
-    headers: { "Content-Type": "text/html" },
-    body: html,
-  });
+  const path = storage === "kv"
+    ? `/accounts/${accountId}/storage/kv/namespaces/${kvId}/values/${encodeURIComponent("manage/index.html")}`
+    : `/accounts/${accountId}/r2/buckets/${bucketName}/objects/manage/index.html`;
+  await api(ctx, "PUT", path, { headers: { "Content-Type": "text/html" }, body: html });
 
   ctx.progress.editorDone = true;
   saveProgress(ctx.progress);
@@ -590,9 +681,22 @@ async function putSetting(ctx, key, value) {
   );
 }
 
-/** A valid, empty manifest, so the node answers correctly from the first second. */
+/**
+ * A valid, empty manifest, so the node answers correctly from the first second.
+ *
+ * Only where there is none. Finishing a node that started in a temporary
+ * account runs setup over a node that may already have music on it, and a
+ * starter page written over that would be the worst thing setup could do.
+ */
 async function stepManifest(ctx) {
   if (ctx.progress.manifestDone) return;
+
+  const found = await query(ctx, "SELECT value FROM settings WHERE key = ?", ["manifest"]).catch(() => null);
+  if (found?.[0]?.results?.length) {
+    ctx.progress.manifestDone = true;
+    saveProgress(ctx.progress);
+    return;
+  }
 
   const manifest = {
     amply: 1,
@@ -816,6 +920,131 @@ export async function provision({
     accountId: progress.accountId,
     editorUrl: progress.accessDone ? progress.editorUrl : null,
     skipped: progress.skipped || [],
+  };
+}
+
+/**
+ * The steps of a node set up before the artist has a Cloudflare account.
+ *
+ * The same steps as setup, in a temporary account, with storage in KV and no
+ * Access: temporary accounts can't use either R2 or Access. The node is live
+ * and read-only (it refuses every edit without Access) until the artist
+ * claims the account and finishes setup with their own login, which runs
+ * `provision` over the same progress and adds only what is missing.
+ */
+export const INSTANT_STEPS = [
+  { id: "preview", label: "Making your account" },
+  ...STEPS.filter((s) => !["account", "access"].includes(s.id)),
+];
+
+/**
+ * Ask Cloudflare for a temporary account, through the relay.
+ *
+ * Two calls with no credential: a proof-of-work challenge, solved here in
+ * the browser, and the account itself, made with the artist's acceptance of
+ * Cloudflare's terms. Back comes the account, a token for it, and a claim
+ * link. Claiming the account ends the token.
+ */
+export async function createTemporaryAccount({ relay, onProgress = () => {} }) {
+  const post = async (path, body) => {
+    let res;
+    try {
+      res = await fetch(`${relay}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new ProvisionError("network", "Lost connection to Cloudflare.", e.message);
+    }
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json || json.success === false) {
+      const why = json?.errors?.[0]?.message || json?.error || `HTTP ${res.status}`;
+      throw new ProvisionError("preview_failed", "Cloudflare couldn't make the account.", why);
+    }
+    return json.result;
+  };
+
+  const challenge = await post("/preview/challenge", {});
+  if (!supported(challenge || {})) {
+    throw new ProvisionError("preview_failed", "Cloudflare asked for a check this page can't do.", JSON.stringify({ k: challenge?.k, g: challenge?.g }));
+  }
+  const checkpoints = await solve(challenge, { onProgress });
+
+  const made = await post("/preview/account", {
+    ...TEMPORARY_TERMS,
+    acceptTermsOfService: "yes",
+    challengeToken: challenge.challengeToken,
+    solution: { checkpoints },
+  });
+  const { account, claim } = made || {};
+  if (!account?.id || !account?.apiToken || !account?.expiresAt || !claim?.url || !claim?.expiresAt) {
+    throw new ProvisionError("preview_failed", "Cloudflare's answer was missing something.", "no account, token or claim link");
+  }
+  return {
+    accountId: account.id,
+    token: account.apiToken,
+    expiresAt: account.expiresAt,
+    claimUrl: claim.url,
+    claimExpiresAt: claim.expiresAt,
+  };
+}
+
+/**
+ * Set up a node before the artist has a Cloudflare account.
+ *
+ * Only call this once the artist has accepted Cloudflare's terms on the page:
+ * the account is made in their name. Returns the node's address and the link
+ * that makes the account theirs.
+ */
+export async function provisionInstant({
+  relay, artistName, slug,
+  workerUrl = "/node-worker.js",
+  editorUrl = "/node-manage",
+  versionUrl = "/node-version.json",
+  onStep = () => {},
+  onProof = () => {},
+}) {
+  let preview = loadPreview();
+  let progress = loadProgress();
+  // A different temporary account, or none left: start over. Progress that
+  // belonged to an expired account describes resources that no longer exist.
+  if (!preview || progress.accountId !== preview.accountId) {
+    clearProgress();
+    progress = {};
+    preview = null;
+  }
+
+  progress.bucketName ||= `${slug}-media`;
+  progress.dbName ||= `${slug}-amply`;
+  progress.workerName ||= slug;
+  progress.storage = "kv";
+  progress.preview = true;
+  saveProgress(progress);
+
+  const ctx = { relay, artistName, workerUrl, editorUrl, versionUrl, progress, preview: true, token: null };
+
+  for (const step of INSTANT_STEPS) {
+    onStep(step.id, "running");
+    if (step.id === "preview") {
+      if (!preview) {
+        preview = await createTemporaryAccount({ relay, onProgress: onProof });
+        try { sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(preview)); } catch { /* resumes only within this page */ }
+      }
+      ctx.token = preview.token;
+      progress.accountId = preview.accountId;
+      saveProgress(progress);
+    } else {
+      await RUNNERS[step.id](ctx);
+    }
+    onStep(step.id, "done");
+  }
+
+  return {
+    url: progress.url,
+    accountId: progress.accountId,
+    claimUrl: preview.claimUrl,
+    claimExpiresAt: preview.claimExpiresAt,
   };
 }
 

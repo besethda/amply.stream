@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Set up your streaming service - Amply</title>
-<meta name="description" content="Your own streaming service, on hosting you own. About five minutes.">
+<meta name="description" content="Your own streaming service, on hosting you own. Live in a minute, no card needed.">
 <meta name="robots" content="noindex">
 <link rel="icon" href="/amply.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -72,6 +72,11 @@
   @media (prefers-reduced-motion: reduce) { li[data-state="run"] .dot::after { content: "\25B8"; animation: none; } }
 
   .back { margin-top: 24px; }
+  /* accepting Cloudflare's terms */
+  label.agree { display: flex; gap: 14px; align-items: flex-start; font-size: 17px; color: var(--ink2); margin: 0 0 30px; cursor: pointer; }
+  label.agree input { flex: none; width: 22px; height: 22px; margin: 2px 0 0; accent-color: var(--orange); }
+  .live-url { font-family: var(--mono); font-size: 15px; overflow-wrap: anywhere; color: var(--ink2); margin: 0 0 26px; }
+
   .devbar { margin-top: 90px; padding-top: 22px; border-top: 1px dashed var(--line);
     font-family: var(--mono); font-size: 13px; color: var(--ink3); }
   .devbar button { font: inherit; font-size: 13px; padding: 8px 16px; border-radius: var(--pill);
@@ -97,31 +102,83 @@
 
 <!-- 1 ─────────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="intro">
-  <h1 class="step">Three steps.<br>Five minutes.</h1>
+  <h1 class="step">Your page, live<br>in a minute.</h1>
 
   <ul class="rows stack">
-    <li><span class="n">1</span><span class="t">Open your own streaming account</span><span class="meta">3 min</span></li>
-    <li><span class="n">2</span><span class="t">Let Amply set it up for you</span><span class="meta">1 min</span></li>
-    <li><span class="n">3</span><span class="t">Add your music, and set your price</span><span class="meta">up to you</span></li>
+    <li><span class="n">1</span><span class="t">Name your page, and see it live</span><span class="meta">1 min</span></li>
+    <li><span class="n">2</span><span class="t">Make it yours: sign up with Cloudflare</span><span class="meta">1 min</span></li>
+    <li><span class="n">3</span><span class="t">Lock your editor, then add your music</span><span class="meta">1 min</span></li>
   </ul>
 
   <div class="card orange" style="margin-bottom:30px">
-    <h2 style="font-size:clamp(28px,3.4vw,44px);margin-bottom:22px">You'll need a card.<br>Nothing gets charged.</h2>
+    <h2 style="font-size:clamp(28px,3.4vw,44px);margin-bottom:22px">No card needed.</h2>
     <ul class="marks">
-      <li class="yes"><span class="m">&rarr;</span><span>Your hosting service asks for one on sign-up, the way a phone company does.</span></li>
-      <li class="yes"><span class="m">&rarr;</span><span><strong>Amply never sees it, and never charges you anything. Ever.</strong></span></li>
-      <li class="yes"><span class="m">&rarr;</span><span>The free tier covers <strong>10 GB</strong>, over a thousand songs, and around <strong>half a million plays a month</strong>.</span></li>
-      <li class="yes"><span class="m">&rarr;</span><span>Past that it's a few dollars a month, billed by your host, and you can cap it.</span></li>
+      <li class="yes"><span class="m">&rarr;</span><span>Your page runs on Cloudflare's free plan, in an account in your name.</span></li>
+      <li class="yes"><span class="m">&rarr;</span><span><strong>Amply never charges you anything, and keeps no way into your account.</strong></span></li>
+      <li class="yes"><span class="m">&rarr;</span><span>The free plan holds about <strong>250 songs</strong>. If you outgrow it, you can add bigger storage later.</span></li>
     </ul>
   </div>
 
   <p class="muted">This is <strong>your</strong> account, in your name. That's the whole point,
-  nobody can take your music down or change the terms on you. It also means the bill, the
-  password and the account are yours to look after.</p>
+  nobody can take your music down or change the terms on you. It also means the account is
+  yours to look after.</p>
 
   <div class="actions">
-    <button class="btn" data-go="cloudflare">Let's go</button>
+    <button class="btn" data-go="instant">Let's go</button>
     <a class="link" href="/">Not now</a>
+  </div>
+  <p class="muted" style="margin-top:26px">Already have a Cloudflare account?
+    <button class="link" data-go="cloudflare">Use it instead</button></p>
+</section>
+
+<!-- 2, instant ──────────────────────────────────────────────────────── -->
+<section class="panel" data-panel="instant">
+  <h1 class="step">Name your page.</h1>
+  <p class="lead">We'll put it up straight away, in a new Cloudflare account. You make it yours next.</p>
+
+  <label class="f" for="instant-name">
+    <span>Your name</span>
+    <em>This names your page and your link. Use the name you release music under.</em>
+    <input id="instant-name" type="text" autocomplete="off" spellcheck="false" placeholder="Hollow Coast">
+  </label>
+
+  <label class="agree" for="instant-terms">
+    <input id="instant-terms" type="checkbox">
+    <span>The account is Cloudflare's, in your name. I accept Cloudflare's
+      <a href="https://www.cloudflare.com/terms/" target="_blank" rel="noopener">Terms of Service</a> and
+      <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Privacy Policy</a>.</span>
+  </label>
+
+  <div class="actions">
+    <button class="btn" id="instant-btn" disabled>Make my page</button>
+  </div>
+  <div class="back"><button class="link" data-go="intro">&larr; Back</button></div>
+</section>
+
+<!-- 3, claim ────────────────────────────────────────────────────────── -->
+<section class="panel" data-panel="claim">
+  <h1 class="step">Your page is live.<br><span class="orange">Now make it yours.</span></h1>
+
+  <p class="live-url"><a id="live-link" href="#" target="_blank" rel="noopener"></a></p>
+
+  <ul class="rows stack">
+    <li><span class="n">1</span><span class="t">Open the claim page, and sign up or sign in with Cloudflare. Google or Apple works.</span></li>
+    <li><span class="n">2</span><span class="t">Choose to claim the account.</span></li>
+    <li><span class="n">3</span><span class="t">Come back here to lock your editor.</span></li>
+  </ul>
+
+  <div class="actions" style="margin-bottom:26px">
+    <a class="btn" id="claim-link" href="#" target="_blank" rel="noopener">Make it mine &nearr;</a>
+  </div>
+
+  <div class="card orange" style="margin-bottom:30px">
+    <h3 style="margin-bottom:10px" id="claim-deadline">Claim it within the hour</h3>
+    <p style="margin-bottom:0">Until you do, it's a temporary account, and Cloudflare deletes it
+    after an hour. Once it's yours, Amply's access to it ends.</p>
+  </div>
+
+  <div class="actions">
+    <button class="btn ghost" id="claimed-btn">I've claimed it, lock my editor</button>
   </div>
 </section>
 
@@ -180,8 +237,8 @@
 
 <!-- 3 ─────────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="connect">
-  <h1 class="step">Connect it.</h1>
-  <p class="lead">We set your streaming up for you, then remove our own access.</p>
+  <h1 class="step" id="connect-title">Connect it.</h1>
+  <p class="lead" id="connect-lead">We set your streaming up for you, then remove our own access.</p>
 
   <ul class="marks" style="margin-bottom:38px">
     <li class="yes"><span class="m">&check;</span><span>Somewhere for your audio</span></li>
@@ -228,9 +285,10 @@
   <h1 class="step">Setting up.</h1>
   <p class="lead">Under a minute. Put the kettle on.</p>
   <ul class="log" id="log">
+    <li data-state="wait" data-task="preview" hidden><span class="dot"></span><span id="preview-label">Making your account</span></li>
     <li data-state="wait" data-task="account"><span class="dot"></span><span>Finding your account</span></li>
     <li data-state="wait" data-task="bucket"><span class="dot"></span><span>Making somewhere for your audio</span></li>
-    <li data-state="wait" data-task="kv"><span class="dot"></span><span>Making your track list</span></li>
+    <li data-state="wait" data-task="database"><span class="dot"></span><span>Making your track list</span></li>
     <li data-state="wait" data-task="worker"><span class="dot"></span><span>Putting up your page</span></li>
     <li data-state="wait" data-task="subdomain"><span class="dot"></span><span>Giving it an address</span></li>
     <li data-state="wait" data-task="editor"><span class="dot"></span><span>Installing your editor</span></li>
@@ -313,7 +371,7 @@
 <script type="module">
 import { beginAuthorization, readCallback, completeAuthorization, revoke, ALL_SCOPES }
   from "/js/pkce.js";
-import { provision, clearProgress, toSlug, ProvisionError, STEPS }
+import { provision, provisionInstant, pendingPreview, claimLink, clearProgress, toSlug, ProvisionError, STEPS }
   from "/js/provision.js";
 
 const CONFIG = {
@@ -327,7 +385,9 @@ const CONFIG = {
 const KEY = "amply.onboarding.v1";
 const ORDER = ["intro", "cloudflare", "connect", "done"];
 
-let state = { step: "intro", opened: {}, url: "", artistName: "", email: "", editorUrl: null };
+// `path` is "instant" for a page set up before signing up, "cloudflare" for
+// an artist who brought their own account.
+let state = { step: "intro", opened: {}, url: "", artistName: "", email: "", editorUrl: null, path: "instant" };
 try {
   const saved = localStorage.getItem(KEY);
   if (saved) state = Object.assign(state, JSON.parse(saved));
@@ -341,15 +401,23 @@ const $ = (sel) => document.querySelector(sel);
 function show(step) {
   state.step = step; save();
   panels.forEach((p) => p.toggleAttribute("data-active", p.dataset.panel === step));
+  if (step === "connect") paintConnect();
+  if (step === "cloudflare") state.path = "cloudflare";
+  if (step === "instant") state.path = "instant";
+  save();
   let idx = ORDER.indexOf(step);
-  if (["working", "error", "choose"].includes(step)) idx = 2;
+  if (step === "instant") idx = 1;
+  if (step === "claim") idx = 2;
+  if (["working", "error", "choose"].includes(step)) idx = session.mode === "instant" ? 1 : 2;
   stepEls.forEach((li, i) => {
     li.removeAttribute("data-on"); li.removeAttribute("data-done");
     if (i < idx) li.setAttribute("data-done", "");
     if (i === idx) li.setAttribute("data-on", "");
   });
   // The segments carry no text, so the label under them says where you are.
-  const NAMES = ["What happens", "Your storage", "Connect", "Your page"];
+  const NAMES = state.path === "instant"
+    ? ["What happens", "Your page", "Make it yours", "Done"]
+    : ["What happens", "Your storage", "Connect", "Your page"];
   const name = document.getElementById("stepname");
   if (name) name.textContent = `Step ${idx + 1} of 4 \u2014 ${NAMES[idx]}`;
   window.scrollTo({ top: 0, behavior: "instant" });
@@ -436,6 +504,97 @@ connectBtn.addEventListener("click", async () => {
   }
 });
 
+// ── a page before signing up ───────────────────────────────────────────────
+const instantName = $("#instant-name");
+const instantTerms = $("#instant-terms");
+const instantBtn = $("#instant-btn");
+
+function refreshInstant() {
+  state.artistName = instantName.value.trim(); save();
+  nameInput.value = state.artistName;
+  // The account is made in the artist's name, under Cloudflare's terms, so
+  // nothing happens until they have accepted them themselves.
+  instantBtn.disabled = !state.artistName || !instantTerms.checked;
+}
+instantName.value = state.artistName || "";
+instantName.addEventListener("input", refreshInstant);
+instantTerms.addEventListener("change", refreshInstant);
+refreshInstant();
+
+instantBtn.addEventListener("click", () => { if (!instantBtn.disabled) runInstant(); });
+
+/** Which progress lines a run shows: an instant one makes its account, an ordinary one finds it. */
+function logFor(mode) {
+  document.querySelectorAll("#log li").forEach((li) => {
+    li.setAttribute("data-state", "wait");
+    const t = li.dataset.task;
+    li.hidden = mode === "instant" ? (t === "account" || t === "access") : t === "preview";
+  });
+}
+
+async function runInstant() {
+  session.mode = "instant";
+  show("working");
+  logFor("instant");
+  const label = $("#preview-label");
+  try {
+    const made = await provisionInstant({
+      relay: CONFIG.relay,
+      artistName: state.artistName || "Untitled",
+      slug: toSlug(state.artistName),
+      onStep: markStep,
+      onProof: (f) => { label.textContent = `Making your account (${Math.round(f * 100)}%)`; },
+    });
+    session.mode = null;
+    state.url = made.url;
+    save();
+    paintClaim();
+    setTimeout(() => show("claim"), 400);
+  } catch (err) {
+    fail(err instanceof ProvisionError ? err.kind : "unexpected", err.message);
+  }
+}
+
+let claimTimer = null;
+function paintClaim() {
+  const live = $("#live-link");
+  live.href = state.url || "#";
+  live.textContent = state.url ? `${state.url.replace(/^https:\/\//, "")} \u2197` : "";
+  const link = claimLink();
+  const btn = $("#claim-link");
+  const deadline = $("#claim-deadline");
+  clearInterval(claimTimer);
+  if (!link) {
+    // The claim link lives only as long as the tab it was made in. Without
+    // it, either it has been claimed already or the hour has run out.
+    btn.hidden = true;
+    deadline.textContent = "If you've claimed it, lock your editor below. If not, start again: unclaimed accounts are deleted after an hour.";
+    return;
+  }
+  btn.hidden = false;
+  btn.href = link.url;
+  const tick = () => {
+    const left = Math.max(0, Math.round((Date.parse(link.expiresAt) - Date.now()) / 60000));
+    deadline.textContent = left > 0 ? `Claim it within ${left} minute${left === 1 ? "" : "s"}` : "The claim link has expired. Start again.";
+  };
+  tick();
+  claimTimer = setInterval(tick, 30000);
+}
+
+$("#claimed-btn").addEventListener("click", () => show("connect"));
+
+/** The connect step reads differently when it finishes a page that's already live. */
+function paintConnect() {
+  const finishing = !!pendingPreview();
+  $("#connect-title").textContent = finishing ? "Lock your editor." : "Connect it.";
+  // Back from here is back to claiming, for a page that's already live.
+  document.querySelector('[data-panel="connect"] .back .link').dataset.go = finishing ? "claim" : "cloudflare";
+  $("#connect-lead").textContent = finishing
+    ? "Sign in with the Cloudflare account you just claimed. We lock your editor to your email, then remove our own access."
+    : "We set your streaming up for you, then remove our own access.";
+}
+paintConnect();
+
 // ── failure copy ───────────────────────────────────────────────────────────
 // Every one keeps the artist where they are and names the fix.
 const ERRORS = {
@@ -492,6 +651,17 @@ const ERRORS = {
     body: "We lost contact partway through. Your progress was saved, so nothing needs redoing.",
     retry: "Resume setup",
   },
+  preview_failed: {
+    title: "Cloudflare couldn't make your account",
+    body: "Nothing was created, and nothing needs undoing. This is usually temporary.",
+    retry: "Try again",
+  },
+  not_claimed: {
+    title: "That account isn't yours yet",
+    body: "Your page is still in a temporary account. Open the claim link, sign up or sign in, " +
+          "and choose to claim it. Then lock your editor.",
+    retry: "Back to claiming", goto: "claim",
+  },
   cloudflare: { title: "Cloudflare reported a problem", body: "", retry: "Try again" },
   unexpected: { title: "Something went wrong", body: "", retry: "Try again" },
 };
@@ -517,17 +687,23 @@ function fail(kind, detail) {
   const r = document.createElement("button");
   r.className = "btn"; r.textContent = e.retry;
   r.addEventListener("click", () => {
-    if (e.goto) { show(e.goto); return; }
+    // A page being made before signup goes back into that flow, not to the
+    // screens for an account the artist doesn't have.
+    if (session.mode === "instant") { if (e.goto) show("instant"); else runInstant(); return; }
+    if (e.goto) { if (e.goto === "claim") paintClaim(); show(e.goto); return; }
     // Resume: progress is persisted, so completed steps are skipped.
     if (session.token) runProvision(session.token);
     else show("connect");
   });
   acts.appendChild(r);
+  document.querySelector('[data-panel="error"] .back .link').dataset.go =
+    session.mode === "instant" ? "instant" : "cloudflare";
   show("error");
 }
 
 // ── provisioning ───────────────────────────────────────────────────────────
-const session = { token: null, withAccess: true };
+// `mode` is "instant" while a page is being made before signup.
+const session = { token: null, withAccess: true, mode: null };
 
 // Amply leaves when the artist does, whatever state setup is in. A successful
 // run revokes the token itself (below). A failed one keeps it, deliberately,
@@ -566,8 +742,9 @@ function markStep(id, s, detail) {
 }
 
 async function runProvision(token, chosenAccountId = null) {
+  session.mode = null;
   show("working");
-  document.querySelectorAll("#log li").forEach((li) => li.setAttribute("data-state", "wait"));
+  logFor("setup");
 
   try {
     const { url, editorUrl, skipped } = await provision({
@@ -677,7 +854,14 @@ async function watchCertificate(url) {
 // ── returning from Cloudflare ──────────────────────────────────────────────
 (async function handleCallback() {
   const cb = readCallback();
-  if (!cb) { paintTasks(); show(["working", "error", "choose"].includes(state.step) ? "connect" : state.step); return; }
+  if (!cb) {
+    paintTasks();
+    if (state.step === "claim") paintClaim();
+    // A page interrupted while being made goes back to where it started.
+    const back = state.path === "instant" && !pendingPreview() ? "instant" : "connect";
+    show(["working", "error", "choose"].includes(state.step) ? back : state.step);
+    return;
+  }
 
   // Drop the code from the URL so a refresh cannot replay it.
   history.replaceState({}, "", "/start");
@@ -717,8 +901,9 @@ $("#share").addEventListener("click", (ev) => {
 $("#reset").addEventListener("click", () => {
   try { localStorage.removeItem(KEY); } catch {}
   clearProgress();
-  state = { step: "intro", opened: {}, url: "", artistName: "" };
-  nameInput.value = ""; refreshName(); paintTasks(); show("intro");
+  state = { step: "intro", opened: {}, url: "", artistName: "", path: "instant" };
+  nameInput.value = ""; instantName.value = ""; instantTerms.checked = false;
+  refreshName(); refreshInstant(); paintTasks(); paintConnect(); show("intro");
 });
 </script>
 </body>
