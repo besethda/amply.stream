@@ -1330,11 +1330,120 @@ var MANAGE_CSP = [
   "frame-ancestors 'none'"
 ].join("; ");
 
+// src/media.ts
+var KV_MAX = 25 * 1024 * 1024;
+var R2_MAX = 100 * 1024 * 1024;
+var MediaTooLarge = class extends Error {
+  limit;
+  constructor(limit) {
+    super(`files here can be at most ${Math.floor(limit / 1024 / 1024)} MB`);
+    this.limit = limit;
+  }
+};
+function media(env) {
+  if (env.MEDIA) return r2Media(env.MEDIA);
+  if (env.MEDIA_KV) return kvMedia(env.MEDIA_KV);
+  throw new Error("this node has no storage bound (MEDIA or MEDIA_KV)");
+}
+function r2Media(bucket) {
+  return {
+    get: (key, options) => bucket.get(key, options ?? {}),
+    head: (key) => bucket.head(key),
+    put: (key, body, options) => bucket.put(key, body, options),
+    delete: (key) => bucket.delete(key)
+  };
+}
+function maxObject(env) {
+  return env.MEDIA ? R2_MAX : KV_MAX;
+}
+async function etagOf(bytes) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return Array.from(digest.slice(0, 16), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+function parseRange(header, size) {
+  if (!header) return void 0;
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim());
+  if (!m || m[1] === "" && m[2] === "") return void 0;
+  if (m[1] === "") {
+    const suffix = Number(m[2]);
+    if (suffix === 0) throw new RangeError("unsatisfiable range");
+    const length = Math.min(suffix, size);
+    return { offset: size - length, length };
+  }
+  const offset = Number(m[1]);
+  if (offset >= size) throw new RangeError("unsatisfiable range");
+  const end = m[2] === "" ? size - 1 : Math.min(Number(m[2]), size - 1);
+  if (end < offset) return void 0;
+  return { offset, length: end - offset + 1 };
+}
+var tags = (header) => header.split(",").map((t) => t.trim().replace(/^W\//, "").replace(/^"|"$/g, ""));
+function conditionsHold(headers, meta) {
+  if (!headers) return true;
+  const ifMatch = headers.get("If-Match");
+  if (ifMatch && !tags(ifMatch).some((t) => t === "*" || t === meta.etag)) return false;
+  const ifNoneMatch = headers.get("If-None-Match");
+  if (ifNoneMatch) return !tags(ifNoneMatch).some((t) => t === "*" || t === meta.etag);
+  const since = Date.parse(headers.get("If-Modified-Since") ?? "");
+  if (!Number.isNaN(since) && Math.floor(meta.uploaded / 1e3) <= Math.floor(since / 1e3)) return false;
+  const unmodified = Date.parse(headers.get("If-Unmodified-Since") ?? "");
+  if (!Number.isNaN(unmodified) && Math.floor(meta.uploaded / 1e3) > Math.floor(unmodified / 1e3)) return false;
+  return true;
+}
+function described(meta, range) {
+  return {
+    size: meta.size,
+    httpEtag: `"${meta.etag}"`,
+    range,
+    writeHttpMetadata(headers) {
+      if (meta.type) headers.set("Content-Type", meta.type);
+    }
+  };
+}
+async function metaFor(bytes, meta) {
+  return meta ?? { size: bytes.byteLength, etag: await etagOf(bytes), uploaded: 0 };
+}
+function kvMedia(kv) {
+  const store = kv;
+  return {
+    async get(key, options = {}) {
+      const { value, metadata } = await store.getWithMetadata(key, { type: "arrayBuffer" });
+      if (value === null) return null;
+      const meta = await metaFor(value, metadata);
+      if (!conditionsHold(options.onlyIf, meta)) return described(meta);
+      const range = parseRange(options.range?.get("Range") ?? null, meta.size);
+      const bytes = range ? value.slice(range.offset, range.offset + range.length) : value;
+      return { ...described(meta, range), body: new Blob([bytes]).stream() };
+    },
+    async head(key) {
+      const { value, metadata } = await store.getWithMetadata(key, { type: "stream" });
+      if (value === null) return null;
+      if (metadata) {
+        await value.cancel();
+        return described(metadata);
+      }
+      return described(await metaFor(await new Response(value).arrayBuffer(), null));
+    },
+    async put(key, body, options = {}) {
+      const bytes = await new Response(body).arrayBuffer();
+      if (bytes.byteLength > KV_MAX) throw new MediaTooLarge(KV_MAX);
+      const meta = {
+        type: options.httpMetadata?.contentType,
+        size: bytes.byteLength,
+        etag: await etagOf(bytes),
+        uploaded: Date.now()
+      };
+      await store.put(key, bytes, { metadata: meta });
+    },
+    async delete(key) {
+      await store.delete(key);
+    }
+  };
+}
+
 // src/index.ts
 var MANIFEST_KEY = "manifest";
 var ACCESS_KEY = "access";
 var MANAGE_PREFIX = "manage";
-var MAX_OBJECT = 100 * 1024 * 1024;
 var MAX_MANIFEST = 2 * 1024 * 1024;
 var AUDIO_TYPES = {
   mp3: "audio/mpeg",
@@ -1400,12 +1509,12 @@ async function serveObject(env, request, key, cacheControl, fallbackType) {
   const wantsRange = request.headers.has("Range");
   let object;
   try {
-    object = await env.MEDIA.get(key, {
+    object = await media(env).get(key, {
       range: request.headers,
       onlyIf: request.headers
     });
   } catch {
-    const meta = await env.MEDIA.head(key);
+    const meta = await media(env).head(key);
     if (meta === null) return fail(404, "not found");
     const h = withCors(new Headers());
     h.set("Content-Range", `bytes */${meta.size}`);
@@ -1496,8 +1605,8 @@ async function handleManage(request, env, path) {
     if (!sameOrigin) return fail(403, "that request did not come from your editor");
   }
   if (request.method === "GET" && (path === "" || path === "/")) {
-    const obj = await env.MEDIA.get(`${MANAGE_PREFIX}/index.html`);
-    if (obj === null) return fail(404, "editor not installed on this node");
+    const obj = await media(env).get(`${MANAGE_PREFIX}/index.html`);
+    if (obj === null || !("body" in obj)) return fail(404, "editor not installed on this node");
     const h = noStore({ "Content-Type": "text/html; charset=utf-8" });
     h.set("Content-Security-Policy", MANAGE_CSP);
     return new Response(obj.body, { status: 200, headers: h });
@@ -1623,20 +1732,26 @@ async function handleManage(request, env, path) {
     cachedManifest = null;
     return new Response(null, { status: 204, headers: noStore() });
   }
-  const media = path.match(/^\/(audio|art)\/(.+)$/);
-  if (media) {
-    const key = safeKey(media[1], media[2]);
+  const kind = path.match(/^\/(audio|art)\/(.+)$/);
+  if (kind) {
+    const key = safeKey(kind[1], kind[2]);
     if (key === null) return fail(400, "bad key");
     if (request.method === "PUT") {
       const length = Number(request.headers.get("Content-Length") || 0);
-      if (length > MAX_OBJECT) return fail(413, "file too large");
-      await env.MEDIA.put(key, request.body, {
-        httpMetadata: { contentType: storedType(media[1], key) }
-      });
+      const limit = maxObject(env);
+      if (length > limit) return fail(413, new MediaTooLarge(limit).message);
+      try {
+        await media(env).put(key, request.body, {
+          httpMetadata: { contentType: storedType(kind[1], key) }
+        });
+      } catch (e) {
+        if (e instanceof MediaTooLarge) return fail(413, e.message);
+        throw e;
+      }
       return new Response(null, { status: 204, headers: noStore() });
     }
     if (request.method === "DELETE") {
-      await env.MEDIA.delete(key);
+      await media(env).delete(key);
       return new Response(null, { status: 204, headers: noStore() });
     }
   }
@@ -1801,12 +1916,12 @@ async function handleListen(request, env, path) {
     } catch {
     }
     if (!key) return fail(409, "this song's file isn't kept on this server");
-    const head = await env.MEDIA.head(key);
+    const head = await media(env).head(key);
     if (!head) return fail(404, "that file is missing");
     const taken = await takeDownload(env.DB, manifest, proof.address, trackId);
     if (!taken) return fail(403, "you don't own this song here, or its downloads are used up");
-    const object = await env.MEDIA.get(key);
-    if (!object) return fail(404, "that file is missing");
+    const object = await media(env).get(key);
+    if (!object || !("body" in object)) return fail(404, "that file is missing");
     const ext = key.split(".").pop() || "mp3";
     const name = `${track.title}.${ext}`;
     const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
