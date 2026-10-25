@@ -43,6 +43,29 @@ Nothing here is promised. It's the direction, roughly in order.
 
 ## Artists: setting up in minutes
 
+- **A live page before signing up, with no card.** Cloudflare can create a
+  temporary account before anyone has one. `scripts/prove-temporary-account.mjs`
+  proved it end to end: no key of Amply's is needed, the proof-of-work takes
+  about a second, a node with KV and D1 deploys and serves, everything survives
+  the claim, and the setup token is refused (401) afterwards. The new setup:
+  1. The artist enters their name and accepts Cloudflare's terms themselves.
+  2. Their browser creates the temporary account through the relay (the API
+     has no CORS) and solves the proof-of-work. The token stays in the
+     browser, as the OAuth token does today.
+  3. Setup deploys the node with audio in **KV**, not R2 (temporary accounts
+     can't use R2), and uploads a first song and artwork.
+  4. The artist sees their page live, then claims it: sign up or in with
+     Google or Apple, within the hour. Unclaimed setups delete themselves.
+  5. "Finish setup" runs the existing one-time OAuth flow to switch on the
+     editor lock (Access). Until then the node is read-only, as it already is
+     without Access.
+  6. R2 stays optional, for artists who outgrow KV's free 1 GB. Most never
+     need to add a card.
+
+  Work: KV storage in the node (started), two relay routes
+  (`/provisioning/previews/challenge`, `/provisioning/previews`) with their
+  bodies inspected, the new setup screens, and README updates so the claims
+  table covers the new flow.
 - **One-click Stripe.** Waiting on Stripe's review of the Amply for Artists
   app. Until then the editor shows the manual restricted-key steps.
 - **Timed first-run tests.** Watch musicians who have never used Cloudflare

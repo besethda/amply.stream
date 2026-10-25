@@ -30,9 +30,12 @@ import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
 import { ICONS, MANIFEST_PATH, studioManifest } from "./studio";
 
 import { VERSION, SPEC_VERSION, MANAGE_CSP } from "./constants";
+import { media, maxObject, MediaTooLarge, type MediaObject, type MediaObjectBody } from "./media";
 
 export interface Env {
-  MEDIA: R2Bucket;
+  /** Where files live: R2, or KV for a node that started without it (media.ts). */
+  MEDIA?: R2Bucket;
+  MEDIA_KV?: KVNamespace;
   DB: D1Database;
   /** Cloudflare's rate limiters (limits.ts). Absent on services built before them. */
   LIMIT_LISTEN?: Limiter;
@@ -44,7 +47,6 @@ export interface Env {
 const MANIFEST_KEY = "manifest";
 const ACCESS_KEY = "access";       // { team, aud } — written at setup
 const MANAGE_PREFIX = "manage";    // the editor's own files, never public
-const MAX_OBJECT = 100 * 1024 * 1024;
 const MAX_MANIFEST = 2 * 1024 * 1024;
 
 /**
@@ -134,16 +136,16 @@ async function serveObject(
   // sent, so trusting it alone makes every plain GET a 206.
   const wantsRange = request.headers.has("Range");
 
-  let object: R2ObjectBody | R2Object | null;
+  let object: MediaObjectBody | MediaObject | null;
   try {
-    object = await env.MEDIA.get(key, {
+    object = await media(env).get(key, {
       range: request.headers,
       onlyIf: request.headers,
     });
   } catch {
     // R2 throws on a Range that cannot be satisfied. RFC 9110 wants a 416
     // carrying the real length so the client can correct itself.
-    const meta = await env.MEDIA.head(key);
+    const meta = await media(env).head(key);
     if (meta === null) return fail(404, "not found");
     const h = withCors(new Headers());
     h.set("Content-Range", `bytes */${meta.size}`);
@@ -287,8 +289,8 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
   // The editor itself, stored in R2 and served only to a signed-in artist.
   if (request.method === "GET" && (path === "" || path === "/")) {
-    const obj = await env.MEDIA.get(`${MANAGE_PREFIX}/index.html`);
-    if (obj === null) return fail(404, "editor not installed on this node");
+    const obj = await media(env).get(`${MANAGE_PREFIX}/index.html`);
+    if (obj === null || !("body" in obj)) return fail(404, "editor not installed on this node");
     const h = noStore({ "Content-Type": "text/html; charset=utf-8" });
     h.set("Content-Security-Policy", MANAGE_CSP);
     return new Response(obj.body, { status: 200, headers: h });
@@ -425,21 +427,27 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
   // Media writes are confined to the two public prefixes, so the editor can
   // never overwrite its own files or reach anything else in the bucket.
-  const media = path.match(/^\/(audio|art)\/(.+)$/);
-  if (media) {
-    const key = safeKey(media[1], media[2]);
+  const kind = path.match(/^\/(audio|art)\/(.+)$/);
+  if (kind) {
+    const key = safeKey(kind[1], kind[2]);
     if (key === null) return fail(400, "bad key");
 
     if (request.method === "PUT") {
       const length = Number(request.headers.get("Content-Length") || 0);
-      if (length > MAX_OBJECT) return fail(413, "file too large");
-      await env.MEDIA.put(key, request.body, {
-        httpMetadata: { contentType: storedType(media[1], key) },
-      });
+      const limit = maxObject(env);
+      if (length > limit) return fail(413, new MediaTooLarge(limit).message);
+      try {
+        await media(env).put(key, request.body, {
+          httpMetadata: { contentType: storedType(kind[1], key) },
+        });
+      } catch (e) {
+        if (e instanceof MediaTooLarge) return fail(413, e.message);
+        throw e;
+      }
       return new Response(null, { status: 204, headers: noStore() });
     }
     if (request.method === "DELETE") {
-      await env.MEDIA.delete(key);
+      await media(env).delete(key);
       return new Response(null, { status: 204, headers: noStore() });
     }
   }
@@ -636,12 +644,12 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
       if (u.origin === new URL(request.url).origin && u.pathname.startsWith("/audio/")) key = safeKey("audio", u.pathname.slice("/audio/".length));
     } catch { /* not a URL */ }
     if (!key) return fail(409, "this song's file isn't kept on this server");
-    const head = await env.MEDIA.head(key);
+    const head = await media(env).head(key);
     if (!head) return fail(404, "that file is missing");
     const taken = await takeDownload(env.DB, manifest, proof.address, trackId);
     if (!taken) return fail(403, "you don't own this song here, or its downloads are used up");
-    const object = await env.MEDIA.get(key);
-    if (!object) return fail(404, "that file is missing");
+    const object = await media(env).get(key);
+    if (!object || !("body" in object)) return fail(404, "that file is missing");
     const ext = key.split(".").pop() || "mp3";
     const name = `${track.title}.${ext}`;
     const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
