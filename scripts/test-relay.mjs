@@ -90,5 +90,64 @@ const good = {
   ok("  nor a namespace removed", await status("DELETE", `/accounts/${acc}/storage/kv/namespaces/${ns}`) === 403);
 }
 
+// ── the card top-up page ────────────────────────────────────────────────────
+{
+  const ADDR = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU";
+  const page = (q) => relay.fetch(new Request(`https://relay.test/topup?${q}`), env);
+
+  const res = await page(`address=${ADDR}&currency=usdc&amount=20`);
+  const html = await res.text();
+  ok("the top-up page opens with no Origin, as a page does", res.status === 200);
+  ok("  shows the address to paste", html.includes(ADDR));
+  ok("  says how much, and in what", html.includes("$20 of USDC"));
+  const csp = res.headers.get("Content-Security-Policy") || "";
+  ok("  allows only its own script and Stripe's", /script-src 'self' https:\/\/crypto-js\.stripe\.com\/crypto-onramp-outer\.js(;|$)/.test(csp), csp);
+  ok("  and no inline script at all", !/unsafe-inline[^;]*;?/.test(csp.split("; ").find((d) => d.startsWith("script-src")) || ""));
+  ok("  sends no referrer to Stripe", res.headers.get("Referrer-Policy") === "no-referrer");
+  ok("  and can't be framed", csp.includes("frame-ancestors 'none'"));
+  ok("  and isn't cached", res.headers.get("Cache-Control") === "no-store");
+
+  const refused = async (name, q) => ok(name, (await page(q)).status === 400);
+  await refused("an address that isn't one is refused", "address=not-an-address");
+  await refused("  as is markup posing as one", `address=${encodeURIComponent('<script>x</script>')}`);
+  await refused("an amount that isn't offered is refused", `address=${ADDR}&amount=1000000`);
+  await refused("a currency that isn't USDC or SOL is refused", `address=${ADDR}&currency=btc`);
+  ok("SOL can be bought too, in any amount", (await page(`address=${ADDR}&currency=sol`)).status === 200);
+
+  // Run the page's script against a stand-in for Stripe's, in a fake page.
+  const js = await (await relay.fetch(new Request("https://relay.test/topup.js"), env)).text();
+  const params = JSON.parse(html.match(/<script id="params" type="application\/json">(.*?)<\/script>/s)[1]);
+  const run = (getUrl) => {
+    const els = {
+      params: { textContent: JSON.stringify(params) },
+      go: { disabled: true, listeners: {}, addEventListener(t, f) { this.listeners[t] = f; } },
+      said: { textContent: "Loading" },
+    };
+    let asked = null, went = null, copied = null;
+    const window = { StripeOnramp: { Standalone: (o) => { asked = o; return { getUrl }; } } };
+    const document = { getElementById: (id) => els[id] };
+    const location = { assign: (u) => { went = u; } };
+    const navigator = { clipboard: { writeText: (t) => { copied = t; return Promise.resolve(); } } };
+    new Function("window", "document", "location", "navigator", js)(window, document, location, navigator);
+    return { els, asked: () => asked, went: () => went, copied: () => copied };
+  };
+
+  const good = run(() => "https://crypto.link.com/?ref=x");
+  ok("the script asks Stripe for USDC on Solana only", JSON.stringify(good.asked()?.supported_destination_networks) === '["solana"]'
+    && good.asked()?.destination_currency === "usdc" && good.asked()?.amount?.source_amount === "20");
+  ok("  and enables the button once it has a link", good.els.go.disabled === false);
+  await good.els.go.listeners.click();
+  await new Promise((r) => setTimeout(r, 0));
+  ok("  which copies the address", good.copied() === ADDR);
+  ok("  and goes to Stripe", good.went() === "https://crypto.link.com/?ref=x");
+
+  const bare = run(() => "https://crypto.link.com?ref=x");
+  ok("  a link with no path is still Stripe's", bare.els.go.disabled === false);
+  const lookalike = run(() => "https://link.com.evil.test/");
+  ok("  but one that only starts like it isn't", lookalike.els.go.disabled === true);
+  const bad = run(() => "https://evil.test/phish");
+  ok("a link that isn't Stripe's is never followed", bad.els.go.disabled === true && /didn't load/.test(bad.els.said.textContent));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

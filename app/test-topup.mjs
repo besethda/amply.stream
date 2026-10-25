@@ -14,7 +14,7 @@ globalThis.localStorage = {
   removeItem: (k) => store.delete(k),
 };
 
-const { transferRequest, DOLLAR_AMOUNTS, FEE_SOL, oneTapReady } = await import("./src/topup.js");
+const { transferRequest, DOLLAR_AMOUNTS, FEE_SOL, oneTapReady, topupUrl, CARD_AMOUNTS, TOPUP_PAGE } = await import("./src/topup.js");
 const { NETWORKS } = await import("./src/networks.js");
 const pay = await import("./src/pay.js");
 const { Keypair } = await import("@solana/web3.js");
@@ -88,6 +88,20 @@ await refuses("and sending a wallet's money to itself",
   () => pay.sendDollarsOut(pair, pair.publicKey.toBase58()), /own address/);
 await refuses("the SOL is refused the same way",
   () => pay.sendSolOut(pair, "0x1234"), /isn't a Solana address/);
+
+// ── adding money by card ────────────────────────────────────────────────────
+{
+  const url = new URL(topupUrl(ADDRESS, { amount: 20 }));
+  ok("a card top-up opens on the relay's page, never in this app's origin", url.origin !== "https://amply.stream" && TOPUP_PAGE.startsWith(url.origin));
+  ok("  for this wallet", url.searchParams.get("address") === ADDRESS);
+  ok("  in USDC, for the amount picked", url.searchParams.get("currency") === "usdc" && url.searchParams.get("amount") === "20");
+  ok("the amounts start where Stripe's fixed fee stops mattering much", Math.min(...CARD_AMOUNTS) >= 10);
+  let threw = false;
+  try { topupUrl(ADDRESS, { amount: 3 }); } catch { threw = true; }
+  ok("an amount that isn't offered is refused here too", threw);
+  const sol = new URL(topupUrl(ADDRESS, { currency: "sol" }));
+  ok("SOL for fees comes with no amount: the listener picks it at Stripe", sol.searchParams.get("currency") === "sol" && !sol.searchParams.has("amount"));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
