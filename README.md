@@ -52,6 +52,8 @@ These are properties of the architecture, not promises:
   Access, signing in with a code emailed to them. There is no hosted copy.
 - **Keeps no credential.** Setup never requests `offline_access` and never accepts a refresh
   token. Access to an artist's account lasts for one flow and is then gone for good.
+  An artist without a Cloudflare account starts in a temporary one Cloudflare makes for
+  them; its token lives only in their browser tab, and claiming the account ends it.
 - **Stores nothing.** No accounts, no database, no analytics, no record that an artist
   exists. Nodes are found by listing an account, not by looking anyone up.
 - **Takes no cut.** Payments go from listener to artist. Amply is not in the transaction.
@@ -66,6 +68,7 @@ They are only worth something if you can check them, so here is where to look:
 | Nothing is stored or logged | [`relay/src/index.ts`](relay/src/index.ts): no storage bindings at all, `observability` off |
 | The relay cannot be used as a general proxy | Same file: an exact method-and-path allowlist |
 | Only a one-time PIN provider can be created | Same file: the request body is inspected, not just the path |
+| A temporary account is made only with Cloudflare's terms accepted, and leaves no access once claimed | [`relay/src/index.ts`](relay/src/index.ts) checks the request; [`site/js/provision.js`](site/js/provision.js) keeps the token in the tab, not in storage that outlives it |
 | The node has no write path without Access | [`node/src/index.ts`](node/src/index.ts), and it fails closed with no configuration |
 | Sign-in cannot be forged | [`node/src/access.ts`](node/src/access.ts): the assertion is verified in the Worker, not assumed from the edge |
 

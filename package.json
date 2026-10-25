@@ -8,7 +8,7 @@
     "build": "npm run build:node && npm run build:manage && npm run build:licence && npm run build:app && npm run build:version",
     "build:node": "npm --prefix node run build:site",
     "build:manage": "npm --prefix manage run build",
-    "check": "npm run build && node spec/validate.mjs spec/example.json && npm run test:manage && npm run test:app && npm run test:csp && npm run test:store && npm run test:page && npm run test:stripe && npm run test:sales && npm run test:limits && npm run test:media && npm run test:pricing && npm run test:provision && npm --prefix node run typecheck && npm --prefix relay run typecheck",
+    "check": "npm run build && node spec/validate.mjs spec/example.json && npm run test:manage && npm run test:app && npm run test:csp && npm run test:store && npm run test:page && npm run test:stripe && npm run test:sales && npm run test:limits && npm run test:media && npm run test:pricing && npm run test:provision && npm run test:relay && npm --prefix node run typecheck && npm --prefix relay run typecheck",
     "deploy:site": "npm run build && ./node/node_modules/.bin/wrangler pages deploy site --project-name=amply",
     "deploy:relay": "npm --prefix relay run deploy",
     "test:node": "node/test-node.sh",
@@ -26,7 +26,8 @@
     "test:media": "node --experimental-strip-types node/test-media.mjs",
     "test:pricing": "node spec/test-pricing.mjs && node spec/test-domain.mjs && node spec/test-waves.mjs && node spec/test-colors.mjs",
     "build:licence": "node scripts/build-licence.mjs",
-    "test:provision": "node scripts/test-provision.mjs && node scripts/test-migrate.mjs && node scripts/test-access.mjs && node scripts/test-attach.mjs",
+    "test:provision": "node scripts/test-provision.mjs && node scripts/test-migrate.mjs && node scripts/test-access.mjs && node scripts/test-attach.mjs && node scripts/test-instant.mjs && node scripts/test-pow.mjs",
+    "test:relay": "node --experimental-strip-types scripts/test-relay.mjs",
     "build:app": "npm --prefix app run build",
     "test:app": "npm --prefix app run test",
     "build:version": "node scripts/node-version.mjs && cp spec/manifest-rules.mjs site/js/manifest-rules.mjs && node scripts/security-headers.mjs"
