@@ -42,6 +42,14 @@ const MAX_ART = 8 * 1024 * 1024;
 /** How long a song we quote prices against. Long enough to be honest, round
  *  enough to do in your head. */
 const TYPICAL_SONG_MIN = 4;
+/**
+ * The price a new artist starts with: half a cent a minute, about 2¢ for a
+ * four-minute song. Several times what a stream pays elsewhere, and still
+ * only a few dollars a month for a fan who listens every day.
+ */
+export const DEFAULT_RATE = 0.005;
+/** What a stream typically pays elsewhere, in dollars, for the comparison beside the price. */
+const STREAM_PAYS_ELSEWHERE = 0.004;
 
 /** Price input to dollars: a number to the cent, or null for "not for sale". */
 export function salePrice(text) {
@@ -577,7 +585,39 @@ function Release({
   );
 }
 
-function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf, charging }) {
+/**
+ * What a new artist does, in order, until their music is live: shown at the
+ * top of the music tab, which is where they land, rather than anywhere they
+ * would have to go looking.
+ */
+function FirstSteps({ hasMusic, paid, live, url, onSettings, onAdd }) {
+  const step = (n, done, title, detail) => (
+    <li class={done ? "done" : ""}>
+      <span class="n">{done ? "✓" : n}</span>
+      <span class="t">{title}{detail && <span class="detail">{detail}</span>}</span>
+    </li>
+  );
+  return (
+    <section class="card first-steps">
+      <h2>Getting started</h2>
+      <ol class="steps">
+        {step(1, hasMusic, "Add your music",
+          <>Make a release (an album, an EP or a single), then add your songs to it.{" "}
+            <button class="quiet-link" onClick={onAdd}>+ Add a release</button></>)}
+        {step(2, paid, "Choose how you're paid",
+          <>Set your price and where the money goes, in{" "}
+            <button class="quiet-link" onClick={onSettings}>Settings</button>. Or skip this, and your music is free.</>)}
+        {step(3, live, "Publish",
+          <>Press <b>Publish changes</b> at the top. Nothing is public until you do.</>)}
+        {step(4, false, "Share your link",
+          <>Send it to people who already listen to you.{" "}
+            <CopyButton text={url} label="Copy your link" /></>)}
+      </ol>
+    </section>
+  );
+}
+
+function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf, charging, paid, live, onSettings }) {
   const trackCount = (manifest.releases || []).reduce((n, r) => n + (r.tracks?.length || 0), 0);
 
   const addRelease = () => {
@@ -601,6 +641,9 @@ function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf,
       </div>
 
       <div class="stack">
+        {!live && (
+          <FirstSteps hasMusic={trackCount > 0} paid={paid} live={live} url={node.url} onSettings={onSettings} onAdd={addRelease} />
+        )}
         {(manifest.releases || []).map((r, i) => (
           <Release
             key={r.id} release={r} node={node} manifest={manifest} charging={charging}
@@ -612,9 +655,10 @@ function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf,
           />
         ))}
 
-        {!manifest.releases?.length && (
+        {/* While the steps above are showing, they already say this. */}
+        {live && !manifest.releases?.length && (
           <section class="card nothing">
-            <h2>Nothing here yet. <Help about="releases">A release is an album, an EP or a single. Make one, add your audio, and publish.</Help></h2>
+            <h2>No music yet. <Help about="releases">A release is an album, an EP or a single. Make one, add your songs to it, and publish.</Help></h2>
             <button class="btn sm" onClick={addRelease}>+ Add a release</button>
           </section>
         )}
@@ -690,12 +734,13 @@ export function withPrice(wallet, rate) {
 }
 
 function Price({ wallet, onChange, hasAddress, subscribing }) {
-  const rate = wallet.ratePerMinute ?? 0.01;
+  const rate = wallet.ratePerMinute ?? DEFAULT_RATE;
   const song = rate * TYPICAL_SONG_MIN;
+  const times = song / STREAM_PAYS_ELSEWHERE;
   return (
     <section class="card">
       <h2>Your price <Help at="price" about="your price">Listeners pay by the minute, so a long piece is worth more than a short one.</Help></h2>
-      {!hasAddress && (wallet.ratePerMinute ?? 0.01) > 0 && (
+      {!hasAddress && rate > 0 && (
         <p class="price-pending">
           Your price isn't on your page yet, because there's nowhere for the money to go. Add a
           payment address under Who gets paid and it will publish with it. Until then your music
@@ -745,7 +790,9 @@ function Price({ wallet, onChange, hasAddress, subscribing }) {
               ? (subscribing
                   ? "Listeners pay by subscription only. Set a price here to offer both."
                   : "Nobody is charged. You can change this at any time.")
-              : `Ten songs comes to about ${cents(song * 10)}.`}
+              : `Ten songs comes to about ${cents(song * 10)}.${times >= 1.5
+                  ? ` That's about ${Math.round(times)} times what a stream pays elsewhere, and all of it is yours.`
+                  : ""}`}
           </p>
         </div>
       </div>
@@ -1018,7 +1065,7 @@ function Subscriptions({ manifest, update, api }) {
 }
 
 function Payout({ wallet, onChange, subscribing }) {
-  const rate = wallet.ratePerMinute ?? 0.01;
+  const rate = wallet.ratePerMinute ?? DEFAULT_RATE;
   const batch = batchOf(wallet);
   const amount = settleFor(batch, rate);
   return (
@@ -1299,7 +1346,7 @@ function OwnDomain({ manifest, update }) {
 function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, dirty, saving, onPublish, api, onSignOut }) {
   const artist = manifest.artist || {};
   const wallet = (manifest.payment || []).find((p) => p.type === "solana-usdc")
-    || { type: "solana-usdc", ratePerMinute: 0.01, settleAt: settleFor(DEFAULT_BATCH, 0.01) };
+    || { type: "solana-usdc", ratePerMinute: DEFAULT_RATE, settleAt: settleFor(DEFAULT_BATCH, DEFAULT_RATE) };
   const links = artist.links || [];
 
   const setArtist = (next) => update({ ...manifest, artist: { ...artist, ...next } });
@@ -1772,20 +1819,10 @@ function EarningsTab({ node, published, api, payees, rate, network, settleAt }) 
       <Listeners api={api} payees={payees} rate={rate} network={network} settleAt={settleAt} />
 
       <section class="card nothing">
-        <h2>Getting started</h2>
-
-        <ol class="steps">
-          <li>
-            <span class="n">1</span>
-            <span class="t">Your music is up and published</span>
-            <span class="s">{published ? "done" : "not yet"}</span>
-          </li>
-          <li>
-            <span class="n">2</span>
-            <span class="t">Send your link to people who already listen</span>
-            <span class="s">up to you</span>
-          </li>
-        </ol>
+        <h2>Share your link</h2>
+        <p>{published
+          ? "Listeners find you through it. Send it to people who already listen to you."
+          : "Publish your music first (Music tab), then send this to people who already listen to you."}</p>
 
         <div class="copy-row">
           <CopyButton text={node.url} label="Copy your link" className="btn sm" />
@@ -1949,7 +1986,7 @@ export function buildManifest(manifest, payees) {
   // wallet in the manifest yet. Their address still has to be published, so
   // fall back to the same defaults the settings tab shows them.
   const wallet = (manifest.payment || []).find((p) => p.type === "solana-usdc")
-    || { type: "solana-usdc", ratePerMinute: 0.01, settleAt: settleFor(DEFAULT_BATCH, 0.01) };
+    || { type: "solana-usdc", ratePerMinute: DEFAULT_RATE, settleAt: settleFor(DEFAULT_BATCH, DEFAULT_RATE) };
   const paid = writePayees(wallet, payees);
   return {
     ...manifest, amply: 1, updated: new Date().toISOString(),
@@ -2252,6 +2289,8 @@ export function Editor({ api, node, initial, published = true, initialTab = "mus
             manifest={manifest} node={node} update={update}
             upload={upload} art={art} notify={notify} player={player}
             sizeOf={api.sizeOf} charging={charging}
+            live={musicIsLive} onSettings={() => setTab("settings")}
+            paid={payees.some((p) => p.address) || (next.payment || []).some((p) => p.type === "stripe-subscription")}
           />
         )}
         {tab === "settings" && (

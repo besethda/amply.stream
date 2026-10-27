@@ -527,6 +527,11 @@ input[type=range] {
 .steps .n { font-weight: 800; color: var(--orange); flex: none; }
 .steps .t { flex: 1; font-weight: 600; }
 .steps .s { font-family: var(--mono); font-size: 13.5px; color: var(--ink3); }
+.steps .detail { display: block; font-weight: 400; font-size: 15.5px; color: var(--ink2); margin-top: 4px; }
+.steps li.done .t { color: var(--ink3); }
+.steps li.done .detail { display: none; }
+.first-steps h2 { margin-bottom: 0; }
+.first-steps .steps { margin-bottom: 0; }
 
 .copy-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 22px; }
 .copy-row code {
