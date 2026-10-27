@@ -8,7 +8,7 @@
  */
 import { useState, useEffect } from "preact/hooks";
 import { machinery, markBackupSaved, onHomeScreen } from "./paying.js";
-import { transferRequest, DOLLAR_AMOUNTS, FEE_SOL, oneTapReady } from "./topup.js";
+import { transferRequest, DOLLAR_AMOUNTS, FEE_SOL, oneTapReady, topupUrl, CARD_AMOUNTS } from "./topup.js";
 import { Icon } from "./icons.jsx";
 import { ask } from "./sheets.jsx";
 
@@ -143,6 +143,25 @@ export function TopUp({ address, balance, network }) {
 
   return (
     <div class="stack">
+      <div class="stack">
+        <b>Add money by card</b>
+        <span class="dim small">Through Stripe. Paste your address when it asks, and choose Solana.
+          $20 lasts months of everyday listening.</span>
+        <div class="row">
+          {CARD_AMOUNTS.map((n) => (
+            <a key={n} class={n === 20 ? "btn-primary sm" : "pill"} href={topupUrl(address, { amount: n })}
+              target="_blank" rel="noopener noreferrer">${n}</a>
+          ))}
+        </div>
+        {!hasFee && (
+          <span class="dim small">Also add about $1 of SOL once: it pays the network fee on thousands of payments.{" "}
+            <a class="link-dim" href={topupUrl(address, { currency: "sol" })} target="_blank" rel="noopener noreferrer">Add SOL <Icon.external size={13} /></a>
+          </span>
+        )}
+      </div>
+
+      <details class="more">
+        <summary>Or send it from Phantom</summary>
       <ol class="setup">
         <li>{tick(hasDollars || hasFee, 1)}<div>
           <b>Phantom</b> <a class="link-dim" href="https://phantom.com" target="_blank" rel="noopener">phantom.com <Icon.external size={13} /></a>
@@ -170,6 +189,8 @@ export function TopUp({ address, balance, network }) {
           </div>
         )}</li>
       </ol>
+
+      </details>
 
       {oneTapReady(balance) && (
         <details class="more" onToggle={showQr}>

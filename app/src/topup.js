@@ -41,3 +41,24 @@ export const oneTapReady = (balance) => !!(balance && balance.exists && balance.
  *  that covers the network fee for thousands of payments. */
 export const DOLLAR_AMOUNTS = [5, 10, 20];
 export const FEE_SOL = 0.01;
+
+/**
+ * Adding money by card, through Stripe's onramp.
+ *
+ * Opened on a page of the relay's, never inside the app: Stripe's onramp
+ * runs a script of theirs, and this app's origin is where the wallet key
+ * lives. That page shows the address, copies it, and hands over to Stripe.
+ * Stripe's fee includes a fixed part, so the amounts start at $10.
+ */
+export const TOPUP_PAGE = "https://amply-relay.sdarmistead.workers.dev/topup";
+export const CARD_AMOUNTS = [10, 20, 50];
+
+/** The top-up page for buying `currency` ("usdc" or "sol") to this address. */
+export function topupUrl(address, { currency = "usdc", amount = null } = {}) {
+  const q = [`address=${encodeURIComponent(address)}`, `currency=${currency}`];
+  if (currency === "usdc" && amount !== null) {
+    if (!CARD_AMOUNTS.includes(amount)) throw new Error(`not a card amount: ${amount}`);
+    q.push(`amount=${amount}`);
+  }
+  return `${TOPUP_PAGE}?${q.join("&")}`;
+}
