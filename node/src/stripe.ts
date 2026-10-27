@@ -379,8 +379,8 @@ export async function publicView(db: D1Database) {
  */
 export async function connect(
   db: D1Database,
-  { key, plans, origin, artist, returnTo }: {
-    key: string; plans: Plan[]; origin: string; artist: string; returnTo: string;
+  { key, plans, artist, returnTo }: {
+    key: string; plans: Plan[]; artist: string; returnTo: string;
   },
 ): Promise<Connection> {
   if (!/^(sk|rk)_(live|test)_[A-Za-z0-9]+$/.test(key)) {

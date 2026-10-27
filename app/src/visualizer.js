@@ -61,12 +61,22 @@ export function ribbonsOf(w) {
       last = Math.max(Math.sqrt(energy), last * fall);
       out[i] = last;
     }
-    const sorted = Array.from(out).sort((p, q) => p - q);
-    const ceiling = sorted[Math.min(F - 1, Math.floor(F * CEILING_AT))] || 0;
-    for (let i = 0; i < F; i++) out[i] = ceiling > 0 ? Math.pow(Math.min(1, out[i] / ceiling), 0.8) : 0;
-    return out;
+    return toCeiling(out);
   });
   return { fps: w.fps, frames: F, env };
+}
+
+/**
+ * Scale a loudness curve so the song's loud parts reach 1: the level at the
+ * CEILING_AT point of its own distribution becomes the top, and everything is
+ * eased by a gentle curve beneath it. In place, and returned.
+ */
+function toCeiling(out) {
+  const F = out.length;
+  const sorted = Array.from(out).sort((p, q) => p - q);
+  const ceiling = sorted[Math.min(F - 1, Math.floor(F * CEILING_AT))] || 0;
+  for (let i = 0; i < F; i++) out[i] = ceiling > 0 ? Math.pow(Math.min(1, out[i] / ceiling), 0.8) : 0;
+  return out;
 }
 
 /**
@@ -85,10 +95,7 @@ export function bandsOf(w) {
       last = Math.max(v * v, last * fall);          // back to linear loudness
       out[i] = last;
     }
-    const sorted = Array.from(out).sort((p, q) => p - q);
-    const ceiling = sorted[Math.min(F - 1, Math.floor(F * CEILING_AT))] || 0;
-    for (let i = 0; i < F; i++) out[i] = ceiling > 0 ? Math.pow(Math.min(1, out[i] / ceiling), 0.8) : 0;
-    return out;
+    return toCeiling(out);
   });
   return { fps: w.fps, frames: F, env };
 }

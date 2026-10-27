@@ -92,11 +92,16 @@ const api = {
   async disconnectStripe() { await wait(300); },
 };
 
+// ?new shows what an artist sees the first time: nothing uploaded, nothing
+// published, just the steps to get there.
+const fresh = new URLSearchParams(location.search).has("new");
+
 render(
   <Editor
     api={api}
     node={{ slug: "hollowcoast", url: NODE }}
-    initial={sample}
+    initial={fresh ? { amply: 1, artist: { name: "Hollow Coast" }, releases: [], payment: [] } : sample}
+    published={!fresh}
     onSignOut={() => {}}
   />,
   document.getElementById("app"),

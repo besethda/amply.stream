@@ -69,7 +69,7 @@
   Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-rw2sW8ZOOHYWXWnYHTbn8Omuajl/J2X8WmwUZD8tzl0='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://*.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 
 /start
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-SlQErY+T2+Fz2F8xzszKlr4dK808XZ5+yGCuisODlxI='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://*.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-7GjTtQWdl9AEiEpQKBC3bD4zITa7Xmhx5m8/yXmHMOk='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://*.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 
 /stripe
   Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'

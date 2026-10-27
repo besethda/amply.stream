@@ -90,11 +90,11 @@ export function SetUp({ onMade }) {
     <div class="panel stack">
       <h2>Pay by the minute</h2>
       <ol class="steps">
-        <li><Icon.key size={18} /> Make a wallet here</li>
-        <li><Icon.card size={18} /> Buy USDC + $1 of SOL in Phantom</li>
-        <li><Icon.send size={18} /> Send it here</li>
+        <li><Icon.key size={18} /> Make a wallet here: one tap</li>
+        <li><Icon.card size={18} /> Add money by card: $20 lasts months</li>
+        <li><Icon.send size={18} /> Listen: artists are paid as you go</li>
       </ol>
-      <p class="mono-dim">~30¢ once · ~0.1¢ a payment · 0% to Amply</p>
+      <p class="mono-dim">Stripe's card fee on top-ups · ~0.1¢ a payment · 0% to Amply</p>
       {!restoring ? (
         <div class="row">
           <button class="btn-primary" onClick={make} disabled={busy}>{busy ? "…" : "Make my wallet"}</button>

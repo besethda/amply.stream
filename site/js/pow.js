@@ -33,6 +33,25 @@ const IV = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b0568
 
 const W = new Uint32Array(64);
 
+/** One SHA-256 compression of the 16 words already in W[0..15], into `h`. */
+function compress(h) {
+  for (let i = 16; i < 64; i++) {
+    const x = W[i - 15], y = W[i - 2];
+    const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
+    const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+    W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
+  }
+  let a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], k = h[7];
+  for (let i = 0; i < 64; i++) {
+    const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+    const t1 = (k + S1 + ((e & f) ^ (~e & g)) + K[i] + W[i]) | 0;
+    const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+    const t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+    k = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+  }
+  h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += k;
+}
+
 /**
  * Replace the 8 words in `h` with the SHA-256 of those 32 bytes.
  *
@@ -44,52 +63,21 @@ function hash32(h) {
   W[8] = 0x80000000;
   W[9] = W[10] = W[11] = W[12] = W[13] = W[14] = 0;
   W[15] = 256;
-  for (let i = 16; i < 64; i++) {
-    const x = W[i - 15], y = W[i - 2];
-    const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
-    const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
-    W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
-  }
-  let a = IV[0], b = IV[1], c = IV[2], d = IV[3], e = IV[4], f = IV[5], g = IV[6], k = IV[7];
-  for (let i = 0; i < 64; i++) {
-    const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
-    const ch = (e & f) ^ (~e & g);
-    const t1 = (k + S1 + ch + K[i] + W[i]) | 0;
-    const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
-    const maj = (a & b) ^ (a & c) ^ (b & c);
-    const t2 = (S0 + maj) | 0;
-    k = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
-  }
-  h[0] = (IV[0] + a) | 0; h[1] = (IV[1] + b) | 0; h[2] = (IV[2] + c) | 0; h[3] = (IV[3] + d) | 0;
-  h[4] = (IV[4] + e) | 0; h[5] = (IV[5] + f) | 0; h[6] = (IV[6] + g) | 0; h[7] = (IV[7] + k) | 0;
+  h.set(IV);
+  compress(h);
 }
 
 /** SHA-256 of an arbitrary, short message: only used once, for the seed. */
 function sha256Bytes(bytes) {
-  const bitLen = bytes.length * 8;
   const padded = new Uint8Array(Math.ceil((bytes.length + 9) / 64) * 64);
   padded.set(bytes);
   padded[bytes.length] = 0x80;
-  new DataView(padded.buffer).setUint32(padded.length - 4, bitLen);
-  const h = Uint32Array.from(IV);
   const view = new DataView(padded.buffer);
+  view.setUint32(padded.length - 4, bytes.length * 8);
+  const h = Uint32Array.from(IV);
   for (let off = 0; off < padded.length; off += 64) {
     for (let i = 0; i < 16; i++) W[i] = view.getUint32(off + i * 4);
-    for (let i = 16; i < 64; i++) {
-      const x = W[i - 15], y = W[i - 2];
-      const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
-      const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
-      W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
-    }
-    let a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], k = h[7];
-    for (let i = 0; i < 64; i++) {
-      const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
-      const t1 = (k + S1 + ((e & f) ^ (~e & g)) + K[i] + W[i]) | 0;
-      const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
-      const t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
-      k = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
-    }
-    h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += k;
+    compress(h);
   }
   return h;
 }

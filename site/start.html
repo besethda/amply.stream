@@ -240,7 +240,7 @@
   <h1 class="step" id="connect-title">Connect it.</h1>
   <p class="lead" id="connect-lead">We set your streaming up for you, then remove our own access.</p>
 
-  <ul class="marks" style="margin-bottom:38px">
+  <ul class="marks" id="connect-makes" style="margin-bottom:38px">
     <li class="yes"><span class="m">&check;</span><span>Somewhere for your audio</span></li>
     <li class="yes"><span class="m">&check;</span><span>Your track list</span></li>
     <li class="yes"><span class="m">&check;</span><span>The thing that plays it, and your editor</span></li>
@@ -323,8 +323,9 @@
   </div>
 
   <p class="lead" style="margin-bottom:0">You're now hosting your own streaming service, and
-  your own site for uploading songs to it. Sign in with the email address you gave,
-  a code gets sent there, so there's no password to remember.</p>
+  your own editor for adding songs to it. Sign in with the email you gave: a code is emailed
+  to you, so there's no password to remember. The editor walks you through adding music,
+  choosing your price and publishing.</p>
 
   <p class="muted" id="edit-where" hidden></p>
 
@@ -587,10 +588,13 @@ $("#claimed-btn").addEventListener("click", () => show("connect"));
 function paintConnect() {
   const finishing = !!pendingPreview();
   $("#connect-title").textContent = finishing ? "Lock your editor." : "Connect it.";
+  // A claimed page already has everything on that list: only the lock is new.
+  $("#connect-makes").hidden = finishing;
+  connectBtn.textContent = finishing ? "Lock my editor" : "Set up my streaming service";
   // Back from here is back to claiming, for a page that's already live.
   document.querySelector('[data-panel="connect"] .back .link').dataset.go = finishing ? "claim" : "cloudflare";
   $("#connect-lead").textContent = finishing
-    ? "Sign in with the Cloudflare account you just claimed. We lock your editor to your email, then remove our own access."
+    ? "Sign in with the Cloudflare account you just claimed. We'll lock your editor so only your email can open it, then remove our own access. That's the last step."
     : "We set your streaming up for you, then remove our own access.";
 }
 paintConnect();

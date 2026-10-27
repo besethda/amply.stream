@@ -892,7 +892,7 @@ async function publicView(db) {
     sales
   };
 }
-async function connect(db, { key, plans: plans2, origin, artist, returnTo }) {
+async function connect(db, { key, plans: plans2, artist, returnTo }) {
   if (!/^(sk|rk)_(live|test)_[A-Za-z0-9]+$/.test(key)) {
     throw new StripeError(/^pk_/.test(key) ? "That's Stripe's publishable key. Amply needs the secret key shown with it, which starts rk_." : "That doesn't look like a Stripe secret key. Copy the one that starts rk_.");
   }
@@ -1641,7 +1641,6 @@ async function handleManage(request, env, path) {
       await connect(env.DB, {
         key,
         plans: valid.map((p) => ({ months: Number(p.months), price: Number(p.price) })),
-        origin,
         artist,
         // Stripe fills in {CHECKOUT_SESSION_ID}; the listener's app hands it
         // back here to claim the subscription.

@@ -10,7 +10,8 @@ Nothing here is promised. It's the direction, roughly in order.
 
 ## Listeners: paying without thinking about crypto
 
-- **Buying dollars in the app, through an on-ramp.** A listener pays by card
+- **Buying dollars in the app, through an on-ramp.** Started: the wallet's Top up screen
+  now offers card amounts through Stripe's onramp, on a page that can't see the wallet. A listener pays by card
   and the USDC arrives in the wallet the app already made. Framed as a top-up
   ("add $20, it lasts months"), not as buying crypto.
   - It has to buy a little SOL too, or the first payment fails on the network
@@ -34,7 +35,8 @@ Nothing here is promised. It's the direction, roughly in order.
 
 ## Pricing
 
-- **A lower suggested rate.** Suggest $0.003–0.005 a minute in the editor,
+- **A lower suggested rate.** Done: new artists start at $0.005 a minute, with the
+  comparison shown beside the price. Originally: suggest $0.003–0.005 a minute in the editor,
   with the comparison shown next to the field: at $0.005, a 3.5-minute play
   earns about $0.0175, roughly 3.5–6× a Spotify stream, and a fan who listens
   20 minutes a day pays that artist about $3 a month.
