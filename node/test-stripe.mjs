@@ -216,7 +216,7 @@ ok("anything else is passed on", explain("Something odd").startsWith("Stripe sai
   };
   let said = "";
   try {
-    await connect(DB, { key: "rk_test_abc", plans: [{ months: 12, price: 10 }], origin: "https://a.workers.dev", artist: "A", returnTo: "https://amply.stream/app/" });
+    await connect(DB, { key: "rk_test_abc", plans: [{ months: 12, price: 10 }], artist: "A", returnTo: "https://amply.stream/app/" });
   } catch (e) { said = e.message; }
   ok("connecting without checkout permission fails with the row to fix", said.includes("Checkout Sessions — Read"), said);
   ok("  and never asks for a webhook", !calls.some((c) => c.includes("/webhook_endpoints")));

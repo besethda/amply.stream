@@ -10,10 +10,13 @@ import { useRef, useEffect, useState } from "preact/hooks";
 import { Waveform, palette } from "./waveform.jsx";
 import { TIP_AMOUNTS } from "./tips.js";
 
-export function MiniPlayer({ state, player, cost, onOpen }) {
-  const t = state.track;
-  // Which way the song goes when it changes, as on Now playing: a swipe or
-  // the next button sends it left; "previous" only if it really goes back.
+/**
+ * Skipping, and which way the song should slide when it changes: a swipe or
+ * the next button sends it left; "previous" only if it really goes back.
+ * Each says whether the song will change: "previous" more than a few seconds
+ * in restarts it, and there may be no next.
+ */
+function useSkips(state, player) {
   const move = useRef({ dir: null, x: 0 });
   const next = () => {
     if (!state.hasNext) return false;
@@ -25,6 +28,12 @@ export function MiniPlayer({ state, player, cost, onOpen }) {
     player.prev();
     return changes;
   };
+  return { move, next, prev };
+}
+
+export function MiniPlayer({ state, player, cost, onOpen }) {
+  const t = state.track;
+  const { move, next, prev } = useSkips(state, player);
   // The song after this one, fetched ahead so its cover is there when it's on.
   useEffect(() => { warmCover(state.upNext?.[0]); }, [state.upNext?.[0]?.art]);
   // The song slides; a swipe anywhere on the bar moves it.
@@ -293,20 +302,7 @@ export function NowPlaying({ state, player, cost, session, onClose, onArtist, li
   };
   const repeatOn = state.repeat !== REPEAT.OFF;
   const box = useRef(null);
-  // Skipping, and which way the cover should slide. Each says whether the
-  // song will change: "previous" more than a few seconds in restarts it,
-  // and there may be no next.
-  const move = useRef({ dir: null, x: 0 });
-  const next = () => {
-    if (!state.hasNext) return false;
-    move.current.dir = "next"; player.next(); return true;
-  };
-  const prev = () => {
-    const changes = state.hasPrev && (state.at || 0) <= 3;
-    if (changes) move.current.dir = "prev";
-    player.prev();
-    return changes;
-  };
+  const { move, next, prev } = useSkips(state, player);
   // Closing: pull down anywhere — the art, the controls, the queue — or the
   // chevron. Only the waveform's line (a scrubber) is left out.
   const dismiss = usePullDown(box, onClose, { skip: ".scrub-hit" });

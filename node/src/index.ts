@@ -328,7 +328,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     try { artist = (text && JSON.parse(text)?.artist?.name) || artist; } catch { /* default */ }
     try {
       await connect(env.DB, {
-        key, plans: valid.map((p) => ({ months: Number(p.months), price: Number(p.price) })), origin, artist,
+        key, plans: valid.map((p) => ({ months: Number(p.months), price: Number(p.price) })), artist,
         // Stripe fills in {CHECKOUT_SESSION_ID}; the listener's app hands it
         // back here to claim the subscription.
         returnTo: `https://amply.stream/app/?subscribed=${encodeURIComponent(`${origin}/manifest.json`)}&session={CHECKOUT_SESSION_ID}`,
