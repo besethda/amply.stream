@@ -509,7 +509,7 @@ function Release({
             <span class="label">Price to own the album <span class="muted small">(one-time, optional)</span> <Help about="the album's price">What the whole album costs to buy and keep, separate from your per-minute price for listening. Leave it empty if it isn't for sale.</Help></span>
             <span class="release-price">
               <span>$</span>
-              <input type="number" min="0.5" max="1000" step="0.01" placeholder="—"
+              <input type="number" min="0.5" max="1000" step="0.01" placeholder="Not for sale"
                 value={release.sale?.price ?? ""} aria-label="Price to buy this album, in dollars"
                 onInput={(e) => {
                   const price = salePrice(e.target.value);
@@ -1877,7 +1877,7 @@ function Listeners({ api, paid, rate, settleAt }) {
 
   return (
     <section class="card">
-      <h2>Your listeners <span class="note">{rows.length} · anonymous: fans don't sign up with a name</span>
+      <h2>Your listeners <span class="note">{rows.length}</span>
         <Help at="banning" about="your listeners">Listeners don't sign up with a name, so each one is shown by a
           short code from their payment app. You see how much they listened, never what or when.
           A <strong>Paid</strong> figure in red means they're more than one payment behind. <strong>Overdue</strong>{" "}
@@ -1886,6 +1886,7 @@ function Listeners({ api, paid, rate, settleAt }) {
           <strong>Export</strong>; if they ask you to delete it, <strong>Delete</strong>. Records are deleted
           automatically a year after someone was last here.</Help></h2>
 
+      <p class="muted small">Listeners are anonymous: fans don't sign up with a name, so they're numbered.</p>
       <div class="reconcile">
         <span class="muted">
           {!paid.addresses.length
@@ -2126,7 +2127,7 @@ function CashOut({ payees }) {
             ) : (
               <>
                 <p class="muted"><b>About 10 minutes, once. After that, cashing out takes a minute.</b> Sending
-                  straight from this page isn't ready yet, so for now you open your wallet in the free <b>Phantom</b>
+                  straight from this page isn't ready yet, so for now you open your wallet in the free <b>Phantom</b>{" "}
                   app:</p>
                 <ol class="cash-steps">
                   <li>Install Phantom on your phone or computer.</li>

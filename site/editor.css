@@ -742,3 +742,6 @@ details.testing .test-money { margin-top: 12px; }
 .warn-toggle, .track-tags .warn-toggle { width: auto; padding: 0 10px; border-radius: 99px; white-space: nowrap; font-size: 13px; }
 .listener-key { margin: 10px 0 0; }
 details.testing { padding: 16px 20px; }
+/* The album price box has room for its "Not for sale" hint. */
+.track-price input[placeholder="Not for sale"], input[placeholder="Not for sale"] { min-width: 8.5em; }
+select { max-width: 100%; text-overflow: ellipsis; }
