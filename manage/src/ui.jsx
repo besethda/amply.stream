@@ -18,6 +18,7 @@ import { bareDomain, recordFor, lookup, confirms } from "../../spec/domain.mjs";
 import { makeWaves, wavesKey } from "./waves.js";
 import { coverColors } from "./colors.js";
 import { shrink, COVER_PX, BANNER_PX } from "./images.js";
+import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, NoPasskeySecret } from "../../spec/passkey-wallet.mjs";
 
 export const MAX_UPLOAD = 90 * 1024 * 1024;
 
@@ -1188,6 +1189,49 @@ function FromPhantom({ onAddress }) {
   );
 }
 
+/**
+ * A wallet made from the artist's passkey (spec/passkey-wallet.mjs): Face
+ * ID, Touch ID, Windows Hello, or their phone from a computer. Only its
+ * address is kept, in the split below. Nothing secret is stored: the passkey
+ * makes the key again whenever money has to move, so cashing out asks for
+ * Face ID once more. The passkey belongs to this service's own address.
+ */
+function PasskeyWallet({ onAddress }) {
+  const [offer, setOffer] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState(null);
+  useEffect(() => { mayOfferPasskey().then(setOffer); }, []);
+  if (!offer) return null;
+
+  async function go(seedFn) {
+    setBusy(true); setSaid(null);
+    try {
+      const seed = await seedFn({ name: "Amply payouts" });
+      const address = await addressOf(seed);
+      seed.fill(0);
+      onAddress(address);
+      setSaid({ good: true, text: "Your wallet is ready and filled in below. Publish to start being paid into it." });
+    } catch (e) {
+      if (e instanceof NoPasskeySecret) {
+        setSaid({ text: "This device's passkey can't make a wallet. Try again and choose your phone in the window that appears, or use a wallet app below." });
+      } else if (e.name !== "Cancelled") setSaid({ text: e.message });
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div class="passkey-wallet">
+      <button class="btn sm" disabled={busy} onClick={() => go(createPasskeySeed)}>
+        {busy ? "Waiting for you…" : "Make my wallet with Face ID or a passkey"}
+      </button>
+      <p class="muted">On a computer this uses Touch ID, Windows Hello, or your phone. No app to install and no
+        recovery words: your passkey is the key, and it syncs to your other devices. If you ever lose your
+        passkeys, you lose the wallet, so cash out now and then.{" "}
+        <button class="quiet-link" disabled={busy} onClick={() => go(restorePasskeySeed)}>Made one before?</button></p>
+      {said && <p class={said.good ? "good" : "warn"} role="status">{said.text}</p>}
+    </div>
+  );
+}
+
 function Splits({ payees, rate, onChange }) {
   const total = payees.reduce((n, p) => n + (Number(p.split) || 0), 0);
   const ok = Math.abs(total - 100) <= 0.01;
@@ -1206,14 +1250,18 @@ function Splits({ payees, rate, onChange }) {
     <section class="card">
       {!payees.some((p) => p.address) && (
         <div class="card-note">
-          <p><b>To be paid by listeners, you need a free wallet app.</b> Listeners' payments go
-            straight into it, never through Amply.</p>
+          <p><b>To be paid by listeners, you need a wallet.</b> Listeners' payments go straight into it,
+            never through Amply.</p>
+          <PasskeyWallet onAddress={(a) => set(0, { ...payees[0], address: a })} />
+          <details>
+            <summary>Or use a wallet app (Phantom)</summary>
           <ol>
             <li>Install <a href="https://phantom.com/download" target="_blank" rel="noopener">Phantom ↗</a> on
               your phone or computer, and sign up with Google or Apple, then choose a PIN. There are no recovery words to write down, but don't forget the PIN.</li>
             <li>In Phantom, tap <b>Receive</b>, choose <b>Solana</b>, and copy the address.</li>
             <li>Paste it below, under <b>Wallet address</b>.</li>
           </ol>
+          </details>
           <p class="muted">Rather be paid by card only? Set your price to free, and offer Subscriptions instead.</p>
         </div>
       )}

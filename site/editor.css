@@ -699,3 +699,9 @@ details.advanced[open] > summary::before { content: "\2212 "; }
 details.advanced > summary .note { display: block; font-weight: 400; font-size: 15px; color: var(--ink3); margin-top: 4px; }
 details.advanced > .stack { margin-top: 26px; }
 .steps .step-btn { display: block; margin-top: 10px; font-size: 15px; padding: 9px 18px; }
+
+.passkey-wallet { margin: 4px 0 12px; display: grid; gap: 8px; justify-items: start; }
+.passkey-wallet .muted { margin: 0; font-size: 15px; }
+.card-note details > summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }
+.passkey-wallet .good { color: var(--good); margin: 0; font-weight: 600; }
+.passkey-wallet .warn { color: var(--bad); margin: 0; }

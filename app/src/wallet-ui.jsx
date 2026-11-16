@@ -10,6 +10,10 @@ import { useState, useEffect } from "preact/hooks";
 import { machinery, markBackupSaved, onHomeScreen } from "./paying.js";
 import { transferRequest, DOLLAR_AMOUNTS, FEE_SOL, oneTapReady, topupUrl, CARD_AMOUNTS, COINBASE_AMOUNTS, coinbaseOffered, coinbaseLink, CASH_APP } from "./topup.js";
 import { signText } from "./identify.js";
+import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, NoPasskeySecret } from "../../spec/passkey-wallet.mjs";
+
+/** What this device's passkey is called, for the button. */
+const isPhone = () => /iPhone|iPad|Android/i.test(navigator.userAgent || "");
 import { Icon } from "./icons.jsx";
 import { ask } from "./sheets.jsx";
 
@@ -88,12 +92,26 @@ export function SetUp({ onMade }) {
   const [backup, setBackup] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [passkey, setPasskey] = useState(false);     // offer Face ID and the like?
+  const [noSecret, setNoSecret] = useState(false);   // this device's passkey couldn't
+  useEffect(() => { mayOfferPasskey().then(setPasskey); }, []);
 
   async function run(fn) {
     setBusy(true); setError(null);
-    try { onMade(await fn()); } catch (e) { setError(e.message); } finally { setBusy(false); }
+    try { onMade(await fn()); }
+    catch (e) {
+      if (e instanceof NoPasskeySecret) setNoSecret(true);
+      else if (e.name !== "Cancelled") setError(e.message);
+    }
+    finally { setBusy(false); }
   }
   const make = () => run(async () => (await machinery()).wallet.createWallet());
+  const viaPasskey = (seedFn) => run(async () => {
+    const seed = await seedFn();
+    const pair = (await machinery()).wallet.adoptSeed(seed);
+    markBackupSaved(pair.publicKey.toBase58());   // the passkey is the backup
+    return pair;
+  });
   const restore = () => run(async () => {
     const pair = (await machinery()).wallet.restoreWallet(backup);
     markBackupSaved(pair.publicKey.toBase58());   // pasted from somewhere, so saved somewhere
@@ -109,10 +127,34 @@ export function SetUp({ onMade }) {
         <li><Icon.send size={18} /> Listen. Artists are paid straight from it as you go.</li>
       </ol>
       <p class="dim small">Artists keep everything except small card and network fees. Amply takes nothing.</p>
+      {noSecret && (
+        <div class="note-box stack" role="alert">
+          <b>This device's passkey can't hold a wallet yet.</b>
+          <span class="dim small">{isPhone()
+            ? "Set up with a backup code instead. It works the same; just keep the code somewhere safe."
+            : <>Try again and choose <b>Use a phone</b> (or your phone's name) in the window that appears: your
+              phone's Face ID or fingerprint will do it. Or set up with a backup code.</>}</span>
+        </div>
+      )}
       {!restoring ? (
-        <div class="row">
-          <button class="btn-primary" onClick={make} disabled={busy}>{busy ? "…" : "Make my wallet"}</button>
-          <button class="pill" onClick={() => setRestoring(true)}><Icon.key size={15} /> I have a key</button>
+        <div class="stack">
+          {passkey && (
+            <>
+              <button class="btn-primary" onClick={() => viaPasskey(createPasskeySeed)} disabled={busy}>
+                {busy ? "…" : isPhone() ? "Make my wallet with Face ID or fingerprint" : "Make my wallet with a passkey"}
+              </button>
+              <span class="dim small">{isPhone()
+                ? "No recovery words. Your phone's keychain keeps it, and it works on your other devices too."
+                : "Uses Touch ID, Windows Hello, or your phone: pick whichever your computer offers. No recovery words."}</span>
+            </>
+          )}
+          <div class="row">
+            <button class={passkey ? "pill" : "btn-primary"} onClick={make} disabled={busy}>
+              {passkey ? "Use a backup code instead" : busy ? "…" : "Make my wallet"}
+            </button>
+            {passkey && <button class="pill" onClick={() => viaPasskey(restorePasskeySeed)} disabled={busy}><Icon.key size={15} /> I've used Amply before</button>}
+            <button class="pill" onClick={() => setRestoring(true)}><Icon.key size={15} /> I have a backup code</button>
+          </div>
         </div>
       ) : (
         <>
