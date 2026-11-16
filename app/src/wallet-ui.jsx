@@ -165,8 +165,9 @@ export function TopUp({ address, balance, network }) {
         <ol class="dim small setup-steps">
           <li>Pick an amount. Stripe's secure page opens, and we copy your wallet's address (a long code, like an account number) for you.</li>
           <li>When Stripe asks where to send it, paste the address. If it asks for a network, choose <b>Solana</b>.</li>
-          <li>Pay by card. The first time, Stripe may ask for ID. Then come back here.</li>
+          <li>Pay by card. The first time, Stripe may ask for ID: that's Stripe's own check, not Amply's, and usually takes a couple of minutes. Then come back here.</li>
         </ol>
+        <span class="dim small">The words look technical, but this is the standard way to do it, and it's safe.</span>
         <span class="dim small">At 1¢ a minute, $10 is about 16 hours of listening.</span>
         <div class="row">
           {CARD_AMOUNTS.map((n) => (

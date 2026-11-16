@@ -91,7 +91,8 @@ export function refusalSheet(r, { money, go }) {
       if (cheapest) return {
         icon: <Icon.card size={22} />, title: `Support ${r.name || "this artist"} to listen`,
         body: `Subscribe by card and listen to everything, or pay as you go: ${rate}`,
-        primaryLabel: "Subscribe by card", primary: go.artist,
+        primaryLabel: `Subscribe by card · ${(!cheapest.currency || cheapest.currency === "usd") ? money(cheapest.price) : `${cheapest.price} ${cheapest.currency.toUpperCase()}`} for ${cheapest.months} months`,
+        primary: go.artist,
         secondaryLabel: "Pay by the minute instead", secondary: go.you,
       };
       return {
