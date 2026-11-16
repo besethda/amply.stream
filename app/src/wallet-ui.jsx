@@ -178,6 +178,18 @@ export function SetUp({ onMade }) {
  * hand the first time, because a request can't reach an account that doesn't
  * exist yet.
  */
+/** A "?" that shows its explanation only when tapped: short screens, detail on request. */
+function Hint({ label = "More about this", children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" class={`hint-q${open ? " on" : ""}`} aria-expanded={open} aria-label={label}
+        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen((o) => !o); }}>?</button>
+      {open && <span class="dim small hint-text">{children}</span>}
+    </>
+  );
+}
+
 export function TopUp({ address, balance, network, pair, needsFee = true }) {
   const [qr, setQr] = useState(null);
   const [coinbase, setCoinbase] = useState(false);       // set up on the relay?
@@ -237,9 +249,9 @@ export function TopUp({ address, balance, network, pair, needsFee = true }) {
 
         {coinbase && (
           <section class="choice stack">
-            <b>Coinbase</b>
-            <span class="dim small">Opens Coinbase with everything filled in. About 0.5% from a bank, 2.5% by
-              card. You'll need a Coinbase account; it's free.</span>
+            <b>Coinbase <span class="dim small">· most countries</span> <Hint label="About Coinbase">Opens Coinbase
+              with everything filled in. About 0.5% from a bank, 2.5% by card. You'll need a Coinbase account;
+              it's free.</Hint></b>
             <div class="row">
               {COINBASE_AMOUNTS.map((n) => (
                 <button key={n} class={n === 30 ? "btn-primary sm" : "pill"} disabled={opening !== null}
@@ -251,13 +263,11 @@ export function TopUp({ address, balance, network, pair, needsFee = true }) {
         )}
 
         <details class="choice more" onToggle={showCashQr}>
-          <summary>Cash App <span class="dim small">· free for now · US</span></summary>
-          <ol class="dim small setup-steps">
-            <li>Copy your wallet's address.</li>
-            <li>In Cash App, go to <b>Pay</b>, paste the address in the search box, enter an amount and pay. Cash
-              App sends it as digital dollars (USDC) on the Solana network for you.</li>
-            <li>It arrives here in a minute or so.</li>
-          </ol>
+          <summary>Cash App <span class="dim small">· US</span></summary>
+          <span class="dim small">Copy your address, then pay it in Cash App.{" "}
+            <Hint label="How Cash App works">In Cash App, go to <b>Pay</b>, paste the address in the search box,
+              enter an amount and pay. Cash App sends it as digital dollars (USDC) for you, and it arrives here in a
+              minute or so. Free while Cash App's offer lasts. Not available in New York.</Hint></span>
           <div class="row">
             <Copy text={address} label="Copy address" />
             <a class="pill" href={CASH_APP} target="_blank" rel="noopener noreferrer">Open Cash App <Icon.external size={13} /></a>
@@ -268,18 +278,15 @@ export function TopUp({ address, balance, network, pair, needsFee = true }) {
               <figcaption class="dim small">On a computer? Scan this with your phone instead of pasting.</figcaption>
             </figure>
           )}
-          <span class="dim small">Free while Cash App's offer lasts. Not available in New York.</span>
         </details>
 
         <details class="choice more" open={!coinbase}>
-          <summary>Card <span class="dim small">· works almost anywhere</span></summary>
-        <ol class="dim small setup-steps">
-          <li>Pick an amount. Stripe's secure page opens, and we copy your wallet's address (a long code, like an account number) for you.</li>
-          <li>When Stripe asks where to send it, paste the address. If it asks for a network, choose <b>Solana</b>.</li>
-          <li>Pay by card. The first time, Stripe may ask for ID: that's Stripe's own check, not Amply's, and usually takes a couple of minutes. Then come back here.</li>
-        </ol>
-        <span class="dim small">The words look technical, but this is the standard way to do it, and it's safe.</span>
-        <span class="dim small">At ½¢ a minute, a common price, $10 is about 33 hours of listening.</span>
+          <summary>Card <span class="dim small">· US</span></summary>
+        <span class="dim small">Pick an amount and pay on Stripe's page.{" "}
+          <Hint label="How paying by card works">Stripe's secure page opens. If it asks where to send it, paste your
+            address; if it asks for a network, choose <b>Solana</b>. The first time, Stripe may ask for ID: that's
+            Stripe's own check, not Amply's, and takes a couple of minutes. At ½¢ a minute, a common price, $10 is
+            about 33 hours of listening.</Hint></span>
         <div class="row">
           {CARD_AMOUNTS.map((n) => (
             <a key={n} class={n === 20 ? "btn-primary sm" : "pill"} href={topupUrl(address, { amount: n })}
@@ -289,9 +296,9 @@ export function TopUp({ address, balance, network, pair, needsFee = true }) {
         </details>
         {!hasFee && (
           <div class="stack">
-            <b>{hasDollars ? "One last thing: $1 for fees" : "Then, once: $1 for fees"}</b>
-            <span class="dim small">Each payment needs a tiny fee, paid in a currency called SOL.
-              A one-off $1 covers thousands of payments. Same steps, on the same Stripe page.</span>
+            <b>{hasDollars ? "One last thing: $1 for fees" : "Then, once: $1 for fees"}{" "}
+              <Hint label="About the fee">Each payment has a tiny network fee, paid in a coin called SOL. A one-off
+                $1 covers thousands of payments. Same steps, on the same Stripe page.</Hint></b>
             <div class="row">
               <a class={hasDollars ? "btn-primary sm" : "pill"} href={topupUrl(address, { currency: "sol" })}
                 target="_blank" rel="noopener noreferrer">Add $1 for fees <Icon.external size={13} /></a>

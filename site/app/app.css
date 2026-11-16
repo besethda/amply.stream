@@ -670,3 +670,10 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 
 /* An artist whose service isn't answering. */
 .unreachable { margin: 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg2); }
+
+/* "?" that opens an explanation on request. */
+.hint-q { display: inline-grid; place-items: center; width: 22px; height: 22px; margin-left: 6px; padding: 0;
+  border-radius: 50%; border: 1px solid var(--line); background: transparent; color: var(--dim, inherit);
+  font: inherit; font-size: 13px; font-weight: 700; line-height: 1; cursor: pointer; vertical-align: middle; }
+.hint-q.on { background: var(--ink, currentColor); color: var(--bg); }
+.hint-text { display: block; margin-top: 6px; font-weight: 400; }
