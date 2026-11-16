@@ -10,22 +10,38 @@ Nothing here is promised. It's the direction, roughly in order.
 
 ## Listeners: paying without thinking about crypto
 
-- **Buying dollars in the app, through an on-ramp.** Started: the wallet's Top up screen
-  now offers card amounts through Stripe's onramp, on a page that can't see the wallet. A listener pays by card
-  and the USDC arrives in the wallet the app already made. Framed as a top-up
-  ("add $20, it lasts months"), not as buying crypto.
-  - It has to buy a little SOL too, or the first payment fails on the network
-    fee.
-  - It must not make Amply hold a secret or keep any state. Many ramps require
-    server-side signing; prefer one that doesn't.
-  - Before building it: re-check the MiCA reasoning that currently rules out
-    buying crypto inside the app (see `app/src/wallet.js`). Linking out to a
-    separately regulated ramp may be fine; building one in may not be.
-  - Any referral fee from the provider is declined or disclosed. Amply takes 0%.
-- **A wallet that can't be lost.** Today it lives in browser storage, and
-  deleting the home-screen icon deletes it. In the native apps, keep the key in
-  the iOS Keychain (with iCloud Keychain sync) and the Android Keystore (with
-  Block Store backup), behind Face ID or a fingerprint for anything unusual.
+- **Adding money: three plain choices, fees shown upfront.** One calm screen.
+  Each option says who handles the money and that Amply never sees bank or
+  card details:
+  - **Coinbase (the main route).** Coinbase's onramp fills in the wallet,
+    USDC on Solana and the amount; returning fans are already signed in, so a
+    top-up is one tap and a confirm. Fees: about 0.5% by bank (ACH), 2.5% by
+    card, nothing extra from an existing Coinbase balance. Needs a free
+    Coinbase developer account and its onramp access form, and the relay
+    holds that one API key to mint five-minute sessions (origin check plus a
+    wallet signature, no storage). Open questions: trial-mode limits, and
+    whether full access needs a registered business. Fans need a Coinbase
+    account: guest checkout ended on 30 June 2026.
+  - **PayPal (US).** Buying PYUSD in PayPal or Venmo is free, and sending it
+    to the Amply wallet in a separate step costs only the network fee. Needs
+    the app to accept PYUSD or convert it to USDC on arrival.
+  - **Card (almost everywhere).** Ramp's own site, where fans paste the
+    address. Up to 3.9% with a minimum of up to €2.49, so default top-ups are
+    $30 or more, and the app says "about $2.50 goes to card fees" before they
+    pay. Stripe's onramp is not an option in the EU: it doesn't sell USDC on
+    Solana there.
+  - Show the exact amount that arrived afterwards ("$29.85 arrived").
+  - Remember the fan's route and remind them before the balance runs out, so
+    the confusing part happens once.
+  - Any referral fee from a provider is declined or disclosed. Amply takes 0%.
+- **No SOL for listeners.** The artist's node pays the network fee on each
+  payment as fee payer (about $0.001), after checking the transaction only
+  pays this artist's split. The artist tops up a few dollars of fee money once.
+- **A wallet that can't be lost.** Make the wallet from a passkey (WebAuthn
+  PRF): the same passkey on any synced device recreates the same wallet, with
+  no recovery words and nothing stored by anyone. Falls back to a backup code
+  where PRF isn't supported (Firefox on Android; Windows Hello unclear).
+  Prove it first on a one-page test across iPhone, Android, Mac and Windows.
 - **Free first, pay later.** A new listener hears an artist's free tracks with
   no wallet at all, and is asked to set one up only when they reach a paid one.
 - **No surprise bills.** Show each listener an estimated monthly cost from
@@ -77,9 +93,17 @@ Nothing here is promised. It's the direction, roughly in order.
 
 ## Getting paid without chores
 
-- **Automatic stopping of non-payers.** The app sends the node a receipt
-  (transaction signature) each time it settles; the node checks it on-chain
-  with the existing `verifyPayment` and refuses a listening token to a wallet
+- **Get paid with Face ID.** The editor makes the artist's wallet from a
+  passkey on the node's own address: no wallet app, no address to paste. A
+  Phantom address stays possible for artists who want it.
+- **Cash out in one step.** Coinbase's offramp from the editor: the artist
+  picks an amount, the editor reads Coinbase's deposit address and signs the
+  transfer with their passkey, and Coinbase pays out to a bank (ACH in the
+  US, PayPal in some countries) or their Coinbase balance. Elsewhere, guide
+  them through an exchange with low fees (for example Bitvavo in the EU).
+- **Automatic stopping of non-payers.** With the node as fee payer, it signs
+  every payment to its artist and records it, so it knows exactly who has
+  paid without reading the chain, and refuses a listening token to a wallet
   that owes more than its `settleAt` past the 7-day window and a grace period.
   The artist no longer has to check Earnings by hand. Generous by default:
   blocking an honest fan is worse than a freeloader listening a few days more.
