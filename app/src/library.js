@@ -86,6 +86,14 @@ export function noteReach(entry, ok, now = Date.now()) {
   return { ...entry, unreachableSince: entry.unreachableSince ?? now };
 }
 
+/** Whether this artist's node paid listeners' network fees at the last check. */
+export const feesCovered = (e) => !!e?.feesPaid;
+
+/** Whether any followed artist who charges still needs the listener to hold
+ *  SOL for fees: only then is "add $1 for fees" worth saying. */
+export const feesNeeded = (entries, charges) =>
+  (entries || []).some((e) => isFollowed(e) && reachable(e) && charges(e.manifest) && !feesCovered(e));
+
 /** Whether this artist's service answered at the last check. */
 export const reachable = (e) => !!e && !e.unreachableSince;
 

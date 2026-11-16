@@ -6,12 +6,13 @@
   "type": "module",
   "scripts": {
     "build": "rm -rf ../.build/app && esbuild src/main.jsx --bundle --splitting --format=esm --target=es2022 --jsx=automatic --jsx-import-source=preact --minify --outdir=../.build/app && node build.mjs && node ../scripts/make-icons.mjs",
-    "test": "esbuild test-app.mjs --bundle --format=esm --platform=node --target=es2022 --jsx=automatic --jsx-import-source=preact --outfile=../.build/test/app.js && node ../.build/test/app.js && node test-wallet.mjs && node test-pay.mjs && node test-spend.mjs && node test-paying.mjs && node test-identify.mjs && node test-topup.mjs && node test-player.mjs && node test-collection.mjs && node test-visualizer.mjs && node test-update.mjs && node test-tips.mjs && node test-tags.mjs && node test-library.mjs && node test-security.mjs",
+    "test": "esbuild test-app.mjs --bundle --format=esm --platform=node --target=es2022 --jsx=automatic --jsx-import-source=preact --outfile=../.build/test/app.js && node ../.build/test/app.js && node test-wallet.mjs && node test-pay.mjs && node test-spend.mjs && node test-paying.mjs && node test-identify.mjs && node test-topup.mjs && node test-player.mjs && node test-collection.mjs && node test-visualizer.mjs && node test-update.mjs && node test-tips.mjs && node test-tags.mjs && node test-library.mjs && node test-security.mjs && esbuild test-fees.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=../.build/test/fees.js --log-level=warning --external:node:sqlite \"--banner:js=import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\" && node --no-warnings ../.build/test/fees.js",
     "prove": "node prove-payment.mjs"
   },
   "dependencies": {
     "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "^1.99.0",
+    "bs58": "^4.0.1",
     "buffer": "^6.0.3",
     "jsqr": "^1.4.0",
     "preact": "^10.24.0",

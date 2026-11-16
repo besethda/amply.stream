@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Paying for music on Amply - Amply</title>
-<meta name="description" content="A step-by-step guide to paying artists on Amply, for someone who has never used crypto.">
+<meta name="description" content="How paying for music on Amply works: a few dollars in the app, a fraction of a cent a minute, straight to the artist.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -29,123 +29,83 @@
 <header class="page-head">
   <div class="col narrow">
     <p class="eyebrow">Paying for music</p>
-    <h1>Never used crypto? Start here.</h1>
-    <p class="lead">Artists on Amply are paid as you listen, straight from your wallet to theirs,
-    with nobody taking a cut. Setting that up takes a few minutes, once.</p>
+    <h1>How paying works</h1>
+    <p class="lead">You put a few dollars in the Amply app. As you listen, it pays the artist a fraction of a
+    cent for each minute, straight to them. Nobody takes a cut.</p>
   </div>
 </header>
 
 <div class="prose"><div class="col narrow">
 
-<h2 id="ways">Two ways to pay an artist</h2>
-
-<p>Each artist chooses, and their page in the app says which:</p>
+<div class="note">
+<p><strong>In one minute</strong></p>
 <ul>
-  <li><strong>By subscription</strong> — pay by card for a year or a few months. No crypto needed:
-  tap <em>Subscribe</em> on their page and pay on Stripe's page. The app makes a wallet first, only
-  as your name, so the subscription can follow you to a new phone. You can stop reading here.</li>
-  <li><strong>By the minute</strong> — the app pays a fraction of a cent for each minute you listen,
-  from a small wallet on your phone. That needs the setup below, once.</li>
+  <li><strong>What it costs:</strong> each artist sets their own price. A typical one is half a cent a minute,
+  so an hour a day of listening comes to about <strong>$9 a month</strong> in total. You see each price before
+  anything is charged.</li>
+  <li><strong>How it's paid:</strong> automatically, every few songs, for exactly the minutes you listened. There's
+  nothing to approve each time.</li>
+  <li><strong>A safety cap:</strong> however an artist prices things, the app never sends more than $2 at once or
+  $10 in a day.</li>
+  <li><strong>Prefer a card?</strong> Many artists also offer a plain subscription: tap <em>Subscribe</em> on their
+  page and pay with your card. Nothing to set up.</li>
+  <li><strong>Buying to keep:</strong> some artists also sell songs and albums. Tap <em>Buy</em> on their page.</li>
+  <li><strong>Free tracks</strong> play for anyone.</li>
 </ul>
-<p>Free tracks play for anyone, either way.</p>
+</div>
 
-<h2 id="listeners">Setting up paying by the minute</h2>
+<h2 id="listeners">Setting it up</h2>
 
-<p>It takes a few minutes, once. The Amply app keeps a small wallet for you, you put a few dollars
-in it, and it pays artists as you listen.</p>
+<p>About five minutes, once (a little longer if you don't have Coinbase or Cash App yet).</p>
 
 <ol class="steps-list">
-  <li><strong>Make your wallet.</strong> Open the Amply app at <a href="/app/">amply.stream/app</a>,
-  tap <em>You</em>, then <em>Make my wallet with Face ID or a passkey</em>. On a phone that's Face ID
-  or your fingerprint. On a computer it's Touch ID, Windows Hello, or your phone: the browser shows
-  a QR code to scan. There are no recovery words: your passkey is the key, and it syncs to your other
-  devices, where <em>I've used Amply before</em> opens the same wallet. If your device can't do this,
-  choose <em>Use a backup code instead</em> and keep that code somewhere safe, like a password manager.</li>
-
-  <li><strong>Add money.</strong> Tap <em>Top up</em> and pick whichever you already use:
-    <ul>
-      <li><strong>Coinbase</strong> (where the app offers it): opens Coinbase with everything filled in. You need a Coinbase
-      account (free).</li>
-      <li><strong>Cash App</strong> (US): copy your wallet's address, then in Cash App go to
-      <em>Pay</em>, paste it in the search box, and pay. Cash App sends it as digital dollars (USDC)
-      on the Solana network. Not available in New York.</li>
-      <li><strong>Card:</strong> Stripe's checkout. Paste your address when it asks and choose
-      <strong>Solana</strong> as the network. Stripe may ask for ID the first time; that's normal, and
-      required by law. Stripe doesn't sell digital dollars on Solana in the EU yet, so in Europe use
-      Coinbase, or send from a crypto wallet as below.</li>
-    </ul>
-  </li>
-
-  <li><strong>Add $1 for fees, once.</strong> If the app asks, tap <em>Add $1 for fees</em>. Each
-  payment needs a tiny network fee, paid in a currency called SOL, and a dollar covers thousands of
-  payments.</li>
-
-  <li><strong>Listen.</strong> Add an artist by their link or their website. You'll see their price
-  before anything is charged, and the app pays them as you listen. There's nothing to approve
-  each time.</li>
+  <li><strong>Make your wallet.</strong> In the <a href="/app/">Amply app</a>, tap <em>You</em>, then
+  <em>Make my wallet with Face ID</em>. (Your wallet is simply your Amply balance: where your listening money
+  sits.) It opens with Face ID or your
+  fingerprint (on a computer, Touch ID, Windows Hello, or your phone), and works on your other devices too.</li>
+  <li><strong>Add money.</strong> Tap <em>Top up</em> and pick what you already use: <strong>Coinbase</strong>
+  (most countries), or <strong>Cash App</strong> or a <strong>card</strong> (US). The app walks you through it and shows any fee first.</li>
+  <li><strong>Listen.</strong> Add an artist by their link or their website, and play.</li>
 </ol>
 
-<p class="note"><strong>Already use a crypto wallet like Phantom?</strong> You can send USDC and a
-little SOL from it instead: tap <em>Top up</em>, then <em>Already use a crypto wallet? Send from it
-instead</em>. Always use the <strong>Solana</strong> network, and send USDC itself, not Phantom's
-"Cash".</p>
-
-<h2 id="costs">What it costs you</h2>
-
+<details>
+<summary>More detail: fees, card top-ups in Europe, and other wallets</summary>
 <ul>
-  <li><strong>Adding money:</strong> it depends on how. Coinbase charges about 0.5% from a bank and
-  2.5% by card. Cash App is free for now, as an offer of theirs. Card through Stripe costs whatever
-  Stripe shows before you pay. Each of them shows the exact amount before you confirm. Topping up
-  less often, in larger amounts, costs less in fees.</li>
-  <li><strong>Listening:</strong> about a tenth of a cent each time the app pays an artist. It's a
-  fixed amount, not a percentage, and the app pays every few songs, so a month of listening costs a
-  few cents in fees.</li>
+  <li><strong>Network fees.</strong> Each payment also has a tiny network fee, a fraction of a cent. Many artists'
+  services pay it for you. If one doesn't, the app asks you to add $1 for fees, once; that covers thousands
+  of payments.</li>
+  <li><strong>Top-up fees.</strong> Coinbase charges about 0.5% from a bank and 2.5% by card. Cash App is free at
+  the moment. Topping up less often, in larger amounts, costs less.</li>
+  <li><strong>Card top-ups in Europe</strong> aren't available yet; use Coinbase.</li>
+  <li><strong>Already use a crypto wallet like Phantom?</strong> Tap <em>Top up</em>, then <em>Already use a
+  crypto wallet?</em> Your money is digital dollars (USDC) on the Solana network, so send USDC, choosing
+  Solana.</li>
+  <li><strong>No Face ID on your device?</strong> Choose <em>Use a backup code instead</em>, and keep the code
+  somewhere safe, like a password manager.</li>
 </ul>
-<p>The artist receives every cent of their price. Amply takes nothing.</p>
+</details>
 
 <h2 id="back">Getting your money back</h2>
 
-<p>In the Amply app, tap <em>You</em>, then <em>Send back</em>. Paste the Solana address of any
-wallet you control (in Phantom: <em>Receive</em>, choose <strong>Solana</strong>, copy), and send.
-Whatever you haven't spent goes back to you.</p>
-
-<h2 id="artists">If you're an artist</h2>
-
-<ol class="steps-list">
-  <li><strong>Make a wallet to be paid into.</strong> In your editor, open <em>Settings</em> →
-  <em>Who gets paid</em> and tap <em>Make my wallet with Face ID or a passkey</em>. Your address is
-  filled in for you. If you'd rather use a wallet app, install Phantom, then in Phantom tap
-  <em>Receive</em>, choose <strong>Solana</strong>, copy the address, and paste it in. You don't need
-  to buy anything to be paid.</li>
-  <li><strong>Publish.</strong> Payments arrive in your wallet as people listen.</li>
-  <li><strong>Cash out when you like.</strong> Your editor's <em>Earnings</em> tab shows how: send
-  from your wallet to Cash App (US) or Coinbase, which turn it into dollars for your bank. If you made
-  your wallet with a passkey, sending from the editor is coming; until then, <em>Show my wallet key</em>
-  opens it in Phantom, where you send from (with a few cents of SOL for the network fee).</li>
-</ol>
-
-<p>More on wallets and on getting money into your bank is in
-<a href="/why#setup-wallet">Which wallet should I use?</a> To let fans subscribe by card as well,
-see <a href="/stripe">Card subscriptions with Stripe</a>.</p>
+<p>Whatever you haven't spent is yours. In the app, tap <em>You</em>, then <em>Send back</em>, and follow the
+steps.</p>
 
 <h2 id="safe">Staying safe</h2>
 
 <ul>
-  <li><strong>Your key is the money.</strong> A passkey, a backup code or a wallet app's recovery
-  words: nobody from Amply, Phantom or anywhere else will ever need them. Anyone who asks is trying to
-  steal from you.</li>
-  <li><strong>Always Solana.</strong> If an app or exchange asks which network to send on, the
-  answer is Solana. USDC sent any other way won't arrive, and usually can't be recovered.</li>
-  <li><strong>Keep it small.</strong> Treat the Amply wallet like cash in a pocket: a few dollars at a
-  time. The app will never send more than $2 in one payment or $10 in a day, whatever an artist's
-  page asks for.</li>
+  <li><strong>Nobody will ever need your Face ID, backup code or key.</strong> Not Amply, not an artist. Anyone
+  who asks is trying to steal from you.</li>
+  <li><strong>Keep it small,</strong> like cash in a pocket: a few dollars at a time.</li>
+  <li><strong>Payments can't be reversed,</strong> so the app shows each artist's price before it pays anything.</li>
 </ul>
+
+<p class="muted">Make music? <a href="/artists">See how artists get paid</a>.</p>
 
 </div></div>
 </main>
 
 <footer><div class="footer-in"><span>amply</span><div class="footer-links">
-<a href="/">Home</a><a href="/why">Why it works this way</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a>
+<a href="/">Home</a><a href="/paying">Paying</a><a href="/artists">For artists</a><a href="/why">Questions</a><a href="/protect">Protecting your music</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a>
 </div></div></footer>
 </body>
 </html>

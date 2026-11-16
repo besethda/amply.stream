@@ -19,13 +19,19 @@ import { verifyAccess, type AccessConfig } from "./access";
 import { renderPage, renderPrivacy, pageCsp } from "./page";
 import {
   setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale,
-  subscribedUntil, pruneSubscriptions,
+  subscribedUntil, pruneSubscriptions, heard, songTotals,
 } from "./store";
 import { introduce, readToken, guardedKeys, proveOwnership } from "./listen";
 import { challenge } from "./identity";
 import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, claim, refresh, StripeError, setSales, claimSale } from "./stripe";
-import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, type Sale } from "./sales";
-import { DOWNLOADS_PER_PURCHASE, subscriptionOnly } from "../../spec/pricing.mjs";
+import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, itemFor, CHAINS, type Sale } from "./sales";
+import { settle, feeAddress, feeBalance, rpcAt, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS } from "./settle";
+import { purchaseMemo } from "./payment-check";
+import { cleanSite } from "../../spec/site.mjs";
+import { cashOutProblem, draftCashOut, CASHOUT_MIN_MICROS, CASHOUT_MAX_MICROS } from "./cashout";
+import { base64 } from "./solana-tx";
+import { TOKEN_PROGRAM, SYSTEM_PROGRAM } from "./feepay";
+import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf } from "../../spec/pricing.mjs";
 import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
 import { ICONS, MANIFEST_PATH, studioManifest } from "./studio";
 
@@ -196,6 +202,17 @@ let cachedManifest: { at: number; body: string | null } | null = null;
  * than an edge read, so asking it each time would make a fast thing slow. A few
  * seconds is short enough that publishing still feels immediate.
  */
+/** The artist's website (spec/site.mjs), or null. Cached briefly like the
+ *  manifest: every page view reads it. */
+let cachedSite: { at: number; body: string | null } | null = null;
+async function siteText(env: Env): Promise<string | null> {
+  const now = Date.now();
+  if (cachedSite && now - cachedSite.at < MANIFEST_CACHE) return cachedSite.body;
+  const body = await setting(env.DB, "site").catch(() => null);
+  cachedSite = { at: now, body };
+  return body;
+}
+
 async function manifestText(env: Env): Promise<string | null> {
   const now = Date.now();
   if (cachedManifest && now - cachedManifest.at < MANIFEST_CACHE) return cachedManifest.body;
@@ -304,6 +321,91 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
     });
+  }
+
+  // The website: read it, or save it. Saved through cleanSite, the one gate
+  // between what the editor sends and what visitors are shown.
+  if (path === "/site" && request.method === "GET") {
+    const t = await setting(env.DB, "site");
+    return new Response(t || "null", { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+  if (path === "/site" && request.method === "POST") {
+    if (Number(request.headers.get("Content-Length") || 0) > 300_000) return fail(413, "that website is too large");
+    const body = await jsonBody(request, 300_000);
+    if (!body) return fail(400, "bad request");
+    const clean = body.site === null ? null : cleanSite(body.site);
+    if (clean === null) await env.DB.prepare("DELETE FROM settings WHERE key = 'site'").run();
+    else await putSetting(env.DB, "site", JSON.stringify(clean));
+    cachedSite = null;
+    return new Response(JSON.stringify({ site: clean }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+
+  // Totals per song, for the editor's Home tab.
+  if (request.method === "GET" && path === "/stats") {
+    return new Response(JSON.stringify({ songs: await songTotals(env.DB) }), {
+      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
+    });
+  }
+
+  // The wallet that pays listeners' network fees (settle.ts): its address,
+  // what it holds and what it has paid today. Never its key.
+  if (request.method === "GET" && path === "/fees") {
+    const address = await feeAddress(env.DB);
+    const text = await manifestText(env);
+    let network = "solana";
+    try { network = walletOf(text ? JSON.parse(text) : null)?.network || network; } catch { /* default */ }
+    const chain = CHAINS[network] || CHAINS.solana;
+    const lamports = await feeBalance(rpcAt(chain.rpc), address, { fresh: true }).catch(() => null);
+    const today = await env.DB.prepare("SELECT count FROM fee_days WHERE day = ?")
+      .bind(new Date().toISOString().slice(0, 10)).first<{ count: number }>().catch(() => null);
+    return new Response(JSON.stringify({
+      address, network, lamports, offering: lamports !== null && lamports >= OFFER_ABOVE_LAMPORTS,
+      offerAbove: OFFER_ABOVE_LAMPORTS, paidToday: today?.count ?? 0, dailyCap: DAILY_PAYMENTS,
+    }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+
+  // Cashing out from a Face ID payout wallet (cashout.ts): the node drafts
+  // the transfer with its fee wallet paying the fee; the editor checks and
+  // signs it; the node checks it again and sends it. Behind the sign-in above,
+  // and only ever from a payout wallet named in the published manifest.
+  if (request.method === "POST" && (path === "/send/prepare" || path === "/send")) {
+    const body = await jsonBody(request);
+    if (!body) return fail(400, "bad request");
+    const pay = walletOf(await manifestNowOf(env));
+    const chain = pay && CHAINS[pay.network];
+    if (!pay || !chain) return fail(409, "publish a payout wallet first");
+    const payees = pay.recipients.map((r) => r.address);
+    const from = String(body.from || ""), to = String(body.to || "").trim(), micros = Number(body.micros);
+    const feePayer = await feeAddress(env.DB);
+    const problem = cashOutProblem(from, to, micros, { payees, feePayer });
+    if (problem) return fail(400, problem);
+    const rpc = rpcAt(chain.rpc);
+    const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+
+    if (path === "/send/prepare") {
+      if ((await feeBalance(rpc, feePayer, { fresh: true }).catch(() => 0)) < OFFER_ABOVE_LAMPORTS) {
+        return fail(409, "your fees account needs about $5 of SOL first (see Your fees account, under Earnings)");
+      }
+      try {
+        // A deposit address is a plain wallet. A token account pasted by
+        // mistake would have the money sent somewhere nobody can use.
+        const info = await rpc("getAccountInfo", [to, { encoding: "base64", commitment: "confirmed" }]);
+        const owner = info?.value?.owner;
+        if (owner === TOKEN_PROGRAM) return fail(400, "that's the address of a token account, not a wallet. Copy the deposit address again from Cash App or Coinbase");
+        if (owner && owner !== SYSTEM_PROGRAM) return fail(400, "that address isn't a wallet. Copy the deposit address again from Cash App or Coinbase");
+        const { value } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+        const tx = await draftCashOut({ feePayer, from, to, micros, mint: chain.mint, blockhash: value.blockhash });
+        return json({ tx: base64.encode(tx), feePayer, mint: chain.mint });
+      } catch (e) {
+        return fail(502, "couldn't reach the network; try again in a moment");
+      }
+    }
+
+    const result = await settle(env.DB, rpc, body.tx, {
+      mint: chain.mint, payees: [{ address: to, split: 100 }], minMicros: micros, maxMicros: micros,
+    }, { from: payees });
+    if (!result.ok) return fail(result.status, result.why);
+    return json({ signature: result.signature, confirmed: result.confirmed });
   }
 
   // Subscriptions through the artist's own Stripe account. The key comes in
@@ -496,6 +598,24 @@ async function whoIsAsking(request: Request, env: Env): Promise<string | null> {
 }
 
 /** Everything a listener can do without being the artist. */
+async function manifestNowOf(env: Env): Promise<unknown> {
+  const text = await manifestText(env);
+  try { return text ? JSON.parse(text) : null; } catch { return null; }
+}
+
+/** What this node offers to pay network fees for, or null. Only for an
+ *  artist taking USDC on a network this node knows, and only while the fee
+ *  wallet holds enough to be worth offering. */
+async function feeOffer(env: Env): Promise<{ feePayer: string; network: string; minMicros: number; maxMicros: number } | null> {
+  const pay = walletOf(await manifestNowOf(env));
+  const chain = pay && CHAINS[pay.network];
+  if (!pay || !chain) return null;
+  const feePayer = await feeAddress(env.DB);
+  if (pay.recipients.some((r) => r.address === feePayer)) return null;
+  if ((await feeBalance(rpcAt(chain.rpc), feePayer)) < OFFER_ABOVE_LAMPORTS) return null;
+  return { feePayer, network: pay.network, minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS };
+}
+
 async function handleListen(request: Request, env: Env, path: string): Promise<Response | null> {
   const host = new URL(request.url).host;
 
@@ -529,6 +649,48 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     return new Response(JSON.stringify({ token: result.token, subscribedUntil: subscribed ? until : null }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
+    });
+  }
+
+  // ── paying listeners' network fees (settle.ts, feepay.ts) ────────────────
+  // Who would pay the fee, if this node will. Offered only while the fee
+  // wallet holds enough; otherwise the app pays its own fee, as before.
+  if (path === "/fees" && request.method === "GET") {
+    const offer = await feeOffer(env).catch(() => null);
+    return new Response(JSON.stringify(offer ?? { feePayer: null }), {
+      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
+    });
+  }
+
+  // A listener's payment, signed by them, for this node to add its fee
+  // signature to and send. What it may contain comes from the artist's
+  // manifest, never from the request; `item` only says which price applies.
+  if (path === "/settle" && request.method === "POST") {
+    if (Number(request.headers.get("Content-Length") || 0) > 4096) return fail(413, "too large");
+    const body = await jsonBody(request);
+    if (!body) return fail(400, "bad request");
+    const offer = await feeOffer(env).catch(() => null);
+    if (!offer) return fail(409, "this artist's node isn't paying network fees right now");
+    const manifest = await manifestNowOf(env);
+    const pay = walletOf(manifest)!;
+    let limits = { minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS } as { minMicros: number; maxMicros: number; memo?: string };
+    if (body.item !== undefined) {
+      const item = String(body.item);
+      const sale = itemFor(manifest, item);
+      if (!sale || !sale.wallet) return fail(404, "that isn't for sale for USDC here");
+      const price = Math.round(sale.price * 1e6);
+      limits = { minMicros: price, maxMicros: price, memo: purchaseMemo(host, item) };
+    }
+    const result = await settle(env.DB, rpcAt(CHAINS[pay.network].rpc), body.tx, {
+      mint: CHAINS[pay.network].mint, payees: pay.recipients, ...limits,
+    }, {
+      // Per paying wallet, on top of the per-address count every listener
+      // request already has.
+      allowed: (who) => allow(env as never, RULES.wallet, `${host}|settle|${who}`),
+    });
+    if (!result.ok) return fail(result.status, result.why);
+    return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {
+      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
     });
   }
 
@@ -703,6 +865,20 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     return new Response(null, { status: 204, headers: noStore() });
   }
 
+  // A song finished playing: counted for the song, by nobody in particular.
+  // No wallet, no token, nothing about who: free tracks count too. Only a
+  // track on the published page is counted, so made-up names can't fill the
+  // table, and each address can only report so fast (limits.ts).
+  if (path === "/heard" && request.method === "POST") {
+    const body = await jsonBody(request);
+    const track = String(body?.track || "");
+    const seconds = Number(body?.seconds) || 0;
+    const manifest = await manifestNowOf(env) as { releases?: { tracks?: { id: string }[] }[] } | null;
+    const known = (manifest?.releases || []).some((r) => (r.tracks || []).some((t) => t.id === track));
+    if (known && seconds >= 30) await heard(env.DB, track, seconds).catch(() => {});
+    return new Response(null, { status: 204, headers: noStore() });
+  }
+
   // A listener holds their key, so they can prove a row is theirs and have it
   // deleted. No documents, no mailbox, no judgement call by a musician. A
   // blocked wallet may still erase itself: being refused the music is not a
@@ -819,7 +995,9 @@ export default {
       const kind = q.has("song") ? "song" : q.has("album") ? "album" : null;
       const id = kind ? String(q.get(kind) || "") : "";
       const focus = kind && /^[a-z0-9-]{1,64}$/.test(id) ? { kind, id } as const : null;
-      return new Response(renderPage(manifest as never, new URL(request.url).origin, nonce, focus), {
+      let site: unknown = null;
+      try { const t = await siteText(env); site = t ? JSON.parse(t) : null; } catch { /* the plain page, then */ }
+      return new Response(renderPage(manifest as never, new URL(request.url).origin, nonce, focus, site), {
         status: 200, headers,
       });
     }

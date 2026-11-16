@@ -1,11 +1,11 @@
 var __toBinary = Uint8Array.fromBase64 || /* @__PURE__ */ (() => {
   var table = new Uint8Array(128);
   for (var i = 0; i < 64; i++) table[i < 26 ? i + 65 : i < 52 ? i + 71 : i < 62 ? i - 4 : i * 4 - 205] = i;
-  return (base64) => {
-    var n = base64.length, bytes = new Uint8Array((n - (base64[n - 1] == "=") - (base64[n - 2] == "=")) * 3 / 4 | 0);
+  return (base642) => {
+    var n = base642.length, bytes = new Uint8Array((n - (base642[n - 1] == "=") - (base642[n - 2] == "=")) * 3 / 4 | 0);
     for (var i2 = 0, j = 0; i2 < n; ) {
-      var c0 = table[base64.charCodeAt(i2++)], c1 = table[base64.charCodeAt(i2++)];
-      var c2 = table[base64.charCodeAt(i2++)], c3 = table[base64.charCodeAt(i2++)];
+      var c0 = table[base642.charCodeAt(i2++)], c1 = table[base642.charCodeAt(i2++)];
+      var c2 = table[base642.charCodeAt(i2++)], c3 = table[base642.charCodeAt(i2++)];
       bytes[j++] = c0 << 2 | c1 >> 4;
       bytes[j++] = c1 << 4 | c2 >> 2;
       bytes[j++] = c2 << 6 | c3;
@@ -137,9 +137,241 @@ function includes(manifest, trackId) {
   }
   return [];
 }
+function shareOut(micros, recipients) {
+  const total = Math.max(0, Math.floor(micros));
+  if (!recipients.length || total === 0) return [];
+  const exact = recipients.map((r) => total * (Number(r.split) || 0) / 100);
+  const parts = exact.map((e) => Math.floor(e));
+  let left = total - parts.reduce((a, b) => a + b, 0);
+  const order = exact.map((e, i) => ({ i, frac: e - Math.floor(e) })).sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (let k = 0; left > 0; k++, left--) parts[order[k % order.length].i] += 1;
+  return recipients.map((r, i) => ({ ...r, micros: parts[i] })).filter((r) => r.micros > 0);
+}
+
+// ../spec/site.mjs
+var SITE_VERSION = 1;
+var SECTION_TYPES = {
+  music: { label: "Music", hint: "Your releases, with play buttons." },
+  about: { label: "About", hint: "A picture and a few paragraphs about you." },
+  news: { label: "News", hint: "Short posts: a new song, a tour, a thank-you." },
+  shows: { label: "Shows", hint: "Dates, places and ticket links." },
+  merch: { label: "Merch", hint: "Things you sell elsewhere, with a link to buy." },
+  links: { label: "Links", hint: "Your other places: Instagram, Bandcamp, a newsletter." }
+};
+var THEMES = {
+  light: { label: "Light", bg: "#ffffff", bg2: "#f7f4f1", ink: "#131110", ink2: "#4a4644", mut: "#66615d", line: "#e3ddd8" },
+  dark: { label: "Dark", bg: "#121110", bg2: "#1d1b19", ink: "#f7f3ef", ink2: "#d4ccc4", mut: "#a39a92", line: "#34302c" },
+  paper: { label: "Paper", bg: "#f4eee3", bg2: "#ebe3d4", ink: "#231d16", ink2: "#4b4134", mut: "#76695a", line: "#d8ccb8" }
+};
+var FONTS = {
+  sans: { label: "Clean", css: '"Archivo",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Helvetica,sans-serif' },
+  serif: { label: "Classic", css: 'ui-serif,Georgia,"Times New Roman",serif' },
+  mono: { label: "Typewriter", css: "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" }
+};
+var MAX = { short: 120, text: 4e3, url: 500, sections: 16, items: 40, label: 60, price: 20 };
+var str = (v, n) => typeof v === "string" ? v.replace(/\r\n?/g, "\n").slice(0, n) : "";
+var line = (v, n) => str(v, n).replace(/\s+/g, " ").trim();
+function httpsUrl(v) {
+  try {
+    const u = new URL(String(v || "").trim());
+    return u.protocol === "https:" && u.href.length <= MAX.url ? u.href : "";
+  } catch {
+    return "";
+  }
+}
+var date = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || "")) ? String(v) : "";
+var colour = (v, d) => /^#[0-9a-f]{6}$/i.test(String(v || "")) ? String(v).toLowerCase() : d;
+var idOf = (v, i) => /^[a-z0-9-]{1,40}$/.test(String(v || "")) ? String(v) : `s${i}`;
+function cleanSite(raw) {
+  const r = raw && typeof raw === "object" ? raw : {};
+  const look = r.look || {};
+  const hero = r.hero || {};
+  const seen2 = /* @__PURE__ */ new Set();
+  const sections = (Array.isArray(r.sections) ? r.sections : []).slice(0, MAX.sections).map((s, i) => {
+    if (!s || !SECTION_TYPES[s.type]) return null;
+    let id = idOf(s.id, i);
+    while (seen2.has(id)) id = `${id}-${i}`;
+    seen2.add(id);
+    const out = { id, type: s.type, title: line(s.title, MAX.short) || SECTION_TYPES[s.type].label };
+    if (s.hidden === true) out.hidden = true;
+    const items = (Array.isArray(s.items) ? s.items : []).slice(0, MAX.items);
+    if (s.type === "about") {
+      out.text = str(s.text, MAX.text);
+      out.image = httpsUrl(s.image);
+    }
+    if (s.type === "news") {
+      out.items = items.map((p, k) => ({
+        id: idOf(p?.id, k),
+        title: line(p?.title, MAX.short),
+        date: date(p?.date),
+        text: str(p?.text, MAX.text),
+        image: httpsUrl(p?.image)
+      }));
+    }
+    if (s.type === "shows") {
+      out.items = items.map((p, k) => ({
+        id: idOf(p?.id, k),
+        date: date(p?.date),
+        city: line(p?.city, MAX.short),
+        venue: line(p?.venue, MAX.short),
+        url: httpsUrl(p?.url)
+      }));
+    }
+    if (s.type === "merch") {
+      out.items = items.map((p, k) => ({
+        id: idOf(p?.id, k),
+        name: line(p?.name, MAX.short),
+        price: line(p?.price, MAX.price),
+        image: httpsUrl(p?.image),
+        url: httpsUrl(p?.url)
+      }));
+    }
+    if (s.type === "links") {
+      out.items = items.map((p, k) => ({ id: idOf(p?.id, k), label: line(p?.label, MAX.label), url: httpsUrl(p?.url) }));
+    }
+    return out;
+  }).filter(Boolean);
+  return {
+    v: SITE_VERSION,
+    look: {
+      theme: THEMES[look.theme] ? look.theme : "light",
+      font: FONTS[look.font] ? look.font : "sans",
+      accent: colour(look.accent, "#f6711e")
+    },
+    hero: { title: line(hero.title, MAX.short), tagline: str(hero.tagline, 300), image: httpsUrl(hero.image) },
+    sections
+  };
+}
+function esc(s) {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+var paras = (t) => esc(t).split(/\n{2,}/).map((p) => p.trim()).filter(Boolean).map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`).join("");
+var niceDate = (d) => {
+  if (!d) return "";
+  const [y, m, day] = d.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, day)).toLocaleDateString("en", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+};
+function renderSite(input, manifest, { edit = false, slots = {}, listenUrl = "" } = {}) {
+  const site = cleanSite(input);
+  const t = THEMES[site.look.theme];
+  const font = FONTS[site.look.font].css;
+  const e = (path, kind) => edit ? ` data-edit="${esc(path)}" data-kind="${kind}"` : "";
+  const ph = (value, placeholder) => value ? esc(value) : edit ? `<span class="ph">${esc(placeholder)}</span>` : "";
+  const img = (src, path, cls, placeholder) => src ? `<img class="${cls}" src="${esc(src)}" alt="" loading="lazy"${e(path, "image")}>` : edit ? `<div class="${cls} ph-img"${e(path, "image")}>${esc(placeholder)}</div>` : "";
+  const name = site.hero.title || manifest?.artist?.name || "";
+  const shown = site.sections.filter((s) => edit || !s.hidden);
+  const nav = shown.filter((s) => !s.hidden).map((s) => `<a href="#${esc(s.id)}">${esc(s.title)}</a>`).join("");
+  const heroImg = site.hero.image;
+  const hero = `<header class="s-hero${heroImg ? " has-img" : ""}" data-section="hero">
+  ${heroImg ? `<img class="s-hero-img" src="${esc(heroImg)}" alt=""${e("hero.image", "image")}>` : edit ? `<div class="s-hero-img ph-img"${e("hero.image", "image")}>Add a banner picture</div>` : ""}
+  <div class="s-hero-in">
+    <h1${e("hero.title", "text")}>${ph(name, "Your name")}</h1>
+    ${site.hero.tagline || edit ? `<p class="s-tag"${e("hero.tagline", "long")}>${ph(site.hero.tagline, "A line about you")}</p>` : ""}
+    ${listenUrl ? `<a class="s-btn" href="${esc(listenUrl)}">Listen in Amply</a>` : edit ? `<span class="s-btn">Listen in Amply</span>` : ""}
+  </div>
+</header>`;
+  const sections = shown.map((s, i) => {
+    const p = `sections.${i}`;
+    const head = `<h2${e(`${p}.title`, "text")}>${esc(s.title)}</h2>`;
+    let inner = "";
+    if (s.type === "music") {
+      const rel = (manifest?.releases || []).filter((r) => (r.tracks || []).length);
+      inner = slots.music || (rel.length ? `<div class="s-rel">${rel.map((r) => `<div class="s-rel-one">
+        ${httpsUrl(r.art) ? `<img src="${esc(httpsUrl(r.art))}" alt="">` : `<div class="s-rel-art"></div>`}
+        <div><b>${esc(r.title)}</b><p class="muted">${(r.tracks || []).map((t2) => esc(t2.title)).join(" \xB7 ")}</p></div>
+      </div>`).join("")}</div>` : `<p class="muted">Your releases appear here once you add music.</p>`);
+    } else if (s.type === "about") {
+      inner = `<div class="s-about">${img(s.image, `${p}.image`, "s-about-img", "Add a picture")}
+        <div class="s-text"${e(`${p}.text`, "long")}>${s.text ? paras(s.text) : edit ? `<p class="ph">Write a few lines about you</p>` : ""}</div></div>`;
+    } else if (s.type === "news") {
+      inner = `<div class="s-news">${(s.items || []).map((n, k) => `<article class="s-post" data-item="${p}.items.${k}">
+        ${img(n.image, `${p}.items.${k}.image`, "s-post-img", "Add a picture")}
+        <p class="s-date"${e(`${p}.items.${k}.date`, "date")}>${ph(niceDate(n.date), "Date")}</p>
+        <h3${e(`${p}.items.${k}.title`, "text")}>${ph(n.title, "Title")}</h3>
+        <div class="s-text"${e(`${p}.items.${k}.text`, "long")}>${n.text ? paras(n.text) : edit ? `<p class="ph">Write the post</p>` : ""}</div>
+      </article>`).join("") || (edit ? `<p class="ph">No posts yet</p>` : "")}</div>`;
+    } else if (s.type === "shows") {
+      const rows = (s.items || []).filter((x) => edit || x.city || x.venue);
+      inner = rows.length ? `<ul class="s-shows">${rows.map((x, k) => `<li data-item="${p}.items.${k}">
+        <span class="s-date"${e(`${p}.items.${k}.date`, "date")}>${ph(niceDate(x.date), "Date")}</span>
+        <span class="s-where"><b${e(`${p}.items.${k}.city`, "text")}>${ph(x.city, "City")}</b> <span${e(`${p}.items.${k}.venue`, "text")}>${ph(x.venue, "Venue")}</span></span>
+        ${x.url ? `<a class="s-btn sm" href="${esc(x.url)}" rel="noopener"${e(`${p}.items.${k}.url`, "url")}>Tickets</a>` : edit ? `<span class="s-btn sm ghost"${e(`${p}.items.${k}.url`, "url")}>Add ticket link</span>` : ""}
+      </li>`).join("")}</ul>` : `<p class="muted">No shows announced right now.</p>`;
+    } else if (s.type === "merch") {
+      inner = `<div class="s-merch">${(s.items || []).map((x, k) => `<div class="s-card" data-item="${p}.items.${k}">
+        ${img(x.image, `${p}.items.${k}.image`, "s-card-img", "Add a picture")}
+        <b${e(`${p}.items.${k}.name`, "text")}>${ph(x.name, "Name")}</b>
+        <span class="muted"${e(`${p}.items.${k}.price`, "text")}>${ph(x.price, "Price")}</span>
+        ${x.url ? `<a class="s-btn sm" href="${esc(x.url)}" rel="noopener"${e(`${p}.items.${k}.url`, "url")}>Buy</a>` : edit ? `<span class="s-btn sm ghost"${e(`${p}.items.${k}.url`, "url")}>Add shop link</span>` : ""}
+      </div>`).join("")}</div>`;
+    } else if (s.type === "links") {
+      const items = (s.items || []).filter((x) => edit || x.url);
+      inner = `<div class="s-links">${items.map((x, k) => edit ? `<span class="s-link" data-item="${p}.items.${k}"><span${e(`${p}.items.${k}.label`, "text")}>${ph(x.label, "Label")}</span> <span class="s-url"${e(`${p}.items.${k}.url`, "url")}>${x.url ? "\u2197" : "add link"}</span></span>` : `<a class="s-link" href="${esc(x.url)}" rel="noopener">${esc(x.label || x.url)} \u2197</a>`).join("")}</div>`;
+    }
+    return `<section class="s-sec s-sec-${s.type}${s.hidden ? " is-hidden" : ""}" id="${esc(s.id)}" data-section="${i}">${head}${inner}</section>`;
+  }).join("\n");
+  const css = `
+.s-site{--bg:${t.bg};--bg2:${t.bg2};--ink:${t.ink};--ink2:${t.ink2};--mut:${t.mut};--line:${t.line};--ac:${site.look.accent};
+ background:var(--bg);color:var(--ink);font:17px/1.6 ${font};-webkit-font-smoothing:antialiased;min-height:100%}
+.s-site *{box-sizing:border-box}
+.s-site a{color:var(--ac);text-underline-offset:2px}
+.s-site .muted{color:var(--mut)}
+.s-nav{position:sticky;top:0;z-index:2;display:flex;gap:22px;justify-content:center;flex-wrap:wrap;padding:14px 20px;
+ background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);font-size:15px;font-weight:600}
+.s-nav a{color:var(--ink);text-decoration:none}
+.s-hero{position:relative;min-height:clamp(320px,52vh,560px);display:flex;align-items:flex-end;overflow:hidden;background:var(--bg2)}
+.s-hero-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.s-hero.has-img::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 30%,rgba(0,0,0,.6))}
+.s-hero-in{position:relative;z-index:1;width:100%;max-width:960px;margin:0 auto;padding:clamp(28px,5vw,56px) clamp(20px,4vw,48px)}
+.s-hero.has-img .s-hero-in{color:#fff}
+.s-hero h1{font-size:clamp(44px,9vw,104px);line-height:.92;letter-spacing:-.045em;margin:0;font-weight:800}
+.s-tag{font-size:clamp(17px,2vw,21px);margin:16px 0 0;max-width:34em;opacity:.9}
+.s-btn{display:inline-block;margin-top:24px;background:var(--ac);color:#131110 !important;text-decoration:none;font-weight:700;
+ padding:13px 24px;border-radius:999px;font-size:16px}
+.s-btn.sm{margin:0;padding:8px 16px;font-size:14px}
+.s-btn.ghost{background:transparent;border:1.5px dashed var(--line);color:var(--mut) !important}
+.s-sec{max-width:960px;margin:0 auto;padding:clamp(40px,6vw,72px) clamp(20px,4vw,48px);border-top:1px solid var(--line)}
+.s-sec h2{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 24px;font-weight:800}
+.s-text p{margin:0 0 14px;color:var(--ink2);max-width:38em}
+.s-about{display:grid;gap:28px;align-items:start}
+@media(min-width:720px){.s-about{grid-template-columns:minmax(0,1fr) minmax(0,1.4fr)}}
+.s-about-img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:18px}
+.s-news{display:grid;gap:34px}
+.s-post{display:grid;gap:6px;max-width:44em}
+.s-post h3{margin:0;font-size:24px;letter-spacing:-.02em}
+.s-post-img{width:100%;max-height:420px;object-fit:cover;border-radius:16px;margin-bottom:10px}
+.s-date{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;color:var(--mut);margin:0}
+.s-shows{list-style:none;margin:0;padding:0}
+.s-shows li{display:grid;grid-template-columns:130px 1fr auto;gap:16px;align-items:center;padding:16px 0;border-bottom:1px solid var(--line)}
+@media(max-width:560px){.s-shows li{grid-template-columns:1fr auto}.s-shows .s-date{grid-column:1/-1}}
+.s-where span{color:var(--mut)}
+.s-merch{display:grid;gap:20px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+.s-card{display:grid;gap:6px;align-content:start}
+.s-card-img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px;background:var(--bg2)}
+.s-card .s-btn{justify-self:start;margin-top:6px}
+.s-links{display:flex;flex-wrap:wrap;gap:12px}
+.s-rel{display:grid;gap:22px}
+.s-rel-one{display:flex;gap:20px;align-items:center}
+.s-rel-one img,.s-rel-art{width:96px;height:96px;border-radius:12px;object-fit:cover;background:var(--bg2);flex:none}
+.s-rel-one p{margin:4px 0 0;font-size:15px}
+.s-link{display:inline-flex;gap:6px;padding:12px 20px;border:1.5px solid var(--line);border-radius:999px;color:var(--ink) !important;text-decoration:none;font-weight:600}
+.s-foot{max-width:960px;margin:0 auto;padding:40px clamp(20px,4vw,48px) 80px;border-top:1px solid var(--line);color:var(--mut);font-size:14.5px}
+.s-site .ph{color:var(--mut);opacity:.7;font-style:italic}
+.s-site .ph-img{display:grid;place-items:center;background:var(--bg2);color:var(--mut);border:1.5px dashed var(--line);min-height:160px;font-size:14px}
+.s-site .s-hero-img.ph-img{min-height:0}
+.s-sec.is-hidden{opacity:.45}
+`;
+  const body = `<div class="s-site">
+${nav ? `<nav class="s-nav">${nav}</nav>` : ""}
+${hero}
+${sections}
+${slots.footer ? `<footer class="s-foot">${slots.footer}</footer>` : ""}
+</div>`;
+  return { css, body, site };
+}
 
 // src/page.ts
-function esc(s) {
+function esc2(s) {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 function safeUrl(u) {
@@ -168,9 +400,9 @@ function appLink(origin, focus) {
   const m = encodeURIComponent(`${origin}/manifest.json`);
   return focus ? `https://amply.stream/app/?${focus.kind}=${m}&id=${encodeURIComponent(focus.id)}` : `https://amply.stream/app/?add=${m}`;
 }
-function renderPage(manifest, origin, nonce, focus = null) {
-  const name = esc(manifest.artist?.name || "Untitled");
-  const bio = manifest.artist?.bio ? `<p class="bio">${esc(manifest.artist.bio)}</p>` : "";
+function renderPage(manifest, origin, nonce, focus = null, site = null) {
+  const name = esc2(manifest.artist?.name || "Untitled");
+  const bio = manifest.artist?.bio ? `<p class="bio">${esc2(manifest.artist.bio)}</p>` : "";
   const avatar = safeUrl(manifest.artist?.image);
   const newest = (manifest.releases || []).filter((r) => safeUrl(r.art)).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))[0];
   const preview = safeUrl(manifest.artist?.banner) || safeUrl(newest?.art) || avatar;
@@ -185,7 +417,7 @@ function renderPage(manifest, origin, nonce, focus = null) {
     }
   }
   const artistName = manifest.artist?.name || "this artist";
-  const cardTitle = focused ? esc(`${focused.title} \u2014 ${artistName}`) : name;
+  const cardTitle = focused ? esc2(`${focused.title} \u2014 ${artistName}`) : name;
   const cardAbout = focused ? `${focused.kind === "song" ? "A song" : "An album"} by ${artistName}. Listen in the Amply app.` : about;
   const cardImage = focused ? focused.art || preview : preview;
   const cardUrl = focused ? `${origin}/?${focused.kind}=${encodeURIComponent(focused.id)}` : `${origin}/`;
@@ -193,66 +425,91 @@ function renderPage(manifest, origin, nonce, focus = null) {
   const cardWide = focused ? !!cardImage : wide;
   const links = (manifest.artist?.links || []).map((l) => {
     const u = safeUrl(l.url);
-    return u ? `<a href="${esc(u)}" rel="noopener">${esc(l.label)}</a>` : "";
+    return u ? `<a href="${esc2(u)}" rel="noopener">${esc2(l.label)}</a>` : "";
   }).join("");
   const wallet = (manifest.payment || []).find((p) => p.type === "solana-usdc");
   const paid = charges(manifest);
   const inApp = appLink(origin, focused ? { kind: focused.kind, id: focused.id } : null);
   const support = (manifest.payment || []).filter((p) => p.type === "link").map((p) => {
     const u = safeUrl(p.url);
-    return u ? `<a class="btn" href="${esc(u)}" rel="noopener">${esc(p.label)}</a>` : "";
+    return u ? `<a class="btn" href="${esc2(u)}" rel="noopener">${esc2(p.label)}</a>` : "";
   }).join("");
   const lic = manifest.licence;
   const licUrl = lic?.type === "amply-personal-1" ? "https://amply.stream/licence/personal-1" : safeUrl(lic?.url);
-  const licence = lic?.type ? `<p class="lic">${lic.notice ? esc(lic.notice) + " " : ""}${paid ? "" : "Listen freely. "}${licUrl ? `<a href="${esc(licUrl)}" rel="noopener">These recordings may not be redistributed</a>` : "These recordings may not be redistributed"} or included in another service without ${name}'s permission.</p>` : "";
+  const licence = lic?.type ? `<p class="lic">${lic.notice ? esc2(lic.notice) + " " : ""}${paid ? "" : "Listen freely. "}${licUrl ? `<a href="${esc2(licUrl)}" rel="noopener">These recordings may not be redistributed</a>` : "These recordings may not be redistributed"} or included in another service without ${name}'s permission.</p>` : "";
   const releases = (manifest.releases || []).map((r) => {
     const art = safeUrl(r.art);
     const tracks = (r.tracks || []).map((t) => {
       const u = safeUrl(t.url);
       if (!u) return "";
-      const title = `${esc(t.title)}${t.explicit ? ' <em class="e">explicit</em>' : ""}`;
+      const title = `${esc2(t.title)}${t.explicit ? ' <em class="e">explicit</em>' : ""}`;
       if (needsWallet(manifest, t)) {
-        return `<li class="t${focused?.id === t.id ? " focus" : ""}" id="song-${esc(t.id)}">
-        <a class="play paid" href="${esc(appLink(origin, { kind: "song", id: t.id }))}" aria-label="Listen to ${esc(t.title)} in the Amply app">\u25B6</a>
+        return `<li class="t${focused?.id === t.id ? " focus" : ""}" id="song-${esc2(t.id)}">
+        <a class="play paid" href="${esc2(appLink(origin, { kind: "song", id: t.id }))}" aria-label="Listen to ${esc2(t.title)} in the Amply app">\u25B6</a>
         <span class="tt">${title}</span>
         <span class="d">${mmss(t.duration)}</span>
       </li>`;
       }
-      return `<li class="t${focused?.id === t.id ? " focus" : ""}" id="song-${esc(t.id)}">
-        <button class="play" data-src="${esc(u)}" aria-label="Play ${esc(t.title)}">\u25B6</button>
+      return `<li class="t${focused?.id === t.id ? " focus" : ""}" id="song-${esc2(t.id)}">
+        <button class="play" data-src="${esc2(u)}" aria-label="Play ${esc2(t.title)}">\u25B6</button>
         <span class="tt">${title}${paid ? ' <em class="free">free</em>' : ""}</span>
         <span class="d">${mmss(t.duration)}</span>
       </li>`;
     }).join("");
-    return `<section class="r${focused?.release === r.id ? " focus" : ""}" id="album-${esc(r.id)}">
-      ${art ? `<img class="art" src="${esc(art)}" alt="" loading="lazy">` : ""}
+    return `<section class="r${focused?.release === r.id ? " focus" : ""}" id="album-${esc2(r.id)}">
+      ${art ? `<img class="art" src="${esc2(art)}" alt="" loading="lazy">` : ""}
       <div class="rb">
-        <h2>${esc(r.title)}</h2>
-        ${r.date ? `<p class="date">${esc(r.date)}</p>` : ""}
+        <h2>${esc2(r.title)}</h2>
+        ${r.date ? `<p class="date">${esc2(r.date)}</p>` : ""}
         <ol class="ts">${tracks}</ol>
       </div>
     </section>`;
   }).join("");
   const empty = !(manifest.releases || []).some((r) => (r.tracks || []).length) ? `<p class="muted">No music published yet.</p>` : "";
+  const linkedHtml = `${focused ? `<div class="linked">
+  ${focused.art ? `<img src="${esc2(focused.art)}" alt="">` : ""}
+  <div><h2>${esc2(focused.title)}</h2><p>${focused.kind === "song" ? "A song" : "An album"} by ${name}</p>
+  <a class="btn" href="${esc2(inApp)}">Open in the Amply app</a></div>
+</div>` : ""}`;
+  const musicHtml = `${paid ? `<div class="listen">
+  <p>${name}'s music is paid for as you listen \u2014 <strong>$${esc2(wallet?.ratePerMinute)}</strong> a
+  minute, straight to them, with nothing taken in between. Listen in the Amply app.</p>
+  <a class="btn" href="${esc2(inApp)}">Open in the Amply app</a>
+</div>` : ""}
+${releases}
+${empty}
+<div class="pay">
+  <h3>Support ${name}</h3>
+  ${wallet?.ratePerMinute ? `<p>Listening in an Amply player pays ${name} <strong>$${esc2(wallet.ratePerMinute)}</strong> a
+       minute, directly. Nobody in between takes a cut.</p>` : `<p>Payments go straight to the artist. Nothing is taken in between.</p>`}
+  ${support}
+</div>`;
+  const footerHtml = `<p>Follow in an Amply player by adding this address:<br><code>${esc2(origin)}/manifest.json</code></p>
+  <p>This page is hosted by the artist, on infrastructure they own. <a href="/privacy">Privacy</a></p>
+  ${licence}`;
+  const built = site && typeof site === "object" && Array.isArray(site.sections) && site.sections.length ? renderSite(site, manifest, { slots: { music: linkedHtml + musicHtml, footer: footerHtml }, listenUrl: inApp }) : null;
+  const siteMode = !!built;
+  const siteBody = built ? built.body : "";
+  const siteCss = built ? built.css + "body{padding:0}" : "";
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${cardTitle}</title>
-<meta name="description" content="${esc(cardAbout.slice(0, 160))}">
+<meta name="description" content="${esc2(cardAbout.slice(0, 160))}">
 <meta property="og:title" content="${cardTitle}">
-<meta property="og:description" content="${esc(cardAbout)}">
+<meta property="og:description" content="${esc2(cardAbout)}">
 <meta property="og:type" content="${cardType}">
-<meta property="og:url" content="${esc(cardUrl)}">
+<meta property="og:url" content="${esc2(cardUrl)}">
 <meta name="twitter:card" content="${cardWide ? "summary_large_image" : "summary"}">
 <meta name="twitter:title" content="${cardTitle}">
-<meta name="twitter:description" content="${esc(cardAbout)}">
+<meta name="twitter:description" content="${esc2(cardAbout)}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;800&display=swap">
-${cardImage ? `<meta property="og:image" content="${esc(cardImage)}">
+${cardImage ? `<meta property="og:image" content="${esc2(cardImage)}">
 <meta property="og:image:alt" content="${cardTitle}">
-<meta name="twitter:image" content="${esc(cardImage)}">` : ""}
+<meta name="twitter:image" content="${esc2(cardImage)}">` : ""}
 <style nonce="${nonce}">
 :root{color-scheme:light only;--ink:#131110;--ink2:#4a4644;--mut:#66615d;--bg:#ffffff;--bg2:#f7f4f1;--line:#e3ddd8;--ac:#f6711e;--on-ac:#131110}
 *{box-sizing:border-box}
@@ -300,38 +557,19 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;ov
 .linked p{margin:0 0 10px;color:var(--mut);font-size:14px}
 .linked h2{margin:0 0 4px;font-size:21px}
 .t.focus .tt{color:var(--ac);font-weight:700}
+${siteCss}
 </style>
-</head><body><div class="w">
+</head><body>${siteMode ? siteBody : `<div class="w">
 <header>
-  ${avatar ? `<img class="av" src="${esc(avatar)}" alt="">` : ""}
+  ${avatar ? `<img class="av" src="${esc2(avatar)}" alt="">` : ""}
   <div><h1>${name}</h1></div>
 </header>
-${focused ? `<div class="linked">
-  ${focused.art ? `<img src="${esc(focused.art)}" alt="">` : ""}
-  <div><h2>${esc(focused.title)}</h2><p>${focused.kind === "song" ? "A song" : "An album"} by ${name}</p>
-  <a class="btn" href="${esc(inApp)}">Open in the Amply app</a></div>
-</div>` : ""}
+${linkedHtml}
 ${bio}
 ${links ? `<div class="links">${links}</div>` : ""}
-${paid ? `<div class="listen">
-  <p>${name}'s music is paid for as you listen \u2014 <strong>$${esc(wallet?.ratePerMinute)}</strong> a
-  minute, straight to them, with nothing taken in between. Listen in the Amply app.</p>
-  <a class="btn" href="${esc(inApp)}">Open in the Amply app</a>
-</div>` : ""}
-${releases}
-${empty}
-<div class="pay">
-  <h3>Support ${name}</h3>
-  ${wallet?.ratePerMinute ? `<p>Listening in an Amply player pays ${name} <strong>$${esc(wallet.ratePerMinute)}</strong> a
-       minute, directly. Nobody in between takes a cut.</p>` : `<p>Payments go straight to the artist. Nothing is taken in between.</p>`}
-  ${support}
-</div>
-<footer>
-  <p>Follow in an Amply player by adding this address:<br><code>${esc(origin)}/manifest.json</code></p>
-  <p>This page is hosted by the artist, on infrastructure they own. <a href="/privacy">Privacy</a></p>
-  ${licence}
-</footer>
-</div>
+${musicHtml}
+<footer>${footerHtml}</footer>
+</div>`}
 <script nonce="${nonce}">
 // One at a time, so a second play stops the first.
 let cur = null, btn = null;
@@ -351,7 +589,7 @@ document.addEventListener("click", (e) => {
 </body></html>`;
 }
 function renderPrivacy(manifest, origin, nonce) {
-  const name = esc(manifest.artist?.name || "This artist");
+  const name = esc2(manifest.artist?.name || "This artist");
   const paid = charges(manifest);
   const subs = plans(manifest).length > 0;
   const selling = forSale(manifest).length > 0;
@@ -366,7 +604,7 @@ holds your name, email and card in ${name}'s own Stripe account, under Stripe's 
   const contact = manifest.artist?.contact || "";
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(contact);
   const contactLine = !contact ? `<p class="warn">${name} has not added a contact address yet. Until they do, you can
-       still see and erase your record yourself, from the Amply app, as described below.</p>` : isEmail ? `<p>Contact them about your data at <a href="mailto:${esc(contact)}">${esc(contact)}</a>.</p>` : `<p>Contact them about your data here: <a href="${esc(safeUrl(contact) || "")}" rel="noopener">${esc(contact)}</a>.</p>`;
+       still see and erase your record yourself, from the Amply app, as described below.</p>` : isEmail ? `<p>Contact them about your data at <a href="mailto:${esc2(contact)}">${esc2(contact)}</a>.</p>` : `<p>Contact them about your data here: <a href="${esc2(safeUrl(contact) || "")}" rel="noopener">${esc2(contact)}</a>.</p>`;
   const body = paid ? `
 <h2>What is kept about you, and why</h2>
 <p>${name} charges for their music, and pays for it to be served. To be paid, and to be able
@@ -381,6 +619,8 @@ wallet that plays their paid tracks:</p>
 <p><strong>What is not kept:</strong> which tracks you played, or when you played any one of
 them. This server does not record that at all. Nothing is kept for tracks ${name} has made
 free, which anyone can play without a wallet.</p>
+<p>Separately, each song keeps a count of how often it has been played by everyone together, so
+${name} can see what's popular. It holds no wallet and nothing about who played it.</p>
 <p>No account, email address or name is asked for. A wallet address does not say who you are
 by itself, but it can sometimes be linked to a person, so it is treated as personal data.</p>
 
@@ -453,7 +693,7 @@ footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);font-si
 </style>
 </head><body><div class="w">
 <h1>Privacy</h1>
-<p class="lead">${name}'s streaming service, at ${esc(new URL(origin).host)}. ${name} is responsible
+<p class="lead">${name}'s streaming service, at ${esc2(new URL(origin).host)}. ${name} is responsible
 for what it keeps.</p>
 ${body}
 <footer><a href="/">Back to ${name}</a></footer>
@@ -550,6 +790,21 @@ async function updateSubscription(db, subscription, until, now = Date.now()) {
 }
 async function pruneSubscriptions(db, now = Date.now()) {
   await db.prepare("DELETE FROM subscriptions WHERE until < ?").bind(now - KEEP_FOR).run();
+}
+async function heard(db, track, seconds) {
+  const clean = Math.max(0, Math.min(Math.round(seconds), 3600));
+  await db.prepare(
+    `INSERT INTO track_plays (track, plays, seconds) VALUES (?, 1, ?)
+     ON CONFLICT(track) DO UPDATE SET plays = plays + 1, seconds = seconds + excluded.seconds`
+  ).bind(track, clean).run();
+}
+async function songTotals(db) {
+  try {
+    const r = await db.prepare("SELECT track, plays, seconds FROM track_plays ORDER BY plays DESC LIMIT 500").all();
+    return r.results || [];
+  } catch {
+    return [];
+  }
 }
 
 // src/identity.ts
@@ -778,13 +1033,13 @@ async function handleEvent(db, raw, signature, { fetchSubscription, now = Date.n
     return "refused";
   }
   const obj = event.data?.object ?? {};
-  const load = fetchSubscription ?? ((id) => call(connection.key, "GET", `/subscriptions/${id}`));
+  const load2 = fetchSubscription ?? ((id) => call(connection.key, "GET", `/subscriptions/${id}`));
   if (event.type === "checkout.session.completed") {
     if (obj.mode !== "subscription" || !obj.subscription) return "ignored";
     const wallet = String(obj.client_reference_id || "");
     const key = fromBase58(wallet);
     if (!key || key.length !== 32) return "ignored";
-    const sub = await load(String(obj.subscription));
+    const sub = await load2(String(obj.subscription));
     if (!ours(sub)) return "ignored";
     if (!STANDING.has(String(sub.status))) return "ignored";
     const until = periodEnd(sub);
@@ -1207,6 +1462,581 @@ async function claimWalletSale(db, manifest, { wallet, signature, item, gift, ho
   return { ok: true, sale: await recordSale(db, { ref: signature, item, buyer: wallet, gift, via: "usdc" }, now) };
 }
 
+// src/solana-tx.ts
+var B583 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function base58(bytes) {
+  let zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+  const digits = [];
+  for (let k = zeros; k < bytes.length; k++) {
+    let carry = bytes[k];
+    for (let i = 0; i < digits.length; i++) {
+      carry += digits[i] * 256;
+      digits[i] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  return "1".repeat(zeros) + digits.reverse().map((d) => B583[d]).join("");
+}
+function unbase58(s) {
+  if (typeof s !== "string" || !s || s.length > 128) return null;
+  const bytes = [];
+  for (const ch of s) {
+    let carry = B583.indexOf(ch);
+    if (carry < 0) return null;
+    for (let i = 0; i < bytes.length; i++) {
+      carry += bytes[i] * 58;
+      bytes[i] = carry & 255;
+      carry >>= 8;
+    }
+    while (carry > 0) {
+      bytes.push(carry & 255);
+      carry >>= 8;
+    }
+  }
+  for (const ch of s) {
+    if (ch === "1") bytes.push(0);
+    else break;
+  }
+  return new Uint8Array(bytes.reverse());
+}
+function keyOf(s) {
+  const k = unbase58(s);
+  return k && k.length === 32 ? k : null;
+}
+var TxError = class extends Error {
+};
+var MAX_TX_BYTES = 1232;
+var MAX_SIGNATURES = 4;
+var Reader = class {
+  at = 0;
+  bytes;
+  constructor(bytes) {
+    this.bytes = bytes;
+  }
+  byte() {
+    if (this.at >= this.bytes.length) throw new TxError("the transaction ends early");
+    return this.bytes[this.at++];
+  }
+  take(n) {
+    if (n < 0 || this.at + n > this.bytes.length) throw new TxError("the transaction ends early");
+    const out = this.bytes.slice(this.at, this.at + n);
+    this.at += n;
+    return out;
+  }
+  /** Solana's "compact-u16": up to three bytes, seven bits each. */
+  short() {
+    let value = 0;
+    for (let i = 0; i < 3; i++) {
+      const b = this.byte();
+      value |= (b & 127) << 7 * i;
+      if ((b & 128) === 0) {
+        if (i > 0 && b === 0) throw new TxError("a length is written in a non-standard way");
+        return value;
+      }
+    }
+    throw new TxError("a length is too long");
+  }
+};
+function shortBytes(n) {
+  const out = [];
+  let v = n;
+  for (; ; ) {
+    const b = v & 127;
+    v >>= 7;
+    if (v === 0) {
+      out.push(b);
+      return out;
+    }
+    out.push(b | 128);
+  }
+}
+function readTransaction(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) throw new TxError("there is no transaction");
+  if (bytes.length > MAX_TX_BYTES) throw new TxError("the transaction is too large");
+  const r = new Reader(bytes);
+  const sigCount = r.short();
+  if (sigCount === 0 || sigCount > MAX_SIGNATURES) throw new TxError("the transaction has an unexpected number of signatures");
+  const signatures = [];
+  for (let i = 0; i < sigCount; i++) signatures.push(r.take(64));
+  const messageStart = r.at;
+  const required = r.byte();
+  if (required & 128) throw new TxError("only legacy transactions are accepted");
+  const readonlySigned = r.byte();
+  const readonlyUnsigned = r.byte();
+  const accountCount = r.short();
+  if (accountCount === 0 || accountCount > 64) throw new TxError("the transaction has an unexpected number of accounts");
+  const accounts = [];
+  for (let i = 0; i < accountCount; i++) accounts.push(base58(r.take(32)));
+  if (new Set(accounts).size !== accounts.length) throw new TxError("an account is listed twice");
+  if (required !== sigCount) throw new TxError("the signatures don't match the signers");
+  if (required > accountCount || readonlySigned >= required || readonlyUnsigned > accountCount - required) {
+    throw new TxError("the transaction's header doesn't fit its accounts");
+  }
+  const blockhash = base58(r.take(32));
+  const ixCount = r.short();
+  if (ixCount === 0 || ixCount > 16) throw new TxError("the transaction has an unexpected number of instructions");
+  const instructions = [];
+  for (let i = 0; i < ixCount; i++) {
+    const program = r.byte();
+    if (program >= accountCount) throw new TxError("an instruction names an account that isn't there");
+    const n = r.short();
+    const idx = [];
+    for (let j = 0; j < n; j++) {
+      const a = r.byte();
+      if (a >= accountCount) throw new TxError("an instruction names an account that isn't there");
+      idx.push(a);
+    }
+    const len = r.short();
+    instructions.push({ program, accounts: idx, data: r.take(len) });
+  }
+  if (r.at !== bytes.length) throw new TxError("there are extra bytes after the transaction");
+  return {
+    signatures,
+    header: { required, readonlySigned, readonlyUnsigned },
+    accounts,
+    blockhash,
+    instructions,
+    message: bytes.slice(messageStart)
+  };
+}
+function isSigner(tx, i) {
+  return i < tx.header.required;
+}
+function isWritable(tx, i) {
+  const { required, readonlySigned, readonlyUnsigned } = tx.header;
+  if (i < required) return i < required - readonlySigned;
+  return i < tx.accounts.length - readonlyUnsigned;
+}
+function writeTransaction(tx) {
+  const head = shortBytes(tx.signatures.length);
+  const out = new Uint8Array(head.length + tx.signatures.length * 64 + tx.message.length);
+  out.set(head, 0);
+  tx.signatures.forEach((s, i) => out.set(s, head.length + i * 64));
+  out.set(tx.message, head.length + tx.signatures.length * 64);
+  return out;
+}
+async function verifySignature3(key, sig, message) {
+  const raw = keyOf(key);
+  if (!raw || sig.length !== 64) return false;
+  try {
+    const pub = await crypto.subtle.importKey("raw", raw, { name: "Ed25519" }, false, ["verify"]);
+    return await crypto.subtle.verify({ name: "Ed25519" }, pub, sig, message);
+  } catch {
+    return false;
+  }
+}
+function u64(data, at) {
+  if (at + 8 > data.length) throw new TxError("an amount is cut short");
+  let v = 0n;
+  for (let i = 7; i >= 0; i--) v = v << 8n | BigInt(data[at + i]);
+  if (v > BigInt(Number.MAX_SAFE_INTEGER)) throw new TxError("an amount is impossibly large");
+  return Number(v);
+}
+var base64 = {
+  encode: (b) => btoa(String.fromCharCode(...b)),
+  decode: (s) => {
+    if (typeof s !== "string" || s.length > 2e3 || !/^[A-Za-z0-9+/]+={0,2}$/.test(s)) return null;
+    try {
+      return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+    } catch {
+      return null;
+    }
+  }
+};
+var P = (1n << 255n) - 19n;
+var D = (-121665n * inverse(121666n) % P + P) % P;
+var SQRT_M1 = pow(2n, (P - 1n) / 4n);
+function pow(b, e) {
+  let r = 1n;
+  b %= P;
+  while (e > 0n) {
+    if (e & 1n) r = r * b % P;
+    b = b * b % P;
+    e >>= 1n;
+  }
+  return r;
+}
+function inverse(a) {
+  return pow((a % P + P) % P, P - 2n);
+}
+function onCurve(bytes) {
+  if (bytes.length !== 32) return false;
+  let y = 0n;
+  for (let i = 31; i >= 0; i--) y = y << 8n | BigInt(i === 31 ? bytes[i] & 127 : bytes[i]);
+  const sign = bytes[31] >> 7;
+  if (y >= P) return false;
+  const yy = y * y % P;
+  const u = (yy - 1n + P) % P;
+  const v = (D * yy + 1n) % P;
+  const v3 = v * v % P * v % P;
+  const v7 = v3 * v3 % P * v % P;
+  let x = u * v3 % P * pow(u * v7 % P, (P - 5n) / 8n) % P;
+  const vxx = v * (x * x % P) % P;
+  if (vxx !== u) {
+    if (vxx === (P - u) % P) x = x * SQRT_M1 % P;
+    else return false;
+  }
+  if (x === 0n && sign === 1) return false;
+  return true;
+}
+var PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
+async function programAddress(seeds, program) {
+  const programKey = keyOf(program);
+  if (!programKey) throw new TxError("not a program address");
+  for (let bump = 255; bump >= 0; bump--) {
+    const parts = [...seeds, Uint8Array.of(bump), programKey, PDA_MARKER];
+    const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of parts) {
+      all.set(p, at);
+      at += p.length;
+    }
+    const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", all));
+    if (!onCurve(hash)) return base58(hash);
+  }
+  throw new TxError("no program address");
+}
+async function tokenAccountOf(owner, mint, tokenProgram, ataProgram) {
+  const o = keyOf(owner), m = keyOf(mint), t = keyOf(tokenProgram);
+  if (!o || !m || !t) throw new TxError("not an address");
+  return programAddress([o, t, m], ataProgram);
+}
+function compileTransaction(feePayer, blockhash, plan) {
+  const metas = /* @__PURE__ */ new Map();
+  const add = (m) => {
+    const had = metas.get(m.key);
+    metas.set(m.key, had ? { key: m.key, signer: had.signer || m.signer, writable: had.writable || m.writable } : { ...m });
+  };
+  add({ key: feePayer, signer: true, writable: true });
+  for (const ix of plan) {
+    for (const a of ix.accounts) add(a);
+    add({ key: ix.program, signer: false, writable: false });
+  }
+  const all = [...metas.values()];
+  const rank = (m) => m.key === feePayer ? -1 : m.signer ? m.writable ? 0 : 1 : m.writable ? 2 : 3;
+  const ordered = all.map((m, i) => ({ m, i })).sort((a, b) => rank(a.m) - rank(b.m) || a.i - b.i).map((x) => x.m);
+  const index = new Map(ordered.map((m, i) => [m.key, i]));
+  const required = ordered.filter((m) => m.signer).length;
+  const readonlySigned = ordered.filter((m) => m.signer && !m.writable).length;
+  const readonlyUnsigned = ordered.filter((m) => !m.signer && !m.writable).length;
+  const bytes = [];
+  const push = (b) => {
+    for (let i = 0; i < b.length; i++) bytes.push(b[i]);
+  };
+  const key = (k) => {
+    const raw = keyOf(k);
+    if (!raw) throw new TxError(`not an address: ${k}`);
+    return raw;
+  };
+  push([required, readonlySigned, readonlyUnsigned]);
+  push(shortBytes(ordered.length));
+  for (const m of ordered) push(key(m.key));
+  push(key(blockhash));
+  push(shortBytes(plan.length));
+  for (const ix of plan) {
+    bytes.push(index.get(ix.program));
+    push(shortBytes(ix.accounts.length));
+    for (const a of ix.accounts) bytes.push(index.get(a.key));
+    push(shortBytes(ix.data.length));
+    push(ix.data);
+  }
+  const message = Uint8Array.from(bytes);
+  const head = shortBytes(required);
+  const out = new Uint8Array(head.length + required * 64 + message.length);
+  out.set(head, 0);
+  out.set(message, head.length + required * 64);
+  return out;
+}
+function u64Bytes(n) {
+  if (!Number.isSafeInteger(n) || n < 0) throw new TxError("not an amount");
+  const out = new Uint8Array(8);
+  let v = BigInt(n);
+  for (let i = 0; i < 8; i++) {
+    out[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+  return out;
+}
+
+// src/feepay.ts
+var TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+var ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+var SYSTEM_PROGRAM = "11111111111111111111111111111111";
+var MEMO_PROGRAM2 = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+var TRANSFER_CHECKED = 12;
+var CREATE_IDEMPOTENT = 1;
+var USDC_DECIMALS = 6;
+var no = (problem) => ({ ok: false, problem });
+async function checkFeePayment(tx, expect) {
+  const { feePayer, mint } = expect;
+  const payees = expect.payees.filter((p) => typeof p?.address === "string");
+  if (!payees.length) return no("this artist has no wallet to pay");
+  const payeeSet = new Set(payees.map((p) => p.address));
+  if (payeeSet.size !== payees.length) return no("the artist's wallet list names someone twice");
+  if (payeeSet.has(feePayer)) return no("the fee wallet can't also be paid");
+  if (tx.header.required !== 2 || tx.signatures.length !== 2) return no("a payment has exactly two signers");
+  if (tx.accounts[0] !== feePayer) return no("the fee wallet isn't the fee payer");
+  if (!isWritable(tx, 0)) return no("the fee wallet must pay the fee");
+  const listener2 = tx.accounts[1];
+  if (payeeSet.has(listener2)) return no("the artist can't pay themselves through their own node");
+  if (!tx.signatures[0].every((b) => b === 0)) return no("the fee wallet's signature is already there");
+  const at = (i) => tx.accounts[i];
+  const created = /* @__PURE__ */ new Map();
+  const paid = /* @__PURE__ */ new Map();
+  const uses = /* @__PURE__ */ new Map();
+  let memos = 0;
+  for (const ix of tx.instructions) {
+    const program = at(ix.program);
+    if (isSigner(tx, ix.program)) return no("a signer is used as a program");
+    if (program === ATA_PROGRAM) {
+      if (ix.data.length !== 1 || ix.data[0] !== CREATE_IDEMPOTENT) return no("only creating a payee's USDC account is allowed");
+      if (ix.accounts.length !== 6) return no("creating a USDC account takes six accounts");
+      const [payer, account, owner, mintAt, system, token] = ix.accounts;
+      if (payer !== 0) return no("the fee wallet pays for a payee's USDC account, nobody else");
+      if (!payeeSet.has(at(owner))) return no("a USDC account is being created for someone who isn't paid");
+      if (at(mintAt) !== mint) return no("that isn't USDC");
+      if (at(system) !== SYSTEM_PROGRAM || at(token) !== TOKEN_PROGRAM) return no("creating a USDC account names the wrong programs");
+      if (account < 2 || owner < 2) return no("a signer can't be a payee's account");
+      if (created.has(at(account)) || [...created.values()].includes(at(owner))) return no("a payee's USDC account is created twice");
+      created.set(at(account), at(owner));
+      uses.set(0, (uses.get(0) ?? 0) + 1);
+      continue;
+    }
+    if (program === TOKEN_PROGRAM) {
+      if (ix.data.length !== 10 || ix.data[0] !== TRANSFER_CHECKED) return no("only checked USDC transfers are allowed");
+      if (ix.data[9] !== USDC_DECIMALS) return no("that isn't USDC");
+      if (ix.accounts.length !== 4) return no("a transfer takes four accounts");
+      const [source, mintAt, dest, authority] = ix.accounts;
+      if (authority !== 1) return no("the listener must sign their own payment");
+      if (at(mintAt) !== mint) return no("that isn't USDC");
+      if (source < 2) return no("a signer can't be a token account");
+      const payee = created.get(at(dest));
+      if (!payee) return no("a transfer goes somewhere that isn't a payee's USDC account");
+      if (created.has(at(source))) return no("a transfer can't come from a payee's account");
+      if (paid.has(payee)) return no("a payee is paid twice");
+      const micros2 = u64(ix.data, 1);
+      if (micros2 <= 0) return no("a transfer of nothing");
+      paid.set(payee, micros2);
+      uses.set(1, (uses.get(1) ?? 0) + 1);
+      continue;
+    }
+    if (program === MEMO_PROGRAM2 && expect.memo !== void 0) {
+      if (++memos > 1) return no("a payment carries one note");
+      if (ix.accounts.length !== 1 || ix.accounts[0] !== 1) return no("only the listener signs a payment's note");
+      if (new TextDecoder().decode(ix.data) !== expect.memo || ix.data.length > 200) return no("the note doesn't say what was bought");
+      uses.set(1, (uses.get(1) ?? 0) + 1);
+      continue;
+    }
+    return no("the payment uses a program it doesn't need");
+  }
+  for (const ix of tx.instructions) {
+    if (ix.program === 0 || ix.program === 1) return no("a signer is used as a program");
+  }
+  const mentions = (i) => tx.instructions.reduce((n, ix) => n + ix.accounts.filter((a) => a === i).length, 0);
+  if (mentions(0) !== (uses.get(0) ?? 0)) return no("the fee wallet is used for something other than fees");
+  if (mentions(1) !== (uses.get(1) ?? 0)) return no("the listener's key is used for something other than paying");
+  if (expect.memo !== void 0 && memos !== 1) return no("a purchase must say what it bought");
+  if (paid.size !== created.size) return no("a USDC account is created without being paid");
+  const micros = [...paid.values()].reduce((a, b) => a + b, 0);
+  if (!Number.isSafeInteger(micros)) return no("the amount is impossibly large");
+  if (micros < expect.minMicros) return no("too small to pay the network fee for");
+  if (micros > expect.maxMicros) return no("more than one payment can be");
+  const shares = shareOut(micros, payees).map((s) => ({ address: s.address, micros: s.micros }));
+  if (shares.length !== paid.size || !shares.every((s) => paid.get(s.address) === s.micros)) {
+    return no("the payment isn't split the way the artist set it");
+  }
+  if (!await verifySignature3(listener2, tx.signatures[1], tx.message)) return no("the listener's signature doesn't check out");
+  return { ok: true, listener: listener2, micros, shares };
+}
+
+// src/settle.ts
+var LISTEN_MIN_MICROS = 1e4;
+var LISTEN_MAX_MICROS = 2e6;
+var DAILY_PAYMENTS = 1e3;
+var OFFER_ABOVE_LAMPORTS = 3e6;
+var FEE_KEY = "fee-wallet";
+var RPC_TIMEOUT_MS = 1e4;
+var CONFIRM_WITHIN_MS = 25e3;
+var cached = null;
+async function load(stored) {
+  const { pkcs8, address } = JSON.parse(stored);
+  const raw = base64.decode(pkcs8);
+  if (!raw || typeof address !== "string") throw new Error("the fee wallet's key is damaged");
+  const key = await crypto.subtle.importKey("pkcs8", raw, { name: "Ed25519" }, false, ["sign"]);
+  return {
+    address,
+    sign: async (message) => new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key, message))
+  };
+}
+async function feeKey(db) {
+  if (cached) return cached;
+  let stored = await setting(db, FEE_KEY);
+  if (!stored) {
+    const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+    const pub = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+    const made = JSON.stringify({ pkcs8: base64.encode(pkcs8), address: base58(pub) });
+    await db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING").bind(FEE_KEY, made).run();
+    stored = await setting(db, FEE_KEY) ?? made;
+  }
+  cached = await load(stored);
+  return cached;
+}
+async function feeAddress(db) {
+  return (await feeKey(db)).address;
+}
+var RpcError = class extends Error {
+};
+function rpcAt(url) {
+  return async (method, params) => {
+    let res;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        // Solana's public endpoint refuses a Worker without a User-Agent.
+        headers: { "Content-Type": "application/json", "User-Agent": "amply-node/1.0" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: AbortSignal.timeout(RPC_TIMEOUT_MS)
+      });
+    } catch {
+      throw new RpcError("couldn't reach the network");
+    }
+    if (!res.ok) throw new RpcError(res.status === 429 ? "the network is busy" : "the network refused the request");
+    const body = await res.json().catch(() => null);
+    if (!body || body.error) throw new RpcError(`the network said: ${String(body?.error?.message || "nothing useful").slice(0, 200)}`);
+    return body.result;
+  };
+}
+var balances = /* @__PURE__ */ new Map();
+var BALANCE_FRESH_MS = 5 * 6e4;
+async function feeBalance(rpc, address, { fresh = false, now = Date.now() } = {}) {
+  const known = balances.get(address);
+  if (known && !fresh && now - known.at < BALANCE_FRESH_MS) return known.lamports;
+  const r = await rpc("getBalance", [address, { commitment: "confirmed" }]);
+  const lamports = Number(r?.value ?? 0);
+  balances.set(address, { lamports, at: now });
+  return lamports;
+}
+async function countFee(db, now = Date.now()) {
+  const day = new Date(now).toISOString().slice(0, 10);
+  try {
+    const row = await db.prepare(
+      `INSERT INTO fee_days (day, count) VALUES (?, 1)
+       ON CONFLICT(day) DO UPDATE SET count = count + 1
+       RETURNING count`
+    ).bind(day).first();
+    if (row && row.count === 1) {
+      await db.prepare("DELETE FROM fee_days WHERE day < ?").bind(new Date(now - 31 * 864e5).toISOString().slice(0, 10)).run();
+    }
+    return !!row && row.count <= DAILY_PAYMENTS;
+  } catch {
+    return false;
+  }
+}
+var refuse = (status, why) => ({ ok: false, status, why });
+async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) => true, now = Date.now(), wait = (ms) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS, from } = {}) {
+  const bytes = base64.decode(String(txBase64 ?? ""));
+  if (!bytes) return refuse(400, "that isn't a transaction");
+  let tx;
+  try {
+    tx = readTransaction(bytes);
+  } catch (e) {
+    return refuse(400, e instanceof TxError ? e.message : "that isn't a transaction");
+  }
+  const key = await feeKey(db);
+  const verdict = await checkFeePayment(tx, { ...expect, feePayer: key.address });
+  if (!verdict.ok) return refuse(403, verdict.problem);
+  if (from && !from.includes(verdict.listener)) return refuse(403, "that isn't one of your payout wallets");
+  if (!await allowed(verdict.listener)) return refuse(429, "too many payments from this wallet; try again in a minute");
+  if (!await countFee(db, now)) return refuse(503, "this artist's node has paid all the fees it will today; try again tomorrow");
+  tx.signatures[0] = await key.sign(tx.message);
+  const signed = base64.encode(writeTransaction(tx));
+  const signature = base58(tx.signatures[0]);
+  try {
+    const sim = await rpc("simulateTransaction", [signed, { encoding: "base64", sigVerify: true, commitment: "confirmed" }]);
+    if (sim?.value?.err) return refuse(422, failureOf(sim.value));
+  } catch (e) {
+    return refuse(502, e instanceof RpcError ? e.message : "couldn't reach the network");
+  }
+  try {
+    await rpc("sendTransaction", [signed, { encoding: "base64", skipPreflight: true, maxRetries: 5 }]);
+  } catch {
+    return { ok: true, signature, micros: verdict.micros, confirmed: false };
+  }
+  const until = Date.now() + confirmWithinMs;
+  while (Date.now() < until) {
+    await wait(1500);
+    try {
+      const st = (await rpc("getSignatureStatuses", [[signature]]))?.value?.[0];
+      if (st?.err) return refuse(422, "the payment failed on the network; nothing was taken");
+      if (st && (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized")) {
+        return { ok: true, signature, micros: verdict.micros, confirmed: true };
+      }
+    } catch {
+    }
+  }
+  return { ok: true, signature, micros: verdict.micros, confirmed: false };
+}
+function failureOf(value) {
+  const logs = (value.logs || []).join("\n");
+  if (/insufficient funds/i.test(logs) && /Transfer/i.test(logs)) return "there isn't enough in your wallet to pay this; nothing was sent";
+  if (/Blockhash not found|BlockhashNotFound/i.test(JSON.stringify(value.err))) return "that payment is out of date; try again";
+  if (/insufficient lamports|InsufficientFundsForFee|InsufficientFundsForRent/i.test(logs + JSON.stringify(value.err))) {
+    return "this artist's node can't pay the network fee right now; nothing was sent";
+  }
+  return "the network wouldn't accept that payment; nothing was sent";
+}
+
+// src/cashout.ts
+var CASHOUT_MIN_MICROS = 1e4;
+var CASHOUT_MAX_MICROS = 1e10;
+function cashOutProblem(from, to, micros, { payees, feePayer }) {
+  if (!payees.includes(from)) return "that isn't one of your payout wallets";
+  if (!keyOf(to)) return "that isn't a Solana address. Copy it again from Cash App or Coinbase";
+  if (to === from) return "that's your payout wallet's own address";
+  if (to === feePayer) return "that's your fees account. Paste the deposit address from Cash App or Coinbase";
+  if (!Number.isSafeInteger(micros) || micros < CASHOUT_MIN_MICROS) return "send at least a cent";
+  if (micros > CASHOUT_MAX_MICROS) return "that's more than one transfer can be";
+  return null;
+}
+async function draftCashOut({ feePayer, from, to, micros, mint, blockhash }) {
+  const source = await tokenAccountOf(from, mint, TOKEN_PROGRAM, ATA_PROGRAM);
+  const dest = await tokenAccountOf(to, mint, TOKEN_PROGRAM, ATA_PROGRAM);
+  const data = new Uint8Array(10);
+  data[0] = 12;
+  data.set(u64Bytes(micros), 1);
+  data[9] = 6;
+  return compileTransaction(feePayer, blockhash, [
+    {
+      program: ATA_PROGRAM,
+      data: Uint8Array.of(1),
+      accounts: [
+        { key: feePayer, signer: true, writable: true },
+        { key: dest, signer: false, writable: true },
+        { key: to, signer: false, writable: false },
+        { key: mint, signer: false, writable: false },
+        { key: SYSTEM_PROGRAM, signer: false, writable: false },
+        { key: TOKEN_PROGRAM, signer: false, writable: false }
+      ]
+    },
+    {
+      program: TOKEN_PROGRAM,
+      data,
+      accounts: [
+        { key: source, signer: false, writable: true },
+        { key: mint, signer: false, writable: false },
+        { key: dest, signer: false, writable: true },
+        { key: from, signer: true, writable: false }
+      ]
+    }
+  ]);
+}
+
 // src/limits.ts
 var RULES = {
   /** Listener requests that cost: a pass, a play, a purchase, a download. */
@@ -1546,6 +2376,14 @@ async function serveObject(env, request, key, cacheControl, fallbackType) {
   return new Response(object.body, { status, headers });
 }
 var cachedManifest = null;
+var cachedSite = null;
+async function siteText(env) {
+  const now = Date.now();
+  if (cachedSite && now - cachedSite.at < MANIFEST_CACHE) return cachedSite.body;
+  const body = await setting(env.DB, "site").catch(() => null);
+  cachedSite = { at: now, body };
+  return body;
+}
 async function manifestText(env) {
   const now = Date.now();
   if (cachedManifest && now - cachedManifest.at < MANIFEST_CACHE) return cachedManifest.body;
@@ -1617,6 +2455,85 @@ async function handleManage(request, env, path) {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
     });
+  }
+  if (path === "/site" && request.method === "GET") {
+    const t = await setting(env.DB, "site");
+    return new Response(t || "null", { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+  if (path === "/site" && request.method === "POST") {
+    if (Number(request.headers.get("Content-Length") || 0) > 3e5) return fail(413, "that website is too large");
+    const body = await jsonBody(request, 3e5);
+    if (!body) return fail(400, "bad request");
+    const clean = body.site === null ? null : cleanSite(body.site);
+    if (clean === null) await env.DB.prepare("DELETE FROM settings WHERE key = 'site'").run();
+    else await putSetting(env.DB, "site", JSON.stringify(clean));
+    cachedSite = null;
+    return new Response(JSON.stringify({ site: clean }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+  if (request.method === "GET" && path === "/stats") {
+    return new Response(JSON.stringify({ songs: await songTotals(env.DB) }), {
+      status: 200,
+      headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
+    });
+  }
+  if (request.method === "GET" && path === "/fees") {
+    const address = await feeAddress(env.DB);
+    const text = await manifestText(env);
+    let network = "solana";
+    try {
+      network = walletOf(text ? JSON.parse(text) : null)?.network || network;
+    } catch {
+    }
+    const chain = CHAINS[network] || CHAINS.solana;
+    const lamports = await feeBalance(rpcAt(chain.rpc), address, { fresh: true }).catch(() => null);
+    const today = await env.DB.prepare("SELECT count FROM fee_days WHERE day = ?").bind((/* @__PURE__ */ new Date()).toISOString().slice(0, 10)).first().catch(() => null);
+    return new Response(JSON.stringify({
+      address,
+      network,
+      lamports,
+      offering: lamports !== null && lamports >= OFFER_ABOVE_LAMPORTS,
+      offerAbove: OFFER_ABOVE_LAMPORTS,
+      paidToday: today?.count ?? 0,
+      dailyCap: DAILY_PAYMENTS
+    }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+  if (request.method === "POST" && (path === "/send/prepare" || path === "/send")) {
+    const body = await jsonBody(request);
+    if (!body) return fail(400, "bad request");
+    const pay = walletOf(await manifestNowOf(env));
+    const chain = pay && CHAINS[pay.network];
+    if (!pay || !chain) return fail(409, "publish a payout wallet first");
+    const payees = pay.recipients.map((r) => r.address);
+    const from = String(body.from || ""), to = String(body.to || "").trim(), micros = Number(body.micros);
+    const feePayer = await feeAddress(env.DB);
+    const problem = cashOutProblem(from, to, micros, { payees, feePayer });
+    if (problem) return fail(400, problem);
+    const rpc = rpcAt(chain.rpc);
+    const json = (v) => new Response(JSON.stringify(v), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+    if (path === "/send/prepare") {
+      if (await feeBalance(rpc, feePayer, { fresh: true }).catch(() => 0) < OFFER_ABOVE_LAMPORTS) {
+        return fail(409, "your fees account needs about $5 of SOL first (see Your fees account, under Earnings)");
+      }
+      try {
+        const info = await rpc("getAccountInfo", [to, { encoding: "base64", commitment: "confirmed" }]);
+        const owner = info?.value?.owner;
+        if (owner === TOKEN_PROGRAM) return fail(400, "that's the address of a token account, not a wallet. Copy the deposit address again from Cash App or Coinbase");
+        if (owner && owner !== SYSTEM_PROGRAM) return fail(400, "that address isn't a wallet. Copy the deposit address again from Cash App or Coinbase");
+        const { value } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+        const tx = await draftCashOut({ feePayer, from, to, micros, mint: chain.mint, blockhash: value.blockhash });
+        return json({ tx: base64.encode(tx), feePayer, mint: chain.mint });
+      } catch (e) {
+        return fail(502, "couldn't reach the network; try again in a moment");
+      }
+    }
+    const result = await settle(env.DB, rpc, body.tx, {
+      mint: chain.mint,
+      payees: [{ address: to, split: 100 }],
+      minMicros: micros,
+      maxMicros: micros
+    }, { from: payees });
+    if (!result.ok) return fail(result.status, result.why);
+    return json({ signature: result.signature, confirmed: result.confirmed });
   }
   if (request.method === "GET" && path === "/stripe") {
     return new Response(JSON.stringify(await publicView(env.DB)), {
@@ -1779,6 +2696,23 @@ async function whoIsAsking(request, env) {
   if (!token) return null;
   return readToken(env.DB, token);
 }
+async function manifestNowOf(env) {
+  const text = await manifestText(env);
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+}
+async function feeOffer(env) {
+  const pay = walletOf(await manifestNowOf(env));
+  const chain = pay && CHAINS[pay.network];
+  if (!pay || !chain) return null;
+  const feePayer = await feeAddress(env.DB);
+  if (pay.recipients.some((r) => r.address === feePayer)) return null;
+  if (await feeBalance(rpcAt(chain.rpc), feePayer) < OFFER_ABOVE_LAMPORTS) return null;
+  return { feePayer, network: pay.network, minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS };
+}
 async function handleListen(request, env, path) {
   const host = new URL(request.url).host;
   if (path === "/challenge" && request.method === "POST") {
@@ -1805,6 +2739,44 @@ async function handleListen(request, env, path) {
       return fail(402, "subscribe to hear this artist's paid tracks");
     }
     return new Response(JSON.stringify({ token: result.token, subscribedUntil: subscribed ? until : null }), {
+      status: 200,
+      headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
+    });
+  }
+  if (path === "/fees" && request.method === "GET") {
+    const offer = await feeOffer(env).catch(() => null);
+    return new Response(JSON.stringify(offer ?? { feePayer: null }), {
+      status: 200,
+      headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
+    });
+  }
+  if (path === "/settle" && request.method === "POST") {
+    if (Number(request.headers.get("Content-Length") || 0) > 4096) return fail(413, "too large");
+    const body = await jsonBody(request);
+    if (!body) return fail(400, "bad request");
+    const offer = await feeOffer(env).catch(() => null);
+    if (!offer) return fail(409, "this artist's node isn't paying network fees right now");
+    const manifest = await manifestNowOf(env);
+    const pay = walletOf(manifest);
+    let limits = { minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS };
+    if (body.item !== void 0) {
+      const item = String(body.item);
+      const sale = itemFor(manifest, item);
+      if (!sale || !sale.wallet) return fail(404, "that isn't for sale for USDC here");
+      const price = Math.round(sale.price * 1e6);
+      limits = { minMicros: price, maxMicros: price, memo: purchaseMemo(host, item) };
+    }
+    const result = await settle(env.DB, rpcAt(CHAINS[pay.network].rpc), body.tx, {
+      mint: CHAINS[pay.network].mint,
+      payees: pay.recipients,
+      ...limits
+    }, {
+      // Per paying wallet, on top of the per-address count every listener
+      // request already has.
+      allowed: (who) => allow(env, RULES.wallet, `${host}|settle|${who}`)
+    });
+    if (!result.ok) return fail(result.status, result.why);
+    return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
     });
@@ -1962,6 +2934,16 @@ async function handleListen(request, env, path) {
     if (Math.random() < 0.02) await pruneStale(env.DB);
     return new Response(null, { status: 204, headers: noStore() });
   }
+  if (path === "/heard" && request.method === "POST") {
+    const body = await jsonBody(request);
+    const track = String(body?.track || "");
+    const seconds = Number(body?.seconds) || 0;
+    const manifest = await manifestNowOf(env);
+    const known = (manifest?.releases || []).some((r) => (r.tracks || []).some((t) => t.id === track));
+    if (known && seconds >= 30) await heard(env.DB, track, seconds).catch(() => {
+    });
+    return new Response(null, { status: 204, headers: noStore() });
+  }
   if (path === "/forget" && request.method === "POST") {
     const body = await jsonBody(request);
     if (!body) return fail(400, "bad request");
@@ -2051,7 +3033,13 @@ var index_default = {
       const kind = q.has("song") ? "song" : q.has("album") ? "album" : null;
       const id = kind ? String(q.get(kind) || "") : "";
       const focus = kind && /^[a-z0-9-]{1,64}$/.test(id) ? { kind, id } : null;
-      return new Response(renderPage(manifest, new URL(request.url).origin, nonce, focus), {
+      let site = null;
+      try {
+        const t = await siteText(env);
+        site = t ? JSON.parse(t) : null;
+      } catch {
+      }
+      return new Response(renderPage(manifest, new URL(request.url).origin, nonce, focus, site), {
         status: 200,
         headers
       });

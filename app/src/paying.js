@@ -174,6 +174,8 @@ export async function settle(pair, entry, ledger, { ending = false } = {}) {
   const { pay } = await machinery();
   const result = await pay.payArtist(pair, recipients, owed.micros, {
     artistName: entry.manifest.artist?.name,
+    // Their node pays the network fee if it offers to (node/src/settle.ts).
+    node: { origin: new URL(entry.url).origin },
   });
 
   recordSpend(owed.micros);

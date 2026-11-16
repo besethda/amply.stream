@@ -19,42 +19,18 @@ import {
   getAssociatedTokenAddress,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { rpc, network } from "./wallet.js";
+import bs58 from "bs58";
+import { rpc, network, networkName } from "./wallet.js";
 import { toMicros, toUsd } from "./money.js";
-import { SETTLE_WITHIN_DAYS as SETTLE_AFTER_DAYS } from "../../spec/pricing.mjs";
+import { SETTLE_WITHIN_DAYS as SETTLE_AFTER_DAYS, shareOut } from "../../spec/pricing.mjs";
 
 export { MICROS, toMicros, toUsd } from "./money.js";
 export { SETTLE_AFTER_DAYS };
 
-/**
- * Divide a payment between the people named in the manifest.
- *
- * Every micro is accounted for. Percentages rarely divide cleanly, so each
- * share takes its whole part and the micros left over go to whoever was cut
- * hardest by the rounding, largest shortfall first. Three people splitting a
- * penny get 34, 33 and 33 rather than 33, 33, 33 and a micro that belongs to
- * nobody.
- */
-export function shareOut(micros, recipients) {
-  const total = Math.max(0, Math.floor(micros));
-  if (!recipients.length || total === 0) return [];
-
-  const exact = recipients.map((r) => (total * (Number(r.split) || 0)) / 100);
-  const parts = exact.map((e) => Math.floor(e));
-  let left = total - parts.reduce((a, b) => a + b, 0);
-
-  // Largest remainder first, and a stable order so the same payment always
-  // divides the same way.
-  const order = exact
-    .map((e, i) => ({ i, frac: e - Math.floor(e) }))
-    .sort((a, b) => b.frac - a.frac || a.i - b.i);
-
-  for (let k = 0; left > 0; k++, left--) parts[order[k % order.length].i] += 1;
-
-  return recipients
-    .map((r, i) => ({ ...r, micros: parts[i] }))
-    .filter((r) => r.micros > 0);
-}
+/** Dividing a payment between the people named in the manifest: shared with
+ *  the artist's node, which checks a split it pays the fee for divides the
+ *  same way (spec/pricing.mjs). */
+export { shareOut };
 
 /**
  * Whether there is a payment to make, and for how much.
@@ -200,7 +176,7 @@ export const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
  * open it. That falls to the payer, costs a fraction of a cent in rent, and is
  * done idempotently so two listeners paying at once cannot collide.
  */
-export async function payArtist(pair, recipients, micros, { artistName = "This artist", mint: mintAddress, memo } = {}) {
+export async function payArtist(pair, recipients, micros, { artistName = "This artist", mint: mintAddress, memo, node } = {}) {
   const shares = shareOut(micros, recipients);
   if (!shares.length) throw new PaymentError("nothing", "There was nothing to pay.");
 
@@ -210,37 +186,138 @@ export async function payArtist(pair, recipients, micros, { artistName = "This a
   // time with somebody's real money in it.
   const mint = addressOf(mintAddress || network().usdc, "The network");
   const from = await getAssociatedTokenAddress(mint, pair.publicKey, false, TOKEN_PROGRAM_ID);
+  const owners = shares.map((share) => addressOf(share.address, share.name || artistName));
 
-  const tx = new Transaction();
-  for (const share of shares) {
-    const owner = addressOf(share.address, share.name || artistName);
-    const to = await getAssociatedTokenAddress(mint, owner, false, TOKEN_PROGRAM_ID);
-    tx.add(createAssociatedTokenAccountIdempotentInstruction(pair.publicKey, to, owner, mint, TOKEN_PROGRAM_ID));
-    tx.add(createTransferCheckedInstruction(from, mint, to, pair.publicKey, share.micros, 6, [], TOKEN_PROGRAM_ID));
-  }
-  if (memo) {
-    tx.add(new TransactionInstruction({
-      keys: [{ pubkey: pair.publicKey, isSigner: true, isWritable: false }],
-      programId: new PublicKey(MEMO_PROGRAM),
-      data: Buffer.from(String(memo), "utf8"),
-    }));
+  /** The payment, with `payer` paying the network fee and any new account. */
+  const build = async (payer) => {
+    const tx = new Transaction();
+    for (const [i, share] of shares.entries()) {
+      const owner = owners[i];
+      const to = await getAssociatedTokenAddress(mint, owner, false, TOKEN_PROGRAM_ID);
+      tx.add(createAssociatedTokenAccountIdempotentInstruction(payer, to, owner, mint, TOKEN_PROGRAM_ID));
+      tx.add(createTransferCheckedInstruction(from, mint, to, pair.publicKey, share.micros, 6, [], TOKEN_PROGRAM_ID));
+    }
+    if (memo) {
+      tx.add(new TransactionInstruction({
+        keys: [{ pubkey: pair.publicKey, isSigner: true, isWritable: false }],
+        programId: new PublicKey(MEMO_PROGRAM),
+        data: Buffer.from(String(memo), "utf8"),
+      }));
+    }
+    return tx;
+  };
+
+  // The artist's node pays the network fee, where it offers to: then the
+  // listener needs no SOL at all. Only on the real USDC; a test token is
+  // always paid the old way.
+  const offer = node?.origin && !mintAddress ? await feeOffer(node.origin, { micros, owners, pair, item: node.item }) : null;
+  if (offer) {
+    const tx = await build(offer.feePayer);
+    tx.feePayer = offer.feePayer;
+    const sent = await sendThroughNode(conn, node, tx, pair);
+    if (sent) {
+      await confirmed(conn, sent);
+      return { signature: sent, shares, micros, feePaidBy: "artist" };
+    }
+    // The node didn't send it (and said so): pay the fee ourselves.
   }
 
   try {
-    const signature = await conn.sendTransaction(tx, [pair], { preflightCommitment: "confirmed" });
+    const signature = await conn.sendTransaction(await build(pair.publicKey), [pair], { preflightCommitment: "confirmed" });
     await confirmed(conn, signature);
-    return { signature, shares, micros };
+    return { signature, shares, micros, feePaidBy: "listener" };
   } catch (e) {
-    const said = String(e?.message || e);
-    if (/insufficient lamports|insufficient funds for rent|0x1\b/i.test(said)) {
-      throw new PaymentError("fee", "There isn't enough SOL in your wallet to cover the network fee. Nothing was sent.");
-    }
-    if (/insufficient/i.test(said)) {
-      throw new PaymentError("funds", "There isn't enough in your wallet to pay this. Nothing was sent.");
-    }
-    if (/blockhash|timed out|failed to fetch|network/i.test(said)) {
-      throw new PaymentError("network", "Couldn't reach the network, so nothing was sent. What you owe is still owed.");
-    }
-    throw new PaymentError("unknown", `The payment didn't go through, so nothing was sent. ${said}`);
+    throw paymentProblem(e);
   }
+}
+
+/** A failed send, in words a listener can act on. */
+function paymentProblem(e) {
+  if (e instanceof PaymentError) return e;
+  const said = String(e?.message || e);
+  if (/insufficient lamports|insufficient funds for rent|0x1\b/i.test(said)) {
+    return new PaymentError("fee", "There isn't enough SOL in your wallet to cover the network fee. Nothing was sent.");
+  }
+  if (/insufficient/i.test(said)) {
+    return new PaymentError("funds", "There isn't enough in your wallet to pay this. Nothing was sent.");
+  }
+  if (/blockhash|timed out|failed to fetch|network/i.test(said)) {
+    return new PaymentError("network", "Couldn't reach the network, so nothing was sent. What you owe is still owed.");
+  }
+  return new PaymentError("unknown", `The payment didn't go through, so nothing was sent. ${said}`);
+}
+
+// ── the artist's node paying the network fee ────────────────────────────────
+
+const NODE_TIMEOUT_MS = 8_000;
+
+/**
+ * Whether this artist's node will pay the fee for this payment: who would,
+ * or null. Anything odd about the answer is a no, and the listener pays the
+ * fee themselves as before. Nothing about the listener is sent to ask.
+ */
+export async function feeOffer(origin, { micros, owners = [], pair, item } = {}) {
+  let o;
+  try {
+    const res = await fetch(`${origin}/listen/fees`, { signal: AbortSignal.timeout(NODE_TIMEOUT_MS) });
+    if (!res.ok) return null;
+    o = await res.json();
+  } catch {
+    return null;
+  }
+  if (!o?.feePayer || o.network !== networkName()) return null;
+  let feePayer;
+  try { feePayer = new PublicKey(o.feePayer); } catch { return null; }
+  // Never a wallet that's also being paid, or the listener's own.
+  if (owners.some((k) => k.equals(feePayer)) || pair?.publicKey.equals(feePayer)) return null;
+  // A purchase's price is the node's to check; a listening payment must fit.
+  if (item === undefined && !(micros >= Number(o.minMicros) && micros <= Number(o.maxMicros))) return null;
+  return { feePayer };
+}
+
+/**
+ * Hand the signed payment to the artist's node to add its fee signature and
+ * send. The signature that comes back must be the node's own over exactly
+ * this payment, so a confirmed signature means this payment landed.
+ *
+ * Returns the signature, or null when the node didn't send it and said so
+ * (it isn't paying fees just now, or refused): then nothing went out, and
+ * the listener's own wallet can pay the fee instead. Throws where something
+ * may have gone out, so the same debt is never paid twice.
+ */
+async function sendThroughNode(conn, node, tx, pair) {
+  tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
+  tx.partialSign(pair);
+  const wire = tx.serialize({ requireAllSignatures: false, verifySignatures: false }).toString("base64");
+
+  let res;
+  try {
+    res = await fetch(`${node.origin}/listen/settle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(node.item === undefined ? { tx: wire } : { tx: wire, item: node.item }),
+      signal: AbortSignal.timeout(45_000),
+    });
+  } catch {
+    // Unknown whether it reached the node, so unknown whether it was sent.
+    throw new PaymentError("unconfirmed",
+      "Couldn't hear back from the artist's server. The payment may still go through, so it won't be sent again for now.");
+  }
+  const body = await res.json().catch(() => ({}));
+  if (res.ok) {
+    const signature = String(body?.signature || "");
+    let raw;
+    try { raw = bs58.decode(signature); } catch { raw = null; }
+    if (!raw || raw.length !== 64) throw new PaymentError("unknown", "The artist's server gave an answer that doesn't make sense. Nothing more will be sent.");
+    tx.addSignature(tx.feePayer, Buffer.from(raw));
+    if (!tx.verifySignatures()) throw new PaymentError("unknown", "The artist's server gave an answer that doesn't match this payment. Nothing more will be sent.");
+    return signature;
+  }
+  // Refused before anything was signed or sent (see node/src/settle.ts): the
+  // payment itself can't succeed, whoever pays the fee.
+  if (res.status === 422 && /enough in your wallet/.test(body?.error || "")) {
+    throw new PaymentError("funds", "There isn't enough in your wallet to pay this. Nothing was sent.");
+  }
+  if (res.status === 422 && /out of date/.test(body?.error || "")) return null;
+  return null;
 }

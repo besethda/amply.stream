@@ -116,3 +116,33 @@ export function includes(manifest, trackId) {
   }
   return [];
 }
+
+/**
+ * Divide a payment between the people named in the manifest.
+ *
+ * Every micro is accounted for. Percentages rarely divide cleanly, so each
+ * share takes its whole part and the micros left over go to whoever was cut
+ * hardest by the rounding, largest shortfall first. Three people splitting a
+ * penny get 34, 33 and 33 rather than 33, 33, 33 and a micro that belongs to
+ * nobody.
+ */
+export function shareOut(micros, recipients) {
+  const total = Math.max(0, Math.floor(micros));
+  if (!recipients.length || total === 0) return [];
+
+  const exact = recipients.map((r) => (total * (Number(r.split) || 0)) / 100);
+  const parts = exact.map((e) => Math.floor(e));
+  let left = total - parts.reduce((a, b) => a + b, 0);
+
+  // Largest remainder first, and a stable order so the same payment always
+  // divides the same way.
+  const order = exact
+    .map((e, i) => ({ i, frac: e - Math.floor(e) }))
+    .sort((a, b) => b.frac - a.frac || a.i - b.i);
+
+  for (let k = 0; left > 0; k++, left--) parts[order[k % order.length].i] += 1;
+
+  return recipients
+    .map((r, i) => ({ ...r, micros: parts[i] }))
+    .filter((r) => r.micros > 0);
+}

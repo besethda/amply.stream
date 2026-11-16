@@ -18,3 +18,4 @@ export function walletOf(manifest: unknown): WalletPay | null;
 export function saleOf(manifest: unknown, item: unknown): Sale | null;
 export function forSale(manifest: unknown): ForSale[];
 export function includes(manifest: unknown, trackId: string): string[];
+export function shareOut<T extends { split?: number }>(micros: number, recipients: T[]): (T & { micros: number })[];

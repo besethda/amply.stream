@@ -182,3 +182,14 @@ export function reconcile(listeners, byWallet) {
     };
   }).sort((a, b) => (b.seconds || 0) - (a.seconds || 0));
 }
+
+/** How many dollars (USDC) a wallet holds right now, or null if unknown. */
+export async function usdcBalance(address, networkName = "mainnet") {
+  const net = NETWORKS[networkName];
+  if (!net || !address) return null;
+  const r = await rpc(net.rpc, "getTokenAccountsByOwner",
+    [address, { mint: net.usdc }, { encoding: "jsonParsed", commitment: "confirmed" }]);
+  let micros = 0;
+  for (const a of r?.value || []) micros += Number(a.account?.data?.parsed?.info?.tokenAmount?.amount || 0);
+  return micros;
+}

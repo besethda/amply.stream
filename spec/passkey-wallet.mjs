@@ -170,3 +170,16 @@ export function base58(bytes) {
 export async function addressOf(seed) {
   return base58(await publicKeyOf(seed));
 }
+
+/**
+ * Sign `message` with the wallet a seed makes. The key is imported for this
+ * one signature, not extractable, and dropped; the caller wipes the seed.
+ */
+export async function signWithSeed(seed, message) {
+  const pkcs8 = new Uint8Array(ED25519_PKCS8.length + 32);
+  pkcs8.set(ED25519_PKCS8);
+  pkcs8.set(seed, ED25519_PKCS8.length);
+  const key = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "Ed25519" }, false, ["sign"]);
+  pkcs8.fill(0);
+  return new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key, message));
+}
