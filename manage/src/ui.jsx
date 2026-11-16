@@ -1952,6 +1952,63 @@ function Listeners({ api, payees, rate, network, settleAt }) {
   );
 }
 
+/**
+ * Listeners' network fees, paid by this service (node/src/settle.ts). Every
+ * Solana payment needs a fee of a fraction of a cent, in SOL. When this
+ * service's fee wallet holds a little SOL, it pays that for every listener,
+ * so they never need any. It's a wallet of its own, separate from where
+ * listeners pay: it holds SOL for fees and nothing else.
+ */
+function FeesCard({ api, network, payees }) {
+  const [fees, setFees] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const load = useCallback(() => {
+    setFailed(false);
+    api?.fees?.().then(setFees).catch(() => setFailed(true));
+  }, [api]);
+  useEffect(load, [load]);
+
+  if (!api?.fees || !network || !payees?.length) return null;
+  if (failed) return (
+    <section class="card"><h2>Network fees for your listeners</h2>
+      <p class="muted">Couldn't check the fee wallet just now. <button class="link" onClick={load}>Try again</button></p></section>
+  );
+  if (!fees) return <section class="card"><h2>Network fees for your listeners</h2><p class="muted">Checking…</p></section>;
+
+  const sol = fees.lamports == null ? null : fees.lamports / 1e9;
+  // 10,000 lamports a payment; what's held back keeps the wallet itself open.
+  const payments = fees.lamports == null ? null : Math.max(0, Math.floor((fees.lamports - 1_000_000) / 10_000));
+  return (
+    <section class="card">
+      <h2>Network fees for your listeners</h2>
+      {fees.offering ? (
+        <p><b>On.</b> Your listeners pay you without needing any SOL: this service pays each payment's
+          network fee. Enough for about {payments.toLocaleString()} more payments.</p>
+      ) : (
+        <p><b>Off.</b> Listeners need a little SOL of their own to pay you, which is the most confusing step
+          for them. Add about $5 of SOL to the address below and it turns on by itself within a few minutes.</p>
+      )}
+      <p class="muted">Each payment's fee is a fraction of a cent. $5 of SOL covers thousands of payments.
+        It's paid only for payments to you, at least a cent each, and for at most {fees.dailyCap.toLocaleString()} a
+        day, so nobody can run it down by spamming. This wallet is separate from your earnings and only ever
+        holds SOL for fees.</p>
+      <div class="copy-row">
+        <CopyButton text={fees.address} label="Copy fee wallet address" className="btn sm" />
+        <code>{fees.address}</code>
+      </div>
+      <p class="muted small">Holds {sol == null ? "an unknown amount" : `${sol.toFixed(4)} SOL`}
+        {fees.paidToday ? ` · paid ${fees.paidToday} fee${fees.paidToday === 1 ? "" : "s"} today` : ""}
+        {fees.network !== "solana" ? ` · ${fees.network}` : ""} · <button class="link" onClick={load}>Refresh</button></p>
+      <details>
+        <summary>How to add SOL</summary>
+        <p class="muted">In Coinbase: buy a few dollars of <b>SOL</b>, then Send → SOL → paste the address above →
+          network <b>Solana</b>. Or from Phantom or any Solana wallet: Send → SOL. Send <b>SOL</b>, not USDC:
+          this wallet pays fees and can't spend dollars.</p>
+      </details>
+    </section>
+  );
+}
+
 function EarningsTab({ node, published, api, payees, rate, network, settleAt }) {
   return (
     <>
@@ -1961,6 +2018,8 @@ function EarningsTab({ node, published, api, payees, rate, network, settleAt }) 
 
       <div class="stack">
       <Listeners api={api} payees={payees} rate={rate} network={network} settleAt={settleAt} />
+
+      <FeesCard api={api} network={network} payees={payees} />
 
       <section class="card">
         <h2>Cash out to your bank</h2>

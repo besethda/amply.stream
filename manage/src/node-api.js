@@ -72,6 +72,12 @@ export function nodeApi() {
       });
     },
 
+    /** The wallet that pays listeners' network fees: its address, balance and
+     *  today's count. Never its key: no route returns that. */
+    async fees() {
+      return (await req("GET", "/fees")).json();
+    },
+
     /** What subscriptions this service sells, if any. Never the Stripe key. */
     async stripeStatus() {
       return (await req("GET", "/stripe")).json();

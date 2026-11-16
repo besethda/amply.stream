@@ -34,9 +34,11 @@ Nothing here is promised. It's the direction, roughly in order.
   - Remember the fan's route and remind them before the balance runs out, so
     the confusing part happens once.
   - Any referral fee from a provider is declined or disclosed. Amply takes 0%.
-- **No SOL for listeners.** The artist's node pays the network fee on each
-  payment as fee payer (about $0.001), after checking the transaction only
-  pays this artist's split. The artist tops up a few dollars of fee money once.
+- **No SOL for listeners.** *Built:* the artist's node pays the network fee
+  on each payment as fee payer (about $0.001), after checking the transaction
+  only pays this artist's split (node/src/feepay.ts, settle.ts). The artist
+  adds a few dollars of SOL to the fee wallet once, from the Earnings tab.
+  Still to do: fund the fee wallet through Coinbase's onramp in one tap.
 - **A wallet that can't be lost.** Make the wallet from a passkey (WebAuthn
   PRF): the same passkey on any synced device recreates the same wallet, with
   no recovery words and nothing stored by anyone. Falls back to a backup code
@@ -101,8 +103,8 @@ Nothing here is promised. It's the direction, roughly in order.
   transfer with their passkey, and Coinbase pays out to a bank (ACH in the
   US, PayPal in some countries) or their Coinbase balance. Elsewhere, guide
   them through an exchange with low fees (for example Bitvavo in the EU).
-- **Automatic stopping of non-payers.** With the node as fee payer, it signs
-  every payment to its artist and records it, so it knows exactly who has
+- **Automatic stopping of non-payers.** With the node as fee payer (now
+  built), it signs every payment to its artist and could record it, so it knows exactly who has
   paid without reading the chain, and refuses a listening token to a wallet
   that owes more than its `settleAt` past the 7-day window and a grace period.
   The artist no longer has to check Earnings by hand. Generous by default:
