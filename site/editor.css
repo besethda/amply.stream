@@ -677,3 +677,13 @@ input[type=range] {
 .plan .plan-price input { width: 90px; font: inherit; padding: 8px 10px; border-radius: var(--r);
   border: 1.5px solid var(--line); background: var(--bg); color: var(--ink); }
 .plan .plan-price input:disabled { opacity: .45; }
+
+/* A first-run explanation inside a card: what to do before a field makes sense. */
+.card-note {
+  background: var(--bg2); border-radius: var(--r); padding: 18px 22px; margin: 0 0 26px;
+  font-size: 16.5px; color: var(--ink2);
+}
+.card-note p { margin: 0 0 10px; }
+.card-note p:last-child { margin-bottom: 0; }
+.card-note b { color: var(--ink); }
+.card-note ol { margin: 0 0 12px; padding-left: 22px; display: grid; gap: 6px; }
