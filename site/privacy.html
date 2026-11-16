@@ -60,6 +60,19 @@ Worker, and discard it.</p>
 The relay that carries those requests is stateless, has no storage attached to it, and logs
 nothing.</p>
 
+<h2>Adding money through Coinbase</h2>
+
+<p>If you choose Coinbase in the app's <em>Top up</em> screen, your app sends your wallet's
+address, the amount, and a signature proving the wallet is yours to the same relay. The relay
+asks Coinbase for a checkout for that address and hands back the link. To do that it passes
+Coinbase your wallet address and your internet (IP) address, which Coinbase uses to tie the
+checkout to you, and a scrambled reference made from your wallet address. It keeps none of it
+and logs nothing.</p>
+
+<p>The relay holds one key for this: Amply's own Coinbase developer key, which lets it ask for
+checkouts and nothing else. It isn't anyone's wallet key or account. Everything you do on
+Coinbase's page is between you and Coinbase, under Coinbase's privacy policy.</p>
+
 <p>You don't have to take that on trust. Your Cloudflare account keeps its own audit log of
 every change made in it, and it will show exactly what setup created, and that nothing has
 touched your account on Amply's behalf since.</p>
@@ -72,13 +85,17 @@ touched your account on Amply's behalf since.</p>
   <li><strong>Which artists you follow</strong>, stored locally, never transmitted to us.</li>
   <li><strong>What you listen to, and for how long</strong>, measured on your device so that
   artists can be paid. It never leaves it.</li>
-  <li><strong>Your wallet key</strong>, generated on your device and held in its secure
-  storage. We never see it, cannot recover it, and could not spend from it.</li>
+  <li><strong>Your wallet key</strong>, made on your device and kept in the app's storage
+  there. We never see it, cannot recover it, and could not spend from it. If you made the wallet
+  with a passkey, the passkey can make the key again; if you chose a backup code, the code can.</li>
 </ul>
 
-<p>There is no sync, no cloud backup, and no account. That has a real cost: lose the device
-without a backup and you lose the library and the balance. We would rather be honest about
-that than hold your data in order to avoid it.</p>
+<p>Amply runs no sync, no cloud backup, and no account. If you use a passkey, the passkey itself
+is kept and synced by your phone's or computer's keychain (Apple, Google or Microsoft), under
+their terms; Amply never receives it, or anything from it except the wallet key it makes on
+your device. That has a real cost: lose your device and your passkeys (or your backup code) and
+you lose the library and the balance. We would rather be honest about that than hold your data
+in order to avoid it.</p>
 
 <h2>Music you pay for</h2>
 
@@ -133,8 +150,9 @@ part.</p>
   <li><strong>Stripe</strong>, if you subscribe to an artist by card. You pay on Stripe's own
   page, to the artist's own Stripe account, under Stripe's privacy policy. The artist's
   streaming service keeps only your wallet address, the subscription's ids and when it ends.</li>
-  <li><strong>The payment on-ramp</strong>, if you fund a wallet, is a separate company whose
-  terms and identity checks are their own.</li>
+  <li><strong>The company you add money through</strong>, if you fund a wallet: Coinbase, Cash
+  App or Stripe. Each is a separate company whose terms, privacy policy and identity checks are
+  their own. Amply never sees your card, bank or account with them.</li>
   <li><strong>The blockchain.</strong> Payments to artists are recorded on a public ledger.
   This is worth understanding clearly: those records are <strong>permanent, public, and
   cannot be deleted</strong>. Anyone can see that an address paid an artist, when, and how
