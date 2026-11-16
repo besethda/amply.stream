@@ -2013,7 +2013,7 @@ function FeesCard({ api, network, payees }) {
       <p class={`fee-status ${fees.offering ? "on" : "off"}`}>
         <span class={`pill-status ${fees.offering ? "on" : "off"}`}>{fees.offering ? "On" : "Off"}</span>
         {fees.offering
-          ? <> Paying network fees for you and your listeners.{payments != null && <> Enough left for about {payments.toLocaleString()} payments.</>}</>
+          ? <> Paying network fees for you and your listeners.{payments != null && <> Enough left for about {payments.toLocaleString()} payments or sends to your bank.</>}</>
           : <> Empty. Add SOL to send to your bank; until then, listeners pay their own tiny fees.</>}
       </p>
       <p class="muted">$5 lasts thousands of payments, usually months.{" "}
@@ -2156,7 +2156,7 @@ function SendToBank({ api, payees, network, routeName }) {
       <div class="send-done" role="status">
         <p class="good"><b>Sent ${state.usd}.</b> It should show up in {routeName} within a few minutes.</p>
         <p class="muted small"><a href={`https://solscan.io/tx/${state.signature}${net === "devnet" ? "?cluster=devnet" : ""}`}
-          target="_blank" rel="noopener">See the receipt ↗</a> · <button class="link" onClick={() => setState(null)}>Send more</button></p>
+          target="_blank" rel="noopener">See proof of payment ↗</a> <span class="muted">(opens a technical page)</span> · <button class="link" onClick={() => setState(null)}>Send more</button></p>
       </div>
     );
   }
@@ -2165,7 +2165,7 @@ function SendToBank({ api, payees, network, routeName }) {
     return (
       <div class="send-setup">
         <p><b>One-time setup before your first send.</b> Your fees account pays the tiny network fee on each
-          transfer, so nothing comes out of your earnings. It needs about $5 of SOL first, which lasts a long time.</p>
+          transfer, so nothing comes out of your earnings. It needs about $5 of a small network coin (called SOL) first, which lasts a long time.</p>
         <button class="btn sm" onClick={() => document.getElementById("fees")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
           Set up my fees account</button>
         <p class="muted small">Takes about 5 minutes. Come back here when it says <b>On</b>.</p>
