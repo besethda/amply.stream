@@ -506,7 +506,7 @@ function Release({
             />
           </label>
           <label class="side-field">
-            <span class="label">Price to buy the album <Help about="the album's price">What the whole album costs to buy and keep, separate from your per-minute price for listening. Leave it empty if it isn't for sale.</Help></span>
+            <span class="label">Price to own the album <span class="muted small">(one-time, optional)</span> <Help about="the album's price">What the whole album costs to buy and keep, separate from your per-minute price for listening. Leave it empty if it isn't for sale.</Help></span>
             <span class="release-price">
               <span>$</span>
               <input type="number" min="0.5" max="1000" step="0.01" placeholder="—"
@@ -794,7 +794,7 @@ function Price({ wallet, onChange, hasAddress, subscribing }) {
               }}
             />
             <span class="unit">¢</span>
-            <span>a minute</span>
+            <span>a minute <span class="muted small">(only while someone's listening)</span></span>
           </div>
           <input
             type="range" min="0" max={SLIDER_STEPS} step="1" value={toSlider(rate)}
@@ -1121,7 +1121,7 @@ function Payout({ wallet, onChange, subscribing }) {
           ? (subscribing ? "You don't charge by the minute, so there's nothing here to pay in batches." : "Your music is free, so listeners never pay.")
           : batch === 1
             ? `You are paid after each song, about ${cents(amount)} each time.`
-            : `You are paid about ${cents(amount)} every ${batch} songs.`}
+            : `Listeners settle up in batches, so there are fewer tiny payments: you are paid about ${cents(amount)} every ${batch} songs.`}
       </p>
     </section>
   );
@@ -1266,6 +1266,8 @@ function ShowWalletKey({ payees }) {
   if (!state?.key) {
     return (
       <div class="passkey-wallet">
+        <p class="warn small">Treat it like a password: anyone who has it can take your money, and nobody from
+          Amply will ever ask for it.</p>
         <button class="btn ghost sm" disabled={busy} onClick={reveal}>{busy ? "Waiting for you…" : "Show my backup key"}</button>
         {state?.error && <p class="warn" role="alert">{state.error}</p>}
       </div>
@@ -1853,6 +1855,10 @@ function Listeners({ api, paid, rate, settleAt }) {
     }
   }
 
+  // Numbered in the order they first came: listeners are anonymous by design,
+  // so a number is easier to talk about than a code.
+  const numberOf = new Map(rows ? [...rows].sort((a, b) => (a.first_seen || 0) - (b.first_seen || 0)).map((r, i) => [r.pubkey, i + 1]) : []);
+
   if (error) return (
     <section class="card"><h2>Your listeners</h2>
       <p class="muted">Couldn't load your listeners just now. <button class="link" onClick={() => { setError(null); load(); }}>Try again</button></p></section>
@@ -1871,7 +1877,7 @@ function Listeners({ api, paid, rate, settleAt }) {
 
   return (
     <section class="card">
-      <h2>Your listeners <span class="note">{rows.length}</span>
+      <h2>Your listeners <span class="note">{rows.length} · anonymous: fans don't sign up with a name</span>
         <Help at="banning" about="your listeners">Listeners don't sign up with a name, so each one is shown by a
           short code from their payment app. You see how much they listened, never what or when.
           A <strong>Paid</strong> figure in red means they're more than one payment behind. <strong>Overdue</strong>{" "}
@@ -1934,7 +1940,7 @@ function Listeners({ api, paid, rate, settleAt }) {
           }).sort(rank).map(({ r, got, owed, subscribed, short, overdue: late }) => {
             return (
             <tr key={r.pubkey} class={`${r.blocked ? "blocked" : ""}${late ? " late" : ""}`}>
-              <td class="mono" data-k="Listener" title={`Their payment code: ${r.pubkey}`}>{r.pubkey.slice(0, 6)}…{r.pubkey.slice(-4)}</td>
+              <td data-k="Listener" title={`Their wallet code: ${r.pubkey}`}>Listener {numberOf.get(r.pubkey)} <span class="mono muted small">{r.pubkey.slice(0, 4)}…{r.pubkey.slice(-4)}</span></td>
               <td data-k="Plays">{r.plays}</td>
               <td data-k="Listened">{Math.round((r.seconds || 0) / 60)} min</td>
               <td data-k="Paid" class={short ? "short" : ""} title={got?.payments ? `${got.payments} payments, last ${new Date(got.last).toLocaleDateString()}` : ""}>
@@ -1954,7 +1960,7 @@ function Listeners({ api, paid, rate, settleAt }) {
                   onClick={() => block(r, !r.blocked)}
                 >{r.blocked ? "Unblock" : "Block"}</button>
                 <button class="link quiet" onClick={() => exportRow(r)}
-                  title="Download everything held about this listener, to send them if they ask">Export</button>
+                  title="Download everything held about this listener, to send them if they ask">Export data</button>
                 <button class="link quiet danger" disabled={busy === r.pubkey}
                   onClick={() => removeRow(r)}
                   title="Delete this listener's record, if they ask you to">Delete</button>
@@ -1984,7 +1990,7 @@ function FeesCard({ api, network, payees }) {
   useEffect(load, [load]);
 
   if (!api?.fees || !network || !payees?.length) return null;
-  const head = <h2>Make paying you easier for listeners <span class="note">optional</span></h2>;
+  const head = <h2>Cover your listeners' fees <span class="note">optional</span></h2>;
   if (failed) return (
     <section class="card">{head}
       <p class="muted">Couldn't check this just now. <button class="link" onClick={load}>Try again</button></p></section>
@@ -1996,25 +2002,27 @@ function FeesCard({ api, network, payees }) {
   return (
     <section class="card">
       {head}
+      <p class="lead"><b>Pay about $5 once, so new listeners don't have to buy a coin before they can pay you.</b></p>
       <p class={`fee-status ${fees.offering ? "on" : "off"}`}>
-        <b>{fees.offering ? "On: you're covering your listeners' fees." : "Off: listeners cover their own fees."}</b>
-        {fees.offering && payments != null && <> Enough for about {payments.toLocaleString()} more payments.</>}
+        <span class={`pill-status ${fees.offering ? "on" : "off"}`}>{fees.offering ? "On" : "Off"}</span>
+        {fees.offering
+          ? <> You're covering your listeners' fees.{payments != null && <> Enough left for about {payments.toLocaleString()} payments.</>}</>
+          : <> Listeners pay their own tiny fees. That's fine; it's just one more step for them.</>}
       </p>
-      <p>Every payment on the network has a tiny processing fee, a small fraction of a cent. It's paid in
-        <b> SOL</b>, a coin used only for these fees. Right now each new listener has to buy a little SOL
-        before they can pay you, which is the most confusing step for them.</p>
-      <p>You can cover it for them instead: <b>about $5 of SOL lasts thousands of payments</b>, usually months.
-        It isn't required. If you skip it, nothing breaks; listeners just have one more step.</p>
+      <p>Why: every payment to you has a tiny processing fee (a fraction of a cent) charged by Solana, the
+        payment network your money travels on. It's paid in <b>SOL</b>, a coin used only for these fees, which
+        new listeners otherwise have to buy first. $5 of SOL covers thousands of payments, usually months.</p>
       <details class="fee-how" open={!fees.offering}>
         <summary>How to turn it on (about 5 minutes)</summary>
         <ol>
-          <li>Copy this address. It's a separate small account just for fees; your earnings never go here.
+          <li>Copy the address of your fees account. It's separate and small: your earnings never go here.
             <div class="copy-row">
               <CopyButton text={fees.address} label="Copy the fees address" className="btn sm" />
               <code>{fees.address}</code>
             </div></li>
-          <li>In <b>Coinbase</b> (free to join): buy $5 of <b>SOL</b>, then Send → paste the address. If it asks for
-            a network, choose <b>Solana</b>. Phantom or any other Solana app works the same way.</li>
+          <li>In the <b>Coinbase</b> app (free to join): tap <b>Buy</b>, search for <b>Solana (SOL)</b>, buy $5
+            (Coinbase adds a small fee). Then open SOL, tap <b>Send</b>, paste the address, and send it all.
+            If it asks for a network, choose <b>Solana</b>.</li>
           <li>Come back here. It switches on by itself within a few minutes.</li>
         </ol>
         <p class="muted small">Cash App can't send SOL, so use Coinbase for this one step. Send SOL, not dollars
@@ -2022,12 +2030,14 @@ function FeesCard({ api, network, payees }) {
       </details>
       <p class="muted small">
         {fees.paidToday ? `Covered ${fees.paidToday} payment${fees.paidToday === 1 ? "" : "s"} today. ` : ""}
-        It only ever pays for payments to you, and has a daily limit, so it can't run up.
-        {fees.network !== "solana" ? ` Test network (${fees.network}).` : ""}{" "}
-        <button class="link" onClick={load}>Check again</button></p>
+        It only ever pays for payments to you, with a daily limit, so it can't run up.
+        {fees.network !== "solana" ? ` Test network (${fees.network}).` : ""}</p>
+      <button class="btn ghost sm" onClick={load}>{fees.offering ? "Refresh" : "I've sent it: check now"}</button>
     </section>
   );
 }
+
+const short = (a) => (a ? `${a.slice(0, 4)}…${a.slice(-4)}` : "");
 
 /** What listeners have paid, in dollars, at the top of Earnings. */
 function EarningsSummary({ paid, payees }) {
@@ -2050,11 +2060,79 @@ function EarningsSummary({ paid, payees }) {
       <p class="muted small">
         {paid.busy ? "Checking the latest payments…"
           : paid.error ? <>Couldn't check payments just now. <button class="link" onClick={paid.look}>Try again</button></>
-          : paid.at ? <>Checked at {new Date(paid.at).toLocaleTimeString()}. It goes straight into your payout
-              wallet as it's paid. <button class="link" onClick={paid.look}>Check again</button></>
+          : paid.at ? <>Checked at {new Date(paid.at).toLocaleTimeString()}. <button class="link" onClick={paid.look}>Check again</button></>
           : <button class="link" onClick={paid.look}>Check payments</button>}
       </p>
+      <p class="payout-where">It goes straight into your <b>payout wallet</b>, as it's paid:{" "}
+        <code title={payees.find((p) => p.address)?.address}>{short(payees.find((p) => p.address)?.address)}</code>{" "}
+        <CopyButton text={payees.find((p) => p.address)?.address} label="Copy address" />
+        {payees.filter((p) => p.address).length > 1 && <span class="muted small"> (and your collaborators' shares to theirs)</span>}</p>
       <a class="btn sm" href="#cash-out">Move it to your bank</a>
+    </section>
+  );
+}
+
+/**
+ * Moving money to a bank, one route at a time: pick the app you use, then
+ * see only its steps. Listeners pay in USDC; Cash App and Coinbase both take
+ * it on Solana and turn it into dollars.
+ */
+function CashOut({ payees }) {
+  const [via, setVia] = useState(null);
+  const [passkey, setPasskey] = useState(false);
+  const routes = {
+    cashapp: { name: "Cash App", where: "US only, currently free", steps: [
+      <>In Cash App: tap <b>Money</b>, then <b>Deposit USDC</b>, choose <b>Solana</b>, and copy the address it shows.</>,
+      <>From your payout wallet, send your USDC to that address (how depends on your wallet; see below).</>,
+      <>It arrives in Cash App as dollars. Move it to your bank as usual.</>,
+    ] },
+    coinbase: { name: "Coinbase", where: "most countries", steps: [
+      <>In Coinbase: tap <b>Receive</b>, choose <b>USDC</b>, network <b>Solana</b>, and copy the address.</>,
+      <>From your payout wallet, send your USDC to that address (how depends on your wallet; see below).</>,
+      <>In Coinbase, sell the USDC for dollars (one for one), then withdraw to your bank.</>,
+    ] },
+  };
+  const r = via && routes[via];
+  return (
+    <section class="card" id="cash-out">
+      <h2>Move your money to your bank</h2>
+      <p class="muted">Listeners pay you in <b>digital dollars (USDC)</b>: each is worth exactly $1. To get them
+        into your bank, send them to an app that turns them into ordinary dollars. Which do you use?</p>
+      <div class="choices">
+        {Object.entries(routes).map(([k, v]) => (
+          <button key={k} class="choice" aria-pressed={via === k} onClick={() => setVia(k)}>
+            {v.name} <span class="muted small">{v.where}</span></button>
+        ))}
+      </div>
+      {r && (
+        <>
+          <ol class="cash-steps">{r.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
+          <p class="muted small">When asked for a network, choose <b>Solana</b>: it's the one your money is on.</p>
+          <div class="send-how">
+            <b>Sending from your payout wallet</b>
+            <div class="choices">
+              <button class="choice" aria-pressed={!passkey} onClick={() => setPasskey(false)}>I use Phantom</button>
+              <button class="choice" aria-pressed={passkey} onClick={() => setPasskey(true)}>I made it with Face ID</button>
+            </div>
+            {!passkey ? (
+              <p class="muted">In Phantom: tap <b>USDC</b>, then <b>Send</b>, paste the address and the amount.</p>
+            ) : (
+              <>
+                <p class="muted">Sending straight from this page isn't ready yet. Until it is, a one-time setup in
+                  the free <b>Phantom</b> app (about 5 minutes) lets you send from it:</p>
+                <ol class="cash-steps">
+                  <li>Install Phantom on your phone or computer.</li>
+                  <li>Tap <b>Show my backup key</b> below and copy it.</li>
+                  <li>In Phantom: Add account, then <b>Import private key</b> (Phantom's name for a backup key), choose
+                    Solana, and paste. Your earnings appear there.</li>
+                  <li>Phantom needs a few cents of SOL to send. Buy $1 of it in Phantom, once. Then send as above.</li>
+                </ol>
+                <ShowWalletKey payees={payees} />
+              </>
+            )}
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -2072,38 +2150,9 @@ function EarningsTab({ node, published, api, payees, rate, network, settleAt }) 
 
       <Listeners api={api} paid={paid} rate={rate} settleAt={settleAt} />
 
+      <CashOut payees={payees} />
+
       <FeesCard api={api} network={network} payees={payees} />
-
-      <section class="card" id="cash-out">
-        <h2>Move your money to your bank</h2>
-        <p class="muted">Listeners pay you in <b>digital dollars (USDC)</b>: each one is worth exactly $1, and they
-          sit in your payout wallet. To get them into your bank, send them to an app that turns them back
-          into ordinary dollars. Pick whichever you already use:</p>
-        <ol class="steps">
-          <li><span class="n">A</span><span class="t">Cash App <span class="note">(US only, no fee right now)</span>
-            <span class="detail">In Cash App: Money → <b>Deposit USDC</b> → choose <b>Solana</b> → copy the address it
-              shows. Then send to that address from your payout wallet (below). It arrives as dollars in Cash App,
-              and you move it to your bank as usual.</span></span></li>
-          <li><span class="n">B</span><span class="t">Coinbase <span class="note">(most countries)</span>
-            <span class="detail">In Coinbase: Receive → <b>USDC</b> → network <b>Solana</b> → copy the address. Send to
-              it from your payout wallet, then sell the USDC for dollars (one for one) and withdraw to your bank.</span></span></li>
-        </ol>
-        <p class="muted small">Whenever you're asked for a network, choose <b>Solana</b>: it's the one your money is
-          on. Other networks can't receive it, and a transfer can't be called back, so it's worth a second look.</p>
-
-        <details class="cash-out-passkey">
-          <summary>Made your payout wallet with Face ID or a passkey?</summary>
-          <p>Sending straight from this page isn't ready yet. For now, a one-time setup in the free <b>Phantom</b>{" "}
-            app (about 5 minutes) lets you send from it:</p>
-          <ol>
-            <li>Install Phantom on your phone or computer.</li>
-            <li>Tap <b>Show my backup key</b> below, then copy it.</li>
-            <li>In Phantom: Add account → <b>Import private key</b> → Solana → paste. Your earnings appear there.</li>
-            <li>Phantom needs a few cents of SOL to send; buy $1 of it in Phantom. Then send your USDC as above.</li>
-          </ol>
-          <ShowWalletKey payees={payees} />
-        </details>
-      </section>
 
       <section class="card nothing">
         <h2>Share your link</h2>
