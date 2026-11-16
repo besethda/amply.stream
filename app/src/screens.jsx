@@ -5,6 +5,7 @@
  * the link or website that artist gave them; everything on these screens comes
  * from artists they chose. See docs/clients.md.
  */
+import { reachable, seemsGone } from "./library.js";
 import { useState, useEffect, useRef, useContext } from "preact/hooks";
 import { createContext } from "preact";
 import { useRowSwipe } from "./gestures.js";
@@ -234,7 +235,7 @@ export function Library({ entries, localEntry, onOpenArtist, onAdd, lists, liked
     return lists.length ? "Playlists" : "Artists";
   });
   const setSeg = (s) => { pickSeg(s); try { localStorage.setItem(SEG, s); } catch { /* storage off */ } };
-  const albums = [...entries, ...(localEntry ? [localEntry] : [])]
+  const albums = [...entries.filter(reachable), ...(localEntry ? [localEntry] : [])]
     .flatMap((e) => (e.manifest.releases || []).map((r) => ({ entry: e, release: r })));
   return (
     <div class="screen">
@@ -285,7 +286,9 @@ export function Library({ entries, localEntry, onOpenArtist, onAdd, lists, liked
               <span class="art round s50" style={artStyle(imageOf(e), nameOf(e))} />
               <span class="t">
                 <b>{nameOf(e)}</b>
-                {e.domain
+                {!reachable(e)
+                  ? <span class="mono dim">{seemsGone(e) ? "seems to be gone" : "offline right now"}</span>
+                  : e.domain
                   ? <span class="mono good-ink"><Icon.check size={11} /> {e.domain}</span>
                   : <span class="mono warn-ink"><Icon.warn size={11} /> no website</span>}
               </span>
@@ -487,7 +490,17 @@ export function ArtistPage({
         ),
       }} onClose={() => setAbout(false)} />
 
-      {(m.releases || []).map((release) => {
+      {!reachable(entry) && (
+        <div class="unreachable stack" role="status">
+          <b>{seemsGone(entry) ? "This artist's service seems to be gone" : "Can't reach this artist's service right now"}</b>
+          <span class="dim small">{seemsGone(entry)
+            ? "It hasn't answered for over a month, so it may have been taken down. Their songs are hidden. You can remove them, or keep them in case it comes back."
+            : "Their songs are hidden until it answers again. The app checks a few times a day. Songs you've bought and kept on this phone still play."}</span>
+          {seemsGone(entry) && followed && <button class="pill" onClick={onUnfollow}>Remove this artist</button>}
+        </div>
+      )}
+
+      {reachable(entry) && (m.releases || []).map((release) => {
         const tracks = all.filter((t) => t.releaseId === release.id);
         return (
           <section class="release" key={release.id}>

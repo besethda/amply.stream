@@ -12,7 +12,7 @@
  */
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "preact/hooks";
 import { fetchManifest, tracksOf, rateOf, verifiedDomain } from "./manifest.js";
-import { loadLibrary, saveLibrary, addArtist, addKnown, removeArtist, followedOnly, isFollowed, setFollowed } from "./library.js";
+import { loadLibrary, saveLibrary, addArtist, addKnown, removeArtist, followedOnly, isFollowed, setFollowed, noteReach, reachable, CHECK_EVERY_MS } from "./library.js";
 import { createPlayer } from "./player.js";
 import {
   loadLedger, bank, owing, settle, settleAll, backupSaved, totalOwed, hasWallet, machinery, rateStatus, mismatch,
@@ -274,26 +274,50 @@ export function App() {
     };
   }, []);
 
-  // A library is a cache of other people's pages: refresh it on opening, and
-  // keep what we have if an artist's service is unreachable.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const next = await Promise.all(entries.map(async (e) => {
+  // A library is a cache of other people's pages (library.js). Check every
+  // artist's real page when the app opens, when it comes back after a while,
+  // and every few hours while it's open. A page that answers replaces the copy,
+  // so removed songs go; one that doesn't is marked, and its songs are hidden
+  // until it answers again.
+  const checking = useRef(false);
+  const lastCheck = useRef(0);
+  const checkArtists = useCallback(async () => {
+    if (checking.current) return;
+    checking.current = true;
+    lastCheck.current = Date.now();
+    try {
+      const checked = await Promise.all(loadLibrary().map(async (e) => {
         try {
           const { manifest } = await fetchManifest(e.url);
           // Checked afresh each time: a domain pointed elsewhere stops vouching.
           const domain = await verifiedDomain(e.url, manifest, e.domain);
           const { domain: _was, ...rest } = e;
-          return { ...rest, manifest, ...(domain ? { domain } : {}) };
+          return noteReach({ ...rest, manifest, ...(domain ? { domain } : {}) }, true);
         } catch {
-          return e;
+          return noteReach(e, false);
         }
       }));
-      if (!cancelled && next.length) { setEntries(next); saveLibrary(next); }
-    })();
-    return () => { cancelled = true; };
+      const byUrl = new Map(checked.map((e) => [e.url, e]));
+      // Onto the library as it is now: someone may have followed or unfollowed
+      // an artist while the pages were loading.
+      setEntries((now) => {
+        const merged = now.map((e) => (byUrl.has(e.url) ? { ...byUrl.get(e.url), followed: e.followed } : e));
+        saveLibrary(merged);
+        return merged;
+      });
+    } finally {
+      checking.current = false;
+    }
   }, []);
+  useEffect(() => {
+    checkArtists();
+    const back = () => {
+      if (document.visibilityState === "visible" && Date.now() - lastCheck.current > CHECK_EVERY_MS) checkArtists();
+    };
+    document.addEventListener("visibilitychange", back);
+    const t = setInterval(checkArtists, CHECK_EVERY_MS);
+    return () => { document.removeEventListener("visibilitychange", back); clearInterval(t); };
+  }, [checkArtists]);
 
   // A wallet that exists is loaded quietly. Nobody without one ever fetches
   // the payment libraries.
@@ -743,7 +767,9 @@ export function App() {
     url: LOCAL, local: true, followed: false, tracks: localAlbums.flatMap((a) => a.tracks),
     manifest: { artist: { name: "On this phone" }, releases: localAlbums.map((a) => ({ id: a.id, title: a.title, art: a.art, artistName: a.artist, tracks: a.tracks })) },
   } : null), [local, localAlbums]);
-  const byUrl = (url) => (url === LOCAL ? localEntry : entries.find((e) => e.url === url));
+  // Songs are found only on services that answer: an artist that's offline or
+  // gone drops out of playlists, likes and history until it's back.
+  const byUrl = (url) => (url === LOCAL ? localEntry : entries.find((e) => e.url === url && reachable(e)));
 
   // Songs bought and kept on this phone, by the artist's song they came from.
   const ownedMap = useMemo(() => { setOwned(local); return ownedIndex(local); }, [local]);
@@ -1141,7 +1167,7 @@ export function App() {
           onShareGift={(e, code, title) => giftSheet(e, code, title)} />} />
     );
   } else {
-    screen = <Home entries={followed} recentTracks={recentTracks} onOpenArtist={setOpen} onPlay={play}
+    screen = <Home entries={followed.filter(reachable)} recentTracks={recentTracks} onOpenArtist={setOpen} onPlay={play}
       current={state.track} playing={state.playing} onAdd={openAdd} onMore={openMenu}
       lists={lists} onOpenPlaylist={(id) => go({ coll: { kind: "playlist", id } })} onNewPlaylist={newPlaylist} />;
   }

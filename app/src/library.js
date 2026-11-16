@@ -61,3 +61,33 @@ export const followedOnly = (entries) => entries.filter(isFollowed);
 export const setFollowed = (entries, url, on) => entries.map((e) => (e.url === url ? { ...e, followed: !!on } : e));
 
 export const removeArtist = (entries, url) => entries.filter((e) => e.url !== url);
+
+// ── whether an artist's service still answers ──────────────────────────────
+//
+// An artist can take their service down, or a song off it. The manifest kept
+// here is a copy, so the app checks each artist's real page regularly: when it
+// opens, when it comes back after a while, and every few hours while open. A
+// song that's no longer on the page is gone from playlists, likes and history
+// at once, since those only point at songs. An artist whose service doesn't
+// answer has their songs hidden too: their audio and artwork live on the same
+// server, so they couldn't play anyway. They come back when it answers again.
+
+/** How often to check every artist's page. */
+export const CHECK_EVERY_MS = 6 * 3600_000;
+/** How long without an answer before the app says the service seems gone. */
+export const GONE_AFTER_MS = 30 * 86400_000;
+
+/** An entry after a check: when it last answered, or since when it hasn't. */
+export function noteReach(entry, ok, now = Date.now()) {
+  if (ok) {
+    const { unreachableSince: _was, ...rest } = entry;
+    return { ...rest, lastSeen: now };
+  }
+  return { ...entry, unreachableSince: entry.unreachableSince ?? now };
+}
+
+/** Whether this artist's service answered at the last check. */
+export const reachable = (e) => !!e && !e.unreachableSince;
+
+/** Whether it has been silent long enough to say it's probably gone. */
+export const seemsGone = (e, now = Date.now()) => !!e?.unreachableSince && now - e.unreachableSince >= GONE_AFTER_MS;
