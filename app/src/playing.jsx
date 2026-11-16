@@ -31,6 +31,17 @@ function useSkips(state, player) {
   return { move, next, prev };
 }
 
+
+/** What the mini-player says when a song is waiting on something: the fix, not the failure. */
+const REFUSED = {
+  nowallet: "Add money to play",
+  empty: "Add money to play",
+  nosol: "Add $1 for fees to play",
+  price: "Agree to the price to play",
+  subscribe: "Subscribers only",
+  offline: "Artist offline",
+};
+
 export function MiniPlayer({ state, player, cost, onOpen }) {
   const t = state.track;
   const { move, next, prev } = useSkips(state, player);
@@ -45,7 +56,7 @@ export function MiniPlayer({ state, player, cost, onOpen }) {
         <span class="mini-sub">
           {!now ? song.artistName
             : drag != null ? <span class="mini-time">{mmss(drag * state.duration)} / {mmss(state.duration)}</span>
-            : state.refused ? <span class="warn-ink">Can't play</span>
+            : state.refused ? <span class="warn-ink">{REFUSED[state.refused.kind] || "Can't play"}</span>
             : <>{song.artistName}{cost.tag && <span class={`badge ${cost.tone}`}>{cost.tag}</span>}</>}
         </span>
       </span>

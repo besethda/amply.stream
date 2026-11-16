@@ -22,7 +22,7 @@ import {
   tokenFor, reportPlayed, originOf, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
   manageSubscription, claimSubscription,
 } from "./identify.js";
-import { perMinute, subscriptionOnly } from "../../spec/pricing.mjs";
+import { perMinute, subscriptionOnly, plans as plansOf } from "../../spec/pricing.mjs";
 import { Icon } from "./icons.jsx";
 import { money } from "./wallet-ui.jsx";
 import { recent, played, forgetRecent, theme, setTheme, waveStyle, setWaveStyle, WAVE_STYLES } from "./looks.js";
@@ -211,7 +211,12 @@ export function App() {
         }
         if (!track.needsWallet) return track.url;
         const artist = library.current.find((e) => e.url === track.from);
-        const data = { url: track.from, name: nameOf(artist), art: artist?.manifest?.artist?.image || track.art || null };
+        const data = {
+          url: track.from, name: nameOf(artist), art: artist?.manifest?.artist?.image || track.art || null,
+          // For the sheet that asks a fan with no wallet: what it costs, and whether a card will do.
+          rate: (artist && rateOf(artist.manifest)?.perMinute) || null,
+          plans: artist ? plansOf(artist.manifest) : [],
+        };
         const onlySub = artist && subscriptionOnly(artist.manifest);
         if (!holder.current) throw refuse(onlySub ? "subscribe" : "nowallet", "", data);
 
@@ -299,13 +304,29 @@ export function App() {
     });
   }, []);
 
+  const lastBalance = useRef(null);
   const refresh = useCallback(async () => {
     if (!pair) return;
     const { wallet } = await machinery();
-    try { setBalance(await wallet.balances(pair)); }
+    try {
+      const next = await wallet.balances(pair);
+      // Money bought on Stripe's page arrives while the fan is away: say so
+      // when it lands, rather than quietly changing a number.
+      const was = lastBalance.current;
+      if (was && next.usdc > was.usdc + 0.001) flash({ text: `${money(next.usdc - was.usdc)} has arrived. Paid songs will play now.` });
+      else if (was && !(was.sol > 0.001) && next.sol > 0.001) flash({ text: "Fees are covered. You're all set." });
+      lastBalance.current = next;
+      setBalance(next);
+    }
     catch { setBalance(null); flash({ bad: true, text: "Couldn't check your wallet" }); }
   }, [pair]);
   useEffect(() => { refresh(); }, [pair, refresh]);
+  // Coming back from Stripe's page is coming back to this tab: look again.
+  useEffect(() => {
+    const back = () => { if (document.visibilityState === "visible") refresh(); };
+    document.addEventListener("visibilitychange", back);
+    return () => document.removeEventListener("visibilitychange", back);
+  }, [refresh]);
 
   /** Pay whoever is due: at the artist's amount, or a week after listening. */
   const settleNow = useCallback(async () => {
@@ -598,6 +619,19 @@ export function App() {
     const back = `https://amply.stream/app/?subscribed=${encodeURIComponent(entry.url)}`;
     location.href = await manageSubscription(pair, originOf(entry.url), back);
   }
+
+  // Back from Coinbase: /app/?added=coinbase. The money is on its way, not
+  // here yet; keep looking for a few minutes so it's announced when it lands.
+  useEffect(() => {
+    let from = null;
+    try { from = new URLSearchParams(location.search).get("added"); } catch { /* none */ }
+    if (from !== "coinbase") return;
+    history.replaceState({ amply: 1, ui: uiRef.current }, "", location.pathname);
+    flash({ text: "Coinbase is sending your money. It usually arrives within a few minutes." });
+    let n = 0;
+    const t = setInterval(() => { refresh(); if (++n >= 12) clearInterval(t); }, 15_000);
+    return () => clearInterval(t);
+  }, [refresh]);
 
   // Back from Stripe: /app/?subscribed=<manifest>&session=<checkout>.
   useEffect(() => {

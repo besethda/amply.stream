@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Set up your streaming service - Amply</title>
-<meta name="description" content="Your own streaming service, on hosting you own. Live in a minute, no card needed.">
+<meta name="description" content="Your own streaming service, on hosting you own. Up in a few minutes, no card needed.">
 <meta name="robots" content="noindex">
 <link rel="icon" href="/amply.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -102,20 +102,28 @@
 
 <!-- 1 ─────────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="intro">
-  <h1 class="step">Your page, live<br>in a minute.</h1>
+  <h1 class="step">Try it first.<br>See your page in a minute.</h1>
 
   <ul class="rows stack">
-    <li><span class="n">1</span><span class="t">Name your page, and see it live</span><span class="meta">1 min</span></li>
-    <li><span class="n">2</span><span class="t">Make it yours: sign up with Cloudflare</span><span class="meta">1 min</span></li>
-    <li><span class="n">3</span><span class="t">Lock your editor, then add your music</span><span class="meta">1 min</span></li>
+    <li><span class="n">1</span><span class="t">Try it: name your page and watch it go up. No sign-up, no card.</span></li>
+    <li><span class="n">2</span><span class="t">Like it? Keep it: sign up with Cloudflare, the free hosting it runs on. Google or Apple sign-in works.</span></li>
+    <li><span class="n">3</span><span class="t">Make your editor private to you, then add your music.</span></li>
   </ul>
+
+  <p class="lead" style="margin-bottom:30px">It's a trial page. You can open it, look around and send it to a friend.
+  If you don't keep it, Cloudflare deletes it after an hour and nothing is left behind.</p>
+
+  <div class="actions" style="margin-bottom:38px">
+    <button class="btn" data-go="instant">Try it free</button>
+    <a class="link" href="/">Not now</a>
+  </div>
 
   <div class="card orange" style="margin-bottom:30px">
     <h2 style="font-size:clamp(28px,3.4vw,44px);margin-bottom:22px">No card needed.</h2>
     <ul class="marks">
       <li class="yes"><span class="m">&rarr;</span><span>Your page runs on Cloudflare's free plan, in an account in your name.</span></li>
       <li class="yes"><span class="m">&rarr;</span><span><strong>Amply never charges you anything, and keeps no way into your account.</strong></span></li>
-      <li class="yes"><span class="m">&rarr;</span><span>The free plan holds about <strong>250 songs</strong>. If you outgrow it, you can add bigger storage later.</span></li>
+      <li class="yes"><span class="m">&rarr;</span><span>Room for about <strong>250 songs</strong> free. Need more later? Bigger storage is free too, but Cloudflare asks for a card to switch it on.</span></li>
     </ul>
   </div>
 
@@ -123,18 +131,15 @@
   nobody can take your music down or change the terms on you. It also means the account is
   yours to look after.</p>
 
-  <div class="actions">
-    <button class="btn" data-go="instant">Let's go</button>
-    <a class="link" href="/">Not now</a>
-  </div>
   <p class="muted" style="margin-top:26px">Already have a Cloudflare account?
-    <button class="link" data-go="cloudflare">Use it instead</button></p>
+    <button class="link" data-go="cloudflare">Use it instead</button> (Cloudflare asks for a card on
+    that route; nothing is charged).</p>
 </section>
 
 <!-- 2, instant ──────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="instant">
   <h1 class="step">Name your page.</h1>
-  <p class="lead">We'll put it up straight away, in a new Cloudflare account. You make it yours next.</p>
+  <p class="lead">We'll put it up straight away, in a new Cloudflare account, so you can see it. It lasts an hour. Keep it if you like it.</p>
 
   <label class="f" for="instant-name">
     <span>Your name</span>
@@ -157,14 +162,17 @@
 
 <!-- 3, claim ────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="claim">
-  <h1 class="step">Your page is live.<br><span class="orange">Now make it yours.</span></h1>
+  <h1 class="step">Your page is up.<br><span class="orange">Like it? Keep it.</span></h1>
+  <p class="lead">Open it and have a look. It's empty for now: you'll add your music in a few minutes, once it's yours.
+  Not for you? Do nothing, and it deletes itself.</p>
 
   <p class="live-url"><a id="live-link" href="#" target="_blank" rel="noopener"></a></p>
 
   <ul class="rows stack">
-    <li><span class="n">1</span><span class="t">Open the claim page, and sign up or sign in with Cloudflare. Google or Apple works.</span></li>
-    <li><span class="n">2</span><span class="t">Choose to claim the account.</span></li>
-    <li><span class="n">3</span><span class="t">Come back here to lock your editor.</span></li>
+    <li><span class="n">1</span><span class="t">Press <strong>Make it mine</strong>. Cloudflare opens in a new tab.</span></li>
+    <li><span class="n">2</span><span class="t">Sign up, or sign in if you already have an account. Google or Apple works.</span></li>
+    <li><span class="n">3</span><span class="t">Cloudflare asks whether to claim the account. Say yes.</span></li>
+    <li><span class="n">4</span><span class="t">Come back to this tab and press <strong>I've claimed it</strong>.</span></li>
   </ul>
 
   <div class="actions" style="margin-bottom:26px">
@@ -174,12 +182,14 @@
   <div class="card orange" style="margin-bottom:30px">
     <h3 style="margin-bottom:10px" id="claim-deadline">Claim it within the hour</h3>
     <p style="margin-bottom:0">Until you do, it's a temporary account, and Cloudflare deletes it
-    after an hour. Once it's yours, Amply's access to it ends.</p>
+    after an hour. Once it's yours, Amply's access to it ends. <strong>Keep this tab open</strong>:
+    for your safety the claim link lives only here, and closing the tab loses it.</p>
   </div>
 
   <div class="actions">
-    <button class="btn ghost" id="claimed-btn">I've claimed it, lock my editor</button>
+    <button class="btn ghost" id="claimed-btn">I've claimed it, carry on</button>
   </div>
+  <p id="claim-said" role="status" hidden style="margin:14px 0 0;color:var(--ink)"></p>
 </section>
 
 <!-- 2 ─────────────────────────────────────────────────────────────── -->
@@ -189,7 +199,7 @@
 
   <ul class="rows stack">
     <li><span class="n">01</span><span class="t">Pick your sign up method.</span></li>
-    <li><span class="n">02</span><span class="t">Sign up for R2 storage, the free plan. The free tier is 10GB, over a thousand songs.</span></li>
+    <li><span class="n">02</span><span class="t">Switch on storage (Cloudflare calls it R2) on the free plan: 10 GB, over a thousand songs.</span></li>
     <li><span class="n">03</span><span class="t">They'll ask for a card. Expected, and nothing is charged.</span></li>
     <li><span class="n">04</span><span class="t">Come back here when you've added your card.</span></li>
   </ul>
@@ -204,14 +214,16 @@
 
   <div class="card prep" style="margin:34px 0 30px">
     <h3 style="margin-top:0">Then open two more pages</h3>
-    <p>Literally just open these links, let them load, and come back here.</p>
+    <p>Cloudflare switches on the parts your page needs the first time you visit them, and
+    there's no other way to do it. Open each link, let it load, and come back. There's nothing
+    to fill in.</p>
 
     <ul class="marks prep-list">
       <li data-prep="workers">
         <span class="m">1</span>
         <span>
           <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages"
-             target="_blank" rel="noopener" data-mark="workers">Open Workers &nearr;</a>
+             target="_blank" rel="noopener" data-mark="workers">Open the page for your service &nearr;</a>
           <span class="muted"> After the page loads, come back here.</span>
         </span>
       </li>
@@ -219,7 +231,7 @@
         <span class="m">2</span>
         <span>
           <a href="https://dash.cloudflare.com/?to=/:account/workers/d1"
-             target="_blank" rel="noopener" data-mark="d1">Open D1 &nearr;</a>
+             target="_blank" rel="noopener" data-mark="d1">Open the page for your track list &nearr;</a>
           <span class="muted">After the page loads, you're ready for setup!</span>
         </span>
       </li>
@@ -270,7 +282,7 @@
 
   <label class="f" for="artist-email">
     <span>Your email</span>
-    <em>The email address you'll use to log in. Amply doesn't keep your email address.</em>
+    <em>The email you'll sign in to your editor with. Only this address will be let in. Amply uses it once, to set that up, and doesn't keep it.</em>
     <input id="artist-email" type="email" autocomplete="email" spellcheck="false" placeholder="you@example.com">
   </label>
 
@@ -292,7 +304,7 @@
     <li data-state="wait" data-task="worker"><span class="dot"></span><span>Putting up your page</span></li>
     <li data-state="wait" data-task="subdomain"><span class="dot"></span><span>Giving it an address</span></li>
     <li data-state="wait" data-task="editor"><span class="dot"></span><span>Installing your editor</span></li>
-    <li data-state="wait" data-task="access"><span class="dot"></span><span>Locking the editor to you</span></li>
+    <li data-state="wait" data-task="access"><span class="dot"></span><span>Making your editor private to you</span></li>
     <li data-state="wait" data-task="manifest"><span class="dot"></span><span>Publishing it</span></li>
   </ul>
 </section>
@@ -316,24 +328,25 @@
 
 <!-- done ───────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="done">
-  <h1 class="step">It's yours.<br><span class="orange">Go add your music.</span></h1>
+  <h1 class="step">It's yours.<br><span class="orange">Now add your music.</span></h1>
 
   <div class="actions" style="margin-bottom:26px">
     <a class="btn" id="edit-link" href="/start">Open my streaming service</a>
   </div>
 
   <p class="lead" style="margin-bottom:0">You're now hosting your own streaming service, and
-  your own editor for adding songs to it. Sign in with the email you gave: a code is emailed
-  to you, so there's no password to remember. The editor walks you through adding music,
-  choosing your price and publishing.</p>
+  your own editor for adding songs to it. <strong>Next:</strong> open it, and Cloudflare emails a
+  short code to the address you gave. Type it in, and you're in. There's no password to
+  remember. The editor then walks you through adding music, choosing your price and publishing.</p>
 
   <p class="muted" id="edit-where" hidden></p>
 
   <div class="card orange" id="cert-note" hidden style="margin-top:30px">
-    <h3 style="margin-bottom:10px">Your address is still being secured</h3>
-    <p id="cert-why" style="margin-bottom:14px">Cloudflare is issuing the certificate for your
-    new address. It usually takes a few minutes. Until it's done your browser will warn that
-    the address isn't safe, and it isn't worth sending to anyone yet.</p>
+    <h3 style="margin-bottom:10px">Your address needs a few more minutes</h3>
+    <p id="cert-why" style="margin-bottom:14px">Cloudflare is still finishing the secure
+    connection for your new address. That usually takes a few minutes and clears by itself.
+    Until then your browser may show a warning, or the link above may not open. That's normal,
+    nothing is wrong. Wait for it before sharing your link.</p>
     <div class="actions">
       <button class="btn ghost" id="cert-recheck">Check again</button>
     </div>
@@ -352,7 +365,7 @@
   </div>
 </section>
 
-<div class="devbar">
+<div class="devbar" id="devbar" hidden>
   For testing only, not part of what an artist sees.
   <div style="margin-top:12px"><button id="reset">Reset and start over</button></div>
 </div>
@@ -372,7 +385,7 @@
 <script type="module">
 import { beginAuthorization, readCallback, completeAuthorization, revoke, ALL_SCOPES }
   from "/js/pkce.js";
-import { provision, provisionInstant, pendingPreview, claimLink, clearProgress, toSlug, ProvisionError, STEPS }
+import { provision, provisionInstant, pendingPreview, claimLink, stillTemporary, clearProgress, toSlug, ProvisionError, STEPS }
   from "/js/provision.js";
 
 const CONFIG = {
@@ -410,6 +423,12 @@ function show(step) {
   if (step === "instant") idx = 1;
   if (step === "claim") idx = 2;
   if (["working", "error", "choose"].includes(step)) idx = session.mode === "instant" ? 1 : 2;
+  // On the page-first path each segment is one real step: making the page
+  // (with what comes before it), claiming it, the private editor, done.
+  if (state.path === "instant") {
+    idx = { intro: 0, instant: 0, claim: 1, connect: 2, done: 3 }[step]
+      ?? (session.mode === "instant" ? 0 : 2);
+  }
   stepEls.forEach((li, i) => {
     li.removeAttribute("data-on"); li.removeAttribute("data-done");
     if (i < idx) li.setAttribute("data-done", "");
@@ -417,7 +436,7 @@ function show(step) {
   });
   // The segments carry no text, so the label under them says where you are.
   const NAMES = state.path === "instant"
-    ? ["What happens", "Your page", "Make it yours", "Done"]
+    ? ["Your page", "Claim it", "Private editor", "Done"]
     : ["What happens", "Your storage", "Connect", "Your page"];
   const name = document.getElementById("stepname");
   if (name) name.textContent = `Step ${idx + 1} of 4 \u2014 ${NAMES[idx]}`;
@@ -482,7 +501,7 @@ function refreshName() {
   // allowed to open the editor afterwards.
   connectBtn.disabled = name.length === 0 || !looksLikeEmail(state.email);
   $("#slug-preview").textContent = name
-    ? `Your address will be: ${slug}.<your-subdomain>.workers.dev`
+    ? `Your link will look like ${slug}.yourname.workers.dev`
     : "";
 }
 nameInput.value = state.artistName || "";
@@ -569,7 +588,9 @@ function paintClaim() {
     // The claim link lives only as long as the tab it was made in. Without
     // it, either it has been claimed already or the hour has run out.
     btn.hidden = true;
-    deadline.textContent = "If you've claimed it, lock your editor below. If not, start again: unclaimed accounts are deleted after an hour.";
+    deadline.textContent = "This tab no longer has the claim link. If you've claimed the account, carry on below. " +
+      "If not, start again: the page was in a temporary account, which Cloudflare deletes after an hour. " +
+      "You hadn't added any music yet, so nothing of yours is lost, and starting again takes a minute.";
     return;
   }
   btn.hidden = false;
@@ -582,20 +603,57 @@ function paintClaim() {
   claimTimer = setInterval(tick, 30000);
 }
 
-$("#claimed-btn").addEventListener("click", () => show("connect"));
+// Check the claim before moving on: learning it hadn't happened only after
+// signing in again is a long way round. A second press carries on regardless,
+// in case Cloudflare is slow to end the old token.
+let claimAsked = false;
+$("#claimed-btn").addEventListener("click", async () => {
+  const btn = $("#claimed-btn");
+  const said = $("#claim-said");
+  if (!claimAsked) {
+    btn.disabled = true;
+    const temporary = await stillTemporary({ relay: CONFIG.relay });
+    btn.disabled = false;
+    if (temporary === true) {
+      claimAsked = true;
+      said.hidden = false;
+      said.textContent = "Cloudflare doesn't show it as claimed yet. Finish in the Cloudflare tab " +
+        "(it asks whether to claim the account: say yes), then press the button again. " +
+        "If you're sure you've claimed it, pressing again carries on anyway.";
+      return;
+    }
+  }
+  said.hidden = true;
+  show("connect");
+});
+
+// The claim link is only in this tab. While it's needed, closing or
+// reloading away from it asks first.
+window.addEventListener("beforeunload", (e) => {
+  if (state.step === "claim" && claimLink()) { e.preventDefault(); e.returnValue = ""; }
+});
+// Once Cloudflare has been opened, coming back is the next thing to do, so
+// that button becomes the main one.
+$("#claim-link").addEventListener("click", () => {
+  $("#claim-link").classList.add("ghost");
+  $("#claimed-btn").classList.remove("ghost");
+});
 
 /** The connect step reads differently when it finishes a page that's already live. */
 function paintConnect() {
   const finishing = !!pendingPreview();
-  $("#connect-title").textContent = finishing ? "Lock your editor." : "Connect it.";
-  // A claimed page already has everything on that list: only the lock is new.
+  $("#connect-title").textContent = finishing ? "Make your editor private." : "Connect it.";
+  // A claimed page already has everything on that list, and a name: only the
+  // lock is new, and the email is all it needs.
   $("#connect-makes").hidden = finishing;
-  connectBtn.textContent = finishing ? "Lock my editor" : "Set up my streaming service";
+  document.querySelector('label[for="artist-name"]').hidden = finishing;
+  $("#slug-preview").hidden = finishing;
+  connectBtn.textContent = finishing ? "Make my editor private" : "Set up my streaming service";
   // Back from here is back to claiming, for a page that's already live.
   document.querySelector('[data-panel="connect"] .back .link').dataset.go = finishing ? "claim" : "cloudflare";
   $("#connect-lead").textContent = finishing
-    ? "Sign in with the Cloudflare account you just claimed. We'll lock your editor so only your email can open it, then remove our own access. That's the last step."
-    : "We set your streaming up for you, then remove our own access.";
+    ? "Sign in with the Cloudflare account you just claimed. Cloudflare then shows a list of what Amply is asking to do: approve it. We'll set your editor so only your email can open it, then remove our own access. That's the last step."
+    : "We set your streaming up for you, then remove our own access. Cloudflare will show a list of what Amply is asking to do: approve it.";
 }
 paintConnect();
 
@@ -603,18 +661,19 @@ paintConnect();
 // Every one keeps the artist where they are and names the fix.
 const ERRORS = {
   r2_disabled: {
-    title: "R2 isn't switched on yet",
-    body: "Your account is connected, but storage hasn't been enabled. That's the step that " +
-          "asks for a card, nothing gets charged.",
-    action: { label: "Switch on R2 ↗", href: "https://dash.cloudflare.com/?to=/:account/r2/overview" },
+    title: "Storage isn't switched on yet",
+    body: "Your account is connected, but Cloudflare's storage for your music (called R2) " +
+          "hasn't been switched on. Open the page, choose the free plan, and come back. That's " +
+          "the step that asks for a card. Nothing is charged.",
+    action: { label: "Switch on storage ↗", href: "https://dash.cloudflare.com/?to=/:account/r2/overview" },
     retry: "Done, try again",
   },
   d1_disabled: {
     title: "One more switch to flip",
-    body: "Your account hasn't opened its database yet, which is where your track list " +
+    body: "Your account hasn't switched on the place where your track list " +
           "lives. Cloudflare switches it on the first time you open its page. Open it, let it " +
           "load, then come back here. There's nothing to set up on that page.",
-    action: { label: "Open the database page ↗", href: "https://dash.cloudflare.com/?to=/:account/workers/d1" },
+    action: { label: "Open the track list page ↗", href: "https://dash.cloudflare.com/?to=/:account/workers/d1" },
     retry: "Done, try again",
   },
   declined: {
@@ -631,11 +690,11 @@ const ERRORS = {
   },
   no_subdomain: {
     title: "Your account needs a web address",
-    body: "Every Cloudflare account needs a workers.dev name before anything can go live, " +
-          "and a new account has to choose its own. Open the Workers page and, when it asks, " +
+    body: "Cloudflare needs you to choose a name for your web address before anything can go " +
+          "live, and only you can choose it. Open the page and, when it asks, " +
           "pick a name — your artist name works well, since it becomes part of your link. " +
           "Then come back and try again. Nothing is lost; setup carries on where it stopped.",
-    action: { label: "Open the Workers page ↗", href: "https://dash.cloudflare.com/?to=/:account/workers-and-pages" },
+    action: { label: "Choose a name ↗", href: "https://dash.cloudflare.com/?to=/:account/workers-and-pages" },
     retry: "Done, try again",
   },
   no_account: {
@@ -657,13 +716,13 @@ const ERRORS = {
   },
   preview_failed: {
     title: "Cloudflare couldn't make your account",
-    body: "Nothing was created, and nothing needs undoing. This is usually temporary.",
+    body: "Nothing was created, and nothing needs undoing. This is usually temporary: try again in a moment.",
     retry: "Try again",
   },
   not_claimed: {
     title: "That account isn't yours yet",
     body: "Your page is still in a temporary account. Open the claim link, sign up or sign in, " +
-          "and choose to claim it. Then lock your editor.",
+          "and choose to claim it. Then come back here.",
     retry: "Back to claiming", goto: "claim",
   },
   cloudflare: { title: "Cloudflare reported a problem", body: "", retry: "Try again" },
@@ -863,7 +922,10 @@ async function watchCertificate(url) {
     if (state.step === "claim") paintClaim();
     // A page interrupted while being made goes back to where it started.
     const back = state.path === "instant" && !pendingPreview() ? "instant" : "connect";
-    show(["working", "error", "choose"].includes(state.step) ? back : state.step);
+    // "Try it free" links (/start#try) go straight to naming the page,
+    // unless a setup is already under way in this browser.
+    const trying = location.hash === "#try" && state.step === "intro";
+    show(trying ? "instant" : ["working", "error", "choose"].includes(state.step) ? back : state.step);
     return;
   }
 
@@ -901,6 +963,12 @@ $("#share").addEventListener("click", (ev) => {
     .then(() => { btn.textContent = "Link copied"; setTimeout(() => (btn.textContent = "Share"), 1600); })
     .catch(() => { btn.textContent = "Press ⌘C"; });
 });
+
+// The reset bar is for working on this page, never for artists: shown only on
+// a local server, or with ?dev in the address.
+if (["localhost", "127.0.0.1"].includes(location.hostname) || new URLSearchParams(location.search).has("dev")) {
+  $("#devbar").hidden = false;
+}
 
 $("#reset").addEventListener("click", () => {
   try { localStorage.removeItem(KEY); } catch {}

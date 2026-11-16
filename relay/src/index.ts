@@ -31,6 +31,14 @@
 
 export interface Env {
   ALLOWED_ORIGINS: string;
+  /**
+   * Amply's own Coinbase Developer Platform key, for one thing only: asking
+   * Coinbase for a five-minute onramp session for a listener's wallet. Set as
+   * Worker secrets (`wrangler secret put`), never in code or config. Without
+   * them the Coinbase route says so and the app doesn't offer Coinbase.
+   */
+  CDP_KEY_ID?: string;
+  CDP_KEY_SECRET?: string;
 }
 
 const API = "https://api.cloudflare.com/client/v4";
@@ -190,19 +198,27 @@ const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt
 function topupPage(p: { address: string; currency: "usdc" | "sol"; amount: string | null }): string {
   const what = p.currency === "usdc"
     ? `${p.amount ? `$${p.amount} of ` : ""}USDC`
-    : "a little SOL, for network fees";
+    : "a little SOL, the currency that pays payment fees ($1 is plenty)";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>Add money - Amply</title></head>
 <body style="font:18px/1.5 system-ui,sans-serif;max-width:34rem;margin:0 auto;padding:32px 16px;color:#1b1813;background:#fbf8f3">
+<p style="font-weight:800;letter-spacing:-0.02em;margin:0 0 18px">amply</p>
 <h1 style="font-size:28px;margin:0 0 12px">Add money to your Amply wallet</h1>
-<p style="margin:0 0 20px">You're buying ${escapeHtml(what)} by card, through Stripe. On the next page, choose <b>Solana</b> as the network, and paste this as the wallet address:</p>
+<p style="margin:0 0 16px">You're buying ${escapeHtml(what)} by card, through Stripe.${p.currency === "usdc" ? " USDC is a digital dollar: $1 of it is worth $1." : ""} Three steps:</p>
+<ol style="margin:0 0 20px;padding-left:22px">
+<li>Press the button below. We copy your wallet's address, and Stripe's page opens.</li>
+<li>When Stripe asks where to send it, paste the address. If it asks for a network, choose <b>Solana</b>.</li>
+<li>Pay by card. The first time, Stripe may ask for ID. Then go back to the Amply app.</li>
+</ol>
+<p style="color:#6b6257;font-size:15px;margin:0 0 6px">Your wallet's address:</p>
 <p id="address" style="font:15px ui-monospace,monospace;overflow-wrap:anywhere;background:#fff;border:1px solid #e4dccf;border-radius:12px;padding:14px 16px;margin:0 0 20px">${escapeHtml(p.address)}</p>
 <button id="go" disabled style="font:inherit;font-weight:700;padding:14px 26px;border:0;border-radius:999px;background:#f26b1d;color:#1b1813;cursor:pointer">Copy address and continue</button>
 <p id="said" style="color:#6b6257;font-size:15px;margin:16px 0 0">Loading Stripe…</p>
 <p style="color:#6b6257;font-size:15px;margin:28px 0 0">Stripe handles the payment and any identity check. Amply never sees your card and takes nothing.</p>
+<p style="font-size:15px;margin:20px 0 0"><a href="https://amply.stream/app/" style="color:#1b1813">&larr; Back to Amply</a></p>
 <script id="params" type="application/json">${JSON.stringify(p).replace(/</g, "\\u003c")}</script>
 <script src="${STRIPE_ONRAMP_SCRIPT}"></script>
 <script src="/topup.js"></script>
@@ -236,6 +252,123 @@ const TOPUP_SCRIPT = String.raw`(function () {
     } else { leave(); }
   });
 })();`;
+
+// ── adding money through Coinbase ────────────────────────────────────────
+//
+// Coinbase's onramp opens with everything filled in (the listener's wallet,
+// USDC on Solana, the amount) only through a session that Coinbase issues to
+// a server holding a developer key. That is this route, and the only key the
+// relay holds. It is Amply's own key, never anyone's data or money, and the
+// relay still keeps nothing: each call asks Coinbase for a single-use,
+// five-minute session and hands back the link.
+//
+// Coinbase asks that sessions be issued only to real users. Here that means
+// the request comes from Amply's own site (checked like every other route)
+// and is signed by the wallet the money will go to, within five minutes.
+
+const COINBASE_HOST = "api.developer.coinbase.com";
+const COINBASE_TOKEN_PATH = "/onramp/v1/token";
+const COINBASE_PAY = "https://pay.coinbase.com/buy/select-asset";
+const COINBASE_RETURN = "https://amply.stream/app/?added=coinbase";
+export const COINBASE_AMOUNTS = [20, 30, 60];
+const SIGNED_WITHIN_MS = 5 * 60_000;
+
+/** What the wallet signs to ask for a Coinbase session. */
+export const onrampMessage = (address: string, signedAt: number) =>
+  `Amply: add money to ${address} through Coinbase (${signedAt})`;
+
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+/** Base58, as Solana writes addresses and signatures. Null if it isn't. */
+export function unbase58(s: string): Uint8Array | null {
+  if (!s || s.length > 120) return null;
+  const bytes: number[] = [];
+  for (const ch of s) {
+    let carry = B58.indexOf(ch);
+    if (carry < 0) return null;
+    for (let i = 0; i < bytes.length; i++) {
+      carry += bytes[i] * 58;
+      bytes[i] = carry & 0xff;
+      carry >>= 8;
+    }
+    while (carry > 0) { bytes.push(carry & 0xff); carry >>= 8; }
+  }
+  for (const ch of s) { if (ch === "1") bytes.push(0); else break; }
+  return new Uint8Array(bytes.reverse());
+}
+
+/**
+ * Why a request for a Coinbase session is refused, or null. The signature
+ * must be the wallet's own, over exactly this message, signed recently.
+ */
+export async function onrampProblem(body: unknown, now = Date.now()): Promise<string | null> {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return "body must be an object";
+  const b = body as Record<string, unknown>;
+  const extra = Object.keys(b).filter((k) => !["address", "amount", "signedAt", "signature"].includes(k));
+  if (extra.length) return `unexpected field: ${extra[0]}`;
+  const address = typeof b.address === "string" ? b.address : "";
+  const key = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address) ? unbase58(address) : null;
+  if (!key || key.length !== 32) return "not a Solana address";
+  if (!COINBASE_AMOUNTS.includes(b.amount as number)) return "not an amount offered";
+  const signedAt = b.signedAt;
+  if (typeof signedAt !== "number" || Math.abs(now - signedAt) > SIGNED_WITHIN_MS) return "the signature is too old";
+  const sig = typeof b.signature === "string" ? unbase58(b.signature) : null;
+  if (!sig || sig.length !== 64) return "not a signature";
+  let good = false;
+  try {
+    const pub = await crypto.subtle.importKey("raw", key, { name: "Ed25519" }, false, ["verify"]);
+    good = await crypto.subtle.verify({ name: "Ed25519" }, pub, sig, new TextEncoder().encode(onrampMessage(address, signedAt)));
+  } catch { good = false; }
+  return good ? null : "the signature isn't this wallet's";
+}
+
+const b64url = (bytes: Uint8Array) =>
+  btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const b64urlText = (text: string) => b64url(new TextEncoder().encode(text));
+
+/** The PKCS#8 wrapper for a raw Ed25519 seed, which WebCrypto needs to import it. */
+const ED25519_PKCS8 = [0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20];
+
+/**
+ * A two-minute token for one Coinbase API call, signed with Amply's key, as
+ * Coinbase documents: EdDSA, the key's name as `kid` and `sub`, and the call
+ * it is for in `uri`.
+ */
+export async function coinbaseJwt(keyId: string, keySecret: string, method: string, path: string, now = Date.now()): Promise<string> {
+  const raw = Uint8Array.from(atob(keySecret.trim()), (c) => c.charCodeAt(0));
+  if (raw.length !== 64) throw new Error("the Coinbase key secret should be a base64 Ed25519 key");
+  const pkcs8 = new Uint8Array(ED25519_PKCS8.length + 32);
+  pkcs8.set(ED25519_PKCS8);
+  pkcs8.set(raw.slice(0, 32), ED25519_PKCS8.length);
+  const key = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "Ed25519" }, false, ["sign"]);
+  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(8)), (x) => x.toString(16).padStart(2, "0")).join("");
+  const t = Math.floor(now / 1000);
+  const head = b64urlText(JSON.stringify({ alg: "EdDSA", typ: "JWT", kid: keyId, nonce }));
+  const body = b64urlText(JSON.stringify({
+    sub: keyId, iss: "cdp", aud: ["cdp_service"], nbf: t, exp: t + 120,
+    uri: `${method} ${COINBASE_HOST}${path}`,
+  }));
+  const sig = new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key, new TextEncoder().encode(`${head}.${body}`)));
+  return `${head}.${body}.${b64url(sig)}`;
+}
+
+/** Coinbase's page for this session: USDC on Solana, the amount, and the way back. */
+export async function onrampUrl(token: string, address: string, amount: number): Promise<string> {
+  // Coinbase's reference for the person, for looking up the transaction
+  // later: a hash of the wallet, not the wallet itself, and nothing else.
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address)));
+  const ref = Array.from(digest.slice(0, 20), (x) => x.toString(16).padStart(2, "0")).join("");
+  const q = new URLSearchParams({
+    sessionToken: token,
+    defaultNetwork: "solana",
+    defaultAsset: "USDC",
+    presetFiatAmount: String(amount),
+    fiatCurrency: "USD",
+    partnerUserRef: ref,
+    redirectUrl: COINBASE_RETURN,
+  });
+  return `${COINBASE_PAY}?${q}`;
+}
 
 function allowedOrigin(req: Request, env: Env): string | null {
   const origin = req.headers.get("Origin");
@@ -297,6 +430,43 @@ export default {
 
     // Browsers always send Origin on cross-origin requests. No match, no service.
     if (!origin) return refuse(403, "origin not allowed", null);
+
+    // ── Coinbase ──────────────────────────────────────────────────────────
+    const coinbaseReady = !!(env.CDP_KEY_ID && env.CDP_KEY_SECRET);
+    if (url.pathname === "/coinbase/status" && request.method === "GET") {
+      return new Response(JSON.stringify({ enabled: coinbaseReady, amounts: COINBASE_AMOUNTS }), {
+        headers: cors(origin, { "Content-Type": "application/json", "Cache-Control": "no-store" }),
+      });
+    }
+    if (url.pathname === "/coinbase/onramp" && request.method === "POST") {
+      if (!coinbaseReady) return refuse(503, "Coinbase isn't set up here yet", origin);
+      let body: unknown;
+      try { body = JSON.parse(await request.text()); } catch { return refuse(400, "body must be JSON", origin); }
+      const problem = await onrampProblem(body);
+      if (problem) return refuse(403, problem, origin);
+      const { address, amount } = body as { address: string; amount: number };
+
+      const jwt = await coinbaseJwt(env.CDP_KEY_ID!, env.CDP_KEY_SECRET!, "POST", COINBASE_TOKEN_PATH);
+      // Coinbase ties the session to the listener's connection. Cloudflare
+      // sets this header itself, so it can't be supplied by the caller.
+      const clientIp = request.headers.get("CF-Connecting-IP");
+      const upstream = await fetch(`https://${COINBASE_HOST}${COINBASE_TOKEN_PATH}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          addresses: [{ address, blockchains: ["solana"] }],
+          assets: ["USDC"],
+          ...(clientIp ? { clientIp } : {}),
+        }),
+      });
+      const json = (await upstream.json().catch(() => null)) as { token?: string; message?: string } | null;
+      if (!upstream.ok || !json?.token) {
+        return refuse(502, `Coinbase didn't start a session${json?.message ? `: ${json.message}` : ""}`, origin);
+      }
+      return new Response(JSON.stringify({ url: await onrampUrl(json.token, address, amount) }), {
+        headers: cors(origin, { "Content-Type": "application/json", "Cache-Control": "no-store" }),
+      });
+    }
 
     // ── token exchange ────────────────────────────────────────────────────
     if (url.pathname === "/token" && request.method === "POST") {

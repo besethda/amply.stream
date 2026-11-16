@@ -605,14 +605,38 @@ function FirstSteps({ hasMusic, paid, live, url, onSettings, onAdd }) {
           <>Make a release (an album, an EP or a single), then add your songs to it.{" "}
             <button class="quiet-link" onClick={onAdd}>+ Add a release</button></>)}
         {step(2, paid, "Choose how you're paid",
-          <>Set your price and where the money goes, in{" "}
-            <button class="quiet-link" onClick={onSettings}>Settings</button>. Or skip this, and your music is free.</>)}
+          <>Set your price, and paste the address of a free wallet app (Phantom) for the money to
+            arrive in: free, and about 3 minutes. Settings shows you how. Or skip this, and your music is free.
+            <button class="btn ghost sm step-btn" onClick={onSettings}>Open Settings</button></>)}
         {step(3, live, "Publish",
-          <>Press <b>Publish changes</b> at the top. Nothing is public until you do.</>)}
+          <>Press <b>Publish</b> at the top. Nothing is public until you do.</>)}
         {step(4, false, "Share your link",
           <>Send it to people who already listen to you.{" "}
             <CopyButton text={url} label="Copy your link" /></>)}
       </ol>
+    </section>
+  );
+}
+
+/**
+ * The moment the checklist ends: music is public, and the one thing left is
+ * telling people. Shown until the artist closes it, once per browser.
+ */
+const SHARED_KEY = "amply.editor.shared";
+function YoureLive({ url }) {
+  const [gone, setGone] = useState(() => { try { return localStorage.getItem(SHARED_KEY) === "1"; } catch { return false; } });
+  if (gone) return null;
+  const close = () => { try { localStorage.setItem(SHARED_KEY, "1"); } catch { /* shown again next time */ } setGone(true); };
+  return (
+    <section class="card first-steps">
+      <h2>You're live. Share your link.</h2>
+      <p>Send it to people who already listen to you: in your bio, a post, a message. They open
+        it, follow you, and play.</p>
+      <div class="copy-row">
+        <CopyButton text={url} label="Copy your link" className="btn sm" />
+        <code>{url.replace(/^https:\/\//, "")}</code>
+      </div>
+      <p><button class="quiet-link" onClick={close}>Done, hide this</button></p>
     </section>
   );
 }
@@ -644,6 +668,7 @@ function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf,
         {!live && (
           <FirstSteps hasMusic={trackCount > 0} paid={paid} live={live} url={node.url} onSettings={onSettings} onAdd={addRelease} />
         )}
+        {live && trackCount > 0 && <YoureLive url={node.url} />}
         {(manifest.releases || []).map((r, i) => (
           <Release
             key={r.id} release={r} node={node} manifest={manifest} charging={charging}
@@ -1179,6 +1204,19 @@ function Splits({ payees, rate, onChange }) {
 
   return (
     <section class="card">
+      {!payees.some((p) => p.address) && (
+        <div class="card-note">
+          <p><b>To be paid by listeners, you need a free wallet app.</b> Listeners' payments go
+            straight into it, never through Amply.</p>
+          <ol>
+            <li>Install <a href="https://phantom.com/download" target="_blank" rel="noopener">Phantom ↗</a> on
+              your phone or computer, and sign up with Google or Apple, then choose a PIN. There are no recovery words to write down, but don't forget the PIN.</li>
+            <li>In Phantom, tap <b>Receive</b>, choose <b>Solana</b>, and copy the address.</li>
+            <li>Paste it below, under <b>Wallet address</b>.</li>
+          </ol>
+          <p class="muted">Rather be paid by card only? Set your price to free, and offer Subscriptions instead.</p>
+        </div>
+      )}
       <h2>Who gets paid <span class="note">split every payment</span>
         <Help at="wallet" about="who gets paid">Each payment is divided the moment it's made and sent straight to
           these Solana addresses; it never passes through Amply. No address yet? <strong>Phantom</strong> is free
@@ -1210,9 +1248,9 @@ function Splits({ payees, rate, onChange }) {
           </div>
           <div class="payee-split">
             <div class="where">
-              <Field label="Where their share goes">
+              <Field label="Wallet address">
                 <Text
-                  value={p.address} class="mono" placeholder="their payment address"
+                  value={p.address} class="mono" placeholder="Paste a Solana address"
                   onInput={(v) => set(i, { ...p, address: v.trim() })}
                 />
               </Field>
@@ -1441,14 +1479,19 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
           </div>
         </section>
 
-        <OwnDomain manifest={manifest} update={update} />
-
+        {/* What a new artist needs first: their price, and where it goes.
+            The rest is optional and follows. */}
         <Price wallet={wallet} onChange={setWallet} hasAddress={payees.some((p) => p.address)}
           subscribing={(manifest.payment || []).some((p) => p.type === "stripe-subscription")} />
+        <Splits payees={payees} rate={wallet.ratePerMinute ?? 0} onChange={setPayees} />
+        {/* Folded away until the first publish: none of it is needed to go live. */}
+        <details class="advanced" open={everPublished}>
+          <summary>More options <span class="note">card subscriptions, how often listeners pay, your own domain, your terms</span></summary>
+          <div class="stack">
         <Subscriptions manifest={manifest} update={update} api={api} />
         <Payout wallet={wallet} onChange={setWallet}
           subscribing={(manifest.payment || []).some((p) => p.type === "stripe-subscription")} />
-        <Splits payees={payees} rate={wallet.ratePerMinute ?? 0} onChange={setPayees} />
+        <OwnDomain manifest={manifest} update={update} />
 
         <section class="card">
           <h2>Your terms <Help at="free" about="your terms">What you allow others to do with your recordings: your
@@ -1478,6 +1521,8 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
             </Field>
           )}
         </section>
+          </div>
+        </details>
 
         <section class="card publish-card">
           <div>
@@ -1817,6 +1862,22 @@ function EarningsTab({ node, published, api, payees, rate, network, settleAt }) 
 
       <div class="stack">
       <Listeners api={api} payees={payees} rate={rate} network={network} settleAt={settleAt} />
+
+      <section class="card">
+        <h2>Cash out to your bank</h2>
+        <p class="muted">Listeners pay straight into your wallet. To move dollars to your bank, send them from
+          your wallet to an app that turns them back into dollars. Always choose the <b>Solana</b> network:
+          sending on another network can't be undone.</p>
+        <ol class="steps">
+          <li><span class="n">A</span><span class="t">Cash App <span class="note">US · free for now</span>
+            <span class="detail">In Cash App: Money → <b>Deposit USDC</b> → choose <b>Solana</b> → copy the address.
+              In your wallet (Phantom): Send → USDC → paste it → amount. It lands as dollars in Cash App, and
+              you move it to your bank as usual.</span></span></li>
+          <li><span class="n">B</span><span class="t">Coinbase <span class="note">most countries</span>
+            <span class="detail">In Coinbase: Receive → <b>USDC</b> → network <b>Solana</b> → copy the address. Send
+              from your wallet the same way, then sell the USDC for dollars (1 to 1) and withdraw to your bank.</span></span></li>
+        </ol>
+      </section>
 
       <section class="card nothing">
         <h2>Share your link</h2>
