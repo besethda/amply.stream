@@ -745,3 +745,11 @@ details.testing { padding: 16px 20px; }
 /* The album price box has room for its "Not for sale" hint. */
 .track-price input[placeholder="Not for sale"], input[placeholder="Not for sale"] { min-width: 8.5em; }
 select { max-width: 100%; text-overflow: ellipsis; }
+
+/* Sending to a bank app from a Face ID wallet. */
+.send-form { display: grid; gap: 10px; margin: 10px 0 6px; max-width: 560px; }
+.send-amount { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.send-amount .money input { width: 8em; }
+.send-done { margin: 10px 0; }
+.cash-steps .send-how { border-top: 0; margin-top: 8px; padding-top: 0; }
+.send-how .quiet-link { justify-self: start; text-align: left; }

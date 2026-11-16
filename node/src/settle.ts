@@ -163,8 +163,8 @@ const refuse = (status: number, why: string): Settled => ({ ok: false, status, w
  */
 export async function settle(
   db: D1Database, rpc: Rpc, txBase64: unknown, expect: Omit<FeePayExpect, "feePayer">,
-  { allowed = async (_listener: string) => true, now = Date.now(), wait = (ms: number) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS }:
-    { allowed?: (listener: string) => Promise<boolean>; now?: number; wait?: (ms: number) => Promise<unknown>; confirmWithinMs?: number } = {},
+  { allowed = async (_listener: string) => true, now = Date.now(), wait = (ms: number) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS, from }:
+    { allowed?: (listener: string) => Promise<boolean>; now?: number; wait?: (ms: number) => Promise<unknown>; confirmWithinMs?: number; from?: string[] } = {},
 ): Promise<Settled> {
   const bytes = base64.decode(String(txBase64 ?? ""));
   if (!bytes) return refuse(400, "that isn't a transaction");
@@ -176,6 +176,8 @@ export async function settle(
   const key = await feeKey(db);
   const verdict = await checkFeePayment(tx, { ...expect, feePayer: key.address });
   if (!verdict.ok) return refuse(403, verdict.problem);
+  // The artist cashing out: only from one of their own payout wallets.
+  if (from && !from.includes(verdict.listener)) return refuse(403, "that isn't one of your payout wallets");
 
   if (!(await allowed(verdict.listener))) return refuse(429, "too many payments from this wallet; try again in a minute");
   if (!(await countFee(db, now))) return refuse(503, "this artist's node has paid all the fees it will today; try again tomorrow");

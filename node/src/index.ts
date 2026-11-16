@@ -27,6 +27,9 @@ import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, 
 import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, itemFor, CHAINS, type Sale } from "./sales";
 import { settle, feeAddress, feeBalance, rpcAt, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS } from "./settle";
 import { purchaseMemo } from "./payment-check";
+import { cashOutProblem, draftCashOut, CASHOUT_MIN_MICROS, CASHOUT_MAX_MICROS } from "./cashout";
+import { base64 } from "./solana-tx";
+import { TOKEN_PROGRAM, SYSTEM_PROGRAM } from "./feepay";
 import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf } from "../../spec/pricing.mjs";
 import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
 import { ICONS, MANIFEST_PATH, studioManifest } from "./studio";
@@ -323,6 +326,50 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       address, network, lamports, offering: lamports !== null && lamports >= OFFER_ABOVE_LAMPORTS,
       offerAbove: OFFER_ABOVE_LAMPORTS, paidToday: today?.count ?? 0, dailyCap: DAILY_PAYMENTS,
     }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+
+  // Cashing out from a Face ID payout wallet (cashout.ts): the node drafts
+  // the transfer with its fee wallet paying the fee; the editor checks and
+  // signs it; the node checks it again and sends it. Behind the sign-in above,
+  // and only ever from a payout wallet named in the published manifest.
+  if (request.method === "POST" && (path === "/send/prepare" || path === "/send")) {
+    const body = await jsonBody(request);
+    if (!body) return fail(400, "bad request");
+    const pay = walletOf(await manifestNowOf(env));
+    const chain = pay && CHAINS[pay.network];
+    if (!pay || !chain) return fail(409, "publish a payout wallet first");
+    const payees = pay.recipients.map((r) => r.address);
+    const from = String(body.from || ""), to = String(body.to || "").trim(), micros = Number(body.micros);
+    const feePayer = await feeAddress(env.DB);
+    const problem = cashOutProblem(from, to, micros, { payees, feePayer });
+    if (problem) return fail(400, problem);
+    const rpc = rpcAt(chain.rpc);
+    const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+
+    if (path === "/send/prepare") {
+      if ((await feeBalance(rpc, feePayer, { fresh: true }).catch(() => 0)) < OFFER_ABOVE_LAMPORTS) {
+        return fail(409, "your fees account needs a few dollars of SOL first (see Cover your listeners' fees)");
+      }
+      try {
+        // A deposit address is a plain wallet. A token account pasted by
+        // mistake would have the money sent somewhere nobody can use.
+        const info = await rpc("getAccountInfo", [to, { encoding: "base64", commitment: "confirmed" }]);
+        const owner = info?.value?.owner;
+        if (owner === TOKEN_PROGRAM) return fail(400, "that's the address of a token account, not a wallet. Copy the deposit address again from Cash App or Coinbase");
+        if (owner && owner !== SYSTEM_PROGRAM) return fail(400, "that address isn't a wallet. Copy the deposit address again from Cash App or Coinbase");
+        const { value } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+        const tx = await draftCashOut({ feePayer, from, to, micros, mint: chain.mint, blockhash: value.blockhash });
+        return json({ tx: base64.encode(tx), feePayer, mint: chain.mint });
+      } catch (e) {
+        return fail(502, "couldn't reach the network; try again in a moment");
+      }
+    }
+
+    const result = await settle(env.DB, rpc, body.tx, {
+      mint: chain.mint, payees: [{ address: to, split: 100 }], minMicros: micros, maxMicros: micros,
+    }, { from: payees });
+    if (!result.ok) return fail(result.status, result.why);
+    return json({ signature: result.signature, confirmed: result.confirmed });
   }
 
   // Subscriptions through the artist's own Stripe account. The key comes in

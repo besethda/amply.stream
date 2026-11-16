@@ -1403,6 +1403,120 @@ var base64 = {
     }
   }
 };
+var P = (1n << 255n) - 19n;
+var D = (-121665n * inverse(121666n) % P + P) % P;
+var SQRT_M1 = pow(2n, (P - 1n) / 4n);
+function pow(b, e) {
+  let r = 1n;
+  b %= P;
+  while (e > 0n) {
+    if (e & 1n) r = r * b % P;
+    b = b * b % P;
+    e >>= 1n;
+  }
+  return r;
+}
+function inverse(a) {
+  return pow((a % P + P) % P, P - 2n);
+}
+function onCurve(bytes) {
+  if (bytes.length !== 32) return false;
+  let y = 0n;
+  for (let i = 31; i >= 0; i--) y = y << 8n | BigInt(i === 31 ? bytes[i] & 127 : bytes[i]);
+  const sign = bytes[31] >> 7;
+  if (y >= P) return false;
+  const yy = y * y % P;
+  const u = (yy - 1n + P) % P;
+  const v = (D * yy + 1n) % P;
+  const v3 = v * v % P * v % P;
+  const v7 = v3 * v3 % P * v % P;
+  let x = u * v3 % P * pow(u * v7 % P, (P - 5n) / 8n) % P;
+  const vxx = v * (x * x % P) % P;
+  if (vxx !== u) {
+    if (vxx === (P - u) % P) x = x * SQRT_M1 % P;
+    else return false;
+  }
+  if (x === 0n && sign === 1) return false;
+  return true;
+}
+var PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
+async function programAddress(seeds, program) {
+  const programKey = keyOf(program);
+  if (!programKey) throw new TxError("not a program address");
+  for (let bump = 255; bump >= 0; bump--) {
+    const parts = [...seeds, Uint8Array.of(bump), programKey, PDA_MARKER];
+    const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of parts) {
+      all.set(p, at);
+      at += p.length;
+    }
+    const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", all));
+    if (!onCurve(hash)) return base58(hash);
+  }
+  throw new TxError("no program address");
+}
+async function tokenAccountOf(owner, mint, tokenProgram, ataProgram) {
+  const o = keyOf(owner), m = keyOf(mint), t = keyOf(tokenProgram);
+  if (!o || !m || !t) throw new TxError("not an address");
+  return programAddress([o, t, m], ataProgram);
+}
+function compileTransaction(feePayer, blockhash, plan) {
+  const metas = /* @__PURE__ */ new Map();
+  const add = (m) => {
+    const had = metas.get(m.key);
+    metas.set(m.key, had ? { key: m.key, signer: had.signer || m.signer, writable: had.writable || m.writable } : { ...m });
+  };
+  add({ key: feePayer, signer: true, writable: true });
+  for (const ix of plan) {
+    for (const a of ix.accounts) add(a);
+    add({ key: ix.program, signer: false, writable: false });
+  }
+  const all = [...metas.values()];
+  const rank = (m) => m.key === feePayer ? -1 : m.signer ? m.writable ? 0 : 1 : m.writable ? 2 : 3;
+  const ordered = all.map((m, i) => ({ m, i })).sort((a, b) => rank(a.m) - rank(b.m) || a.i - b.i).map((x) => x.m);
+  const index = new Map(ordered.map((m, i) => [m.key, i]));
+  const required = ordered.filter((m) => m.signer).length;
+  const readonlySigned = ordered.filter((m) => m.signer && !m.writable).length;
+  const readonlyUnsigned = ordered.filter((m) => !m.signer && !m.writable).length;
+  const bytes = [];
+  const push = (b) => {
+    for (let i = 0; i < b.length; i++) bytes.push(b[i]);
+  };
+  const key = (k) => {
+    const raw = keyOf(k);
+    if (!raw) throw new TxError(`not an address: ${k}`);
+    return raw;
+  };
+  push([required, readonlySigned, readonlyUnsigned]);
+  push(shortBytes(ordered.length));
+  for (const m of ordered) push(key(m.key));
+  push(key(blockhash));
+  push(shortBytes(plan.length));
+  for (const ix of plan) {
+    bytes.push(index.get(ix.program));
+    push(shortBytes(ix.accounts.length));
+    for (const a of ix.accounts) bytes.push(index.get(a.key));
+    push(shortBytes(ix.data.length));
+    push(ix.data);
+  }
+  const message = Uint8Array.from(bytes);
+  const head = shortBytes(required);
+  const out = new Uint8Array(head.length + required * 64 + message.length);
+  out.set(head, 0);
+  out.set(message, head.length + required * 64);
+  return out;
+}
+function u64Bytes(n) {
+  if (!Number.isSafeInteger(n) || n < 0) throw new TxError("not an amount");
+  const out = new Uint8Array(8);
+  let v = BigInt(n);
+  for (let i = 0; i < 8; i++) {
+    out[i] = Number(v & 0xffn);
+    v >>= 8n;
+  }
+  return out;
+}
 
 // src/feepay.ts
 var TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -1580,7 +1694,7 @@ async function countFee(db, now = Date.now()) {
   }
 }
 var refuse = (status, why) => ({ ok: false, status, why });
-async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) => true, now = Date.now(), wait = (ms) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS } = {}) {
+async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) => true, now = Date.now(), wait = (ms) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS, from } = {}) {
   const bytes = base64.decode(String(txBase64 ?? ""));
   if (!bytes) return refuse(400, "that isn't a transaction");
   let tx;
@@ -1592,6 +1706,7 @@ async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) =
   const key = await feeKey(db);
   const verdict = await checkFeePayment(tx, { ...expect, feePayer: key.address });
   if (!verdict.ok) return refuse(403, verdict.problem);
+  if (from && !from.includes(verdict.listener)) return refuse(403, "that isn't one of your payout wallets");
   if (!await allowed(verdict.listener)) return refuse(429, "too many payments from this wallet; try again in a minute");
   if (!await countFee(db, now)) return refuse(503, "this artist's node has paid all the fees it will today; try again tomorrow");
   tx.signatures[0] = await key.sign(tx.message);
@@ -1630,6 +1745,51 @@ function failureOf(value) {
     return "this artist's node can't pay the network fee right now; nothing was sent";
   }
   return "the network wouldn't accept that payment; nothing was sent";
+}
+
+// src/cashout.ts
+var CASHOUT_MIN_MICROS = 1e4;
+var CASHOUT_MAX_MICROS = 1e10;
+function cashOutProblem(from, to, micros, { payees, feePayer }) {
+  if (!payees.includes(from)) return "that isn't one of your payout wallets";
+  if (!keyOf(to)) return "that isn't a Solana address. Copy it again from Cash App or Coinbase";
+  if (to === from) return "that's your payout wallet's own address";
+  if (to === feePayer) return "that's your fees account. Paste the deposit address from Cash App or Coinbase";
+  if (!Number.isSafeInteger(micros) || micros < CASHOUT_MIN_MICROS) return "send at least a cent";
+  if (micros > CASHOUT_MAX_MICROS) return "that's more than one transfer can be";
+  return null;
+}
+async function draftCashOut({ feePayer, from, to, micros, mint, blockhash }) {
+  const source = await tokenAccountOf(from, mint, TOKEN_PROGRAM, ATA_PROGRAM);
+  const dest = await tokenAccountOf(to, mint, TOKEN_PROGRAM, ATA_PROGRAM);
+  const data = new Uint8Array(10);
+  data[0] = 12;
+  data.set(u64Bytes(micros), 1);
+  data[9] = 6;
+  return compileTransaction(feePayer, blockhash, [
+    {
+      program: ATA_PROGRAM,
+      data: Uint8Array.of(1),
+      accounts: [
+        { key: feePayer, signer: true, writable: true },
+        { key: dest, signer: false, writable: true },
+        { key: to, signer: false, writable: false },
+        { key: mint, signer: false, writable: false },
+        { key: SYSTEM_PROGRAM, signer: false, writable: false },
+        { key: TOKEN_PROGRAM, signer: false, writable: false }
+      ]
+    },
+    {
+      program: TOKEN_PROGRAM,
+      data,
+      accounts: [
+        { key: source, signer: false, writable: true },
+        { key: mint, signer: false, writable: false },
+        { key: dest, signer: false, writable: true },
+        { key: from, signer: true, writable: false }
+      ]
+    }
+  ]);
 }
 
 // src/limits.ts
@@ -2063,6 +2223,44 @@ async function handleManage(request, env, path) {
       paidToday: today?.count ?? 0,
       dailyCap: DAILY_PAYMENTS
     }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+  if (request.method === "POST" && (path === "/send/prepare" || path === "/send")) {
+    const body = await jsonBody(request);
+    if (!body) return fail(400, "bad request");
+    const pay = walletOf(await manifestNowOf(env));
+    const chain = pay && CHAINS[pay.network];
+    if (!pay || !chain) return fail(409, "publish a payout wallet first");
+    const payees = pay.recipients.map((r) => r.address);
+    const from = String(body.from || ""), to = String(body.to || "").trim(), micros = Number(body.micros);
+    const feePayer = await feeAddress(env.DB);
+    const problem = cashOutProblem(from, to, micros, { payees, feePayer });
+    if (problem) return fail(400, problem);
+    const rpc = rpcAt(chain.rpc);
+    const json = (v) => new Response(JSON.stringify(v), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+    if (path === "/send/prepare") {
+      if (await feeBalance(rpc, feePayer, { fresh: true }).catch(() => 0) < OFFER_ABOVE_LAMPORTS) {
+        return fail(409, "your fees account needs a few dollars of SOL first (see Cover your listeners' fees)");
+      }
+      try {
+        const info = await rpc("getAccountInfo", [to, { encoding: "base64", commitment: "confirmed" }]);
+        const owner = info?.value?.owner;
+        if (owner === TOKEN_PROGRAM) return fail(400, "that's the address of a token account, not a wallet. Copy the deposit address again from Cash App or Coinbase");
+        if (owner && owner !== SYSTEM_PROGRAM) return fail(400, "that address isn't a wallet. Copy the deposit address again from Cash App or Coinbase");
+        const { value } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]);
+        const tx = await draftCashOut({ feePayer, from, to, micros, mint: chain.mint, blockhash: value.blockhash });
+        return json({ tx: base64.encode(tx), feePayer, mint: chain.mint });
+      } catch (e) {
+        return fail(502, "couldn't reach the network; try again in a moment");
+      }
+    }
+    const result = await settle(env.DB, rpc, body.tx, {
+      mint: chain.mint,
+      payees: [{ address: to, split: 100 }],
+      minMicros: micros,
+      maxMicros: micros
+    }, { from: payees });
+    if (!result.ok) return fail(result.status, result.why);
+    return json({ signature: result.signature, confirmed: result.confirmed });
   }
   if (request.method === "GET" && path === "/stripe") {
     return new Response(JSON.stringify(await publicView(env.DB)), {

@@ -78,6 +78,23 @@ export function nodeApi() {
       return (await req("GET", "/fees")).json();
     },
 
+    /** Draft a transfer out of a payout wallet, for the editor to check and
+     *  sign. The node pays its network fee. */
+    async prepareSend(from, to, micros) {
+      return (await req("POST", "/send/prepare", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to, micros }),
+      })).json();
+    },
+
+    /** Hand back the signed transfer for the node to send. */
+    async send(tx, from, to, micros) {
+      return (await req("POST", "/send", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tx, from, to, micros }),
+      })).json();
+    },
+
     /** What subscriptions this service sells, if any. Never the Stripe key. */
     async stripeStatus() {
       return (await req("GET", "/stripe")).json();

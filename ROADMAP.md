@@ -39,6 +39,10 @@ Nothing here is promised. It's the direction, roughly in order.
   only pays this artist's split (node/src/feepay.ts, settle.ts). The artist
   adds a few dollars of SOL to the fee wallet once, from the Earnings tab.
   Still to do: fund the fee wallet through Coinbase's onramp in one tap.
+- **Cashing out with Face ID.** *Built:* the editor sends from a passkey payout
+  wallet to a Cash App or Coinbase deposit address, with the node paying the
+  network fee (node/src/cashout.ts). The editor checks the drafted transfer
+  before Face ID signs it, and the node checks it again before sending.
 - **A wallet that can't be lost.** Make the wallet from a passkey (WebAuthn
   PRF): the same passkey on any synced device recreates the same wallet, with
   no recovery words and nothing stored by anyone. Falls back to a backup code

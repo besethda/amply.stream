@@ -31,6 +31,6 @@
     "build:app": "npm --prefix app run build",
     "test:app": "npm --prefix app run test",
     "build:version": "node scripts/node-version.mjs && cp spec/manifest-rules.mjs site/js/manifest-rules.mjs && node scripts/security-headers.mjs",
-    "test:feepay": "node --experimental-strip-types node/test-solana-tx.mjs && node/node_modules/.bin/esbuild node/test-feepay.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/feepay.mjs --log-level=warning && node .build/test/feepay.mjs && node/node_modules/.bin/esbuild node/test-settle.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/settle.mjs --log-level=warning --external:node:sqlite && node --no-warnings .build/test/settle.mjs"
+    "test:feepay": "node --experimental-strip-types node/test-solana-tx.mjs && node/node_modules/.bin/esbuild node/test-feepay.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/feepay.mjs --log-level=warning && node .build/test/feepay.mjs && node/node_modules/.bin/esbuild node/test-settle.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/settle.mjs --log-level=warning --external:node:sqlite && node --no-warnings .build/test/settle.mjs && node/node_modules/.bin/esbuild node/test-cashout.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/cashout.mjs --log-level=warning --external:node:sqlite && node --no-warnings .build/test/cashout.mjs"
   }
 }

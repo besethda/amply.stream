@@ -18,7 +18,9 @@ import { bareDomain, recordFor, lookup, confirms } from "../../spec/domain.mjs";
 import { makeWaves, wavesKey } from "./waves.js";
 import { coverColors } from "./colors.js";
 import { shrink, COVER_PX, BANNER_PX } from "./images.js";
-import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, publicKeyOf, base58, NoPasskeySecret } from "../../spec/passkey-wallet.mjs";
+import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, publicKeyOf, base58, NoPasskeySecret, signWithSeed } from "../../spec/passkey-wallet.mjs";
+import { readTransaction, writeTransaction, base64, keyOf } from "../../node/src/solana-tx.ts";
+import { checkFeePayment } from "../../node/src/feepay.ts";
 
 export const MAX_UPLOAD = 90 * 1024 * 1024;
 
@@ -2081,24 +2083,127 @@ function EarningsSummary({ paid, payees }) {
 }
 
 /**
+ * Sending from a Face ID payout wallet, with no SOL and no other app. The
+ * artist's server drafts the transfer and pays its network fee; this page
+ * checks every part of the draft before Face ID signs it (only this amount,
+ * only to this address, only from this wallet, nothing else), and the server
+ * checks it again before sending. The key is made from the passkey for the
+ * one signature, and wiped.
+ */
+function SendToBank({ api, payees, network, routeName }) {
+  const net = network === "devnet" ? "devnet" : "mainnet";
+  const [to, setTo] = useState("");
+  const [amount, setAmount] = useState("");
+  const [balance, setBalance] = useState(null);
+  const [feesOn, setFeesOn] = useState(null);
+  const [state, setState] = useState(null);   // { busy, text } | { done, usd, signature } | { error }
+  const mine = payees.find((p) => p.address)?.address;
+
+  useEffect(() => {
+    let alive = true;
+    import("./chain.js").then(({ usdcBalance }) => usdcBalance(mine, net)).then((b) => alive && setBalance(b)).catch(() => {});
+    api?.fees?.().then((f) => alive && setFeesOn(!!f.offering)).catch(() => alive && setFeesOn(null));
+    return () => { alive = false; };
+  }, [mine, net]);
+
+  const micros = Math.round(Number(amount) * 100) * 10_000;
+  const toOk = !!keyOf(to.trim());
+  const tooMuch = balance != null && micros > balance;
+
+  async function go() {
+    const dest = to.trim();
+    const usd = (micros / 1e6).toFixed(2);
+    if (!window.confirm(`Send $${usd} to your ${routeName} (${dest.slice(0, 4)}…${dest.slice(-4)})?\n\n`
+      + `Check that address matches the one ${routeName} shows you. A transfer can't be called back.`)) return;
+    let seed = null;
+    setState({ busy: true, text: "Waiting for Face ID…" });
+    try {
+      seed = await restorePasskeySeed();
+      const from = base58(await publicKeyOf(seed));
+      if (!payees.some((p) => p.address === from)) {
+        throw new Error("That passkey opens a different wallet from the one you're paid into. Try again and choose the passkey you made for Amply payouts.");
+      }
+      setState({ busy: true, text: "Preparing the transfer…" });
+      const { tx: draft, feePayer } = await api.prepareSend(from, dest, micros);
+      const tx = readTransaction(base64.decode(draft) || new Uint8Array(0));
+      if (tx.accounts[1] !== from) throw new Error("Your server prepared a transfer from a different wallet, so it wasn't sent.");
+      tx.signatures[1] = await signWithSeed(seed, tx.message);
+      // Checked here before it leaves this page: exactly this, nothing else.
+      const { NETWORKS } = await import("./chain.js");
+      const verdict = await checkFeePayment(tx, {
+        feePayer, mint: NETWORKS[net].usdc, payees: [{ address: dest, split: 100 }], minMicros: micros, maxMicros: micros,
+      });
+      if (!verdict.ok || verdict.listener !== from) {
+        throw new Error(`Your server prepared a transfer that isn't the one you asked for, so it wasn't sent (${verdict.ok ? "wrong wallet" : verdict.problem}).`);
+      }
+      setState({ busy: true, text: "Sending…" });
+      const r = await api.send(base64.encode(writeTransaction(tx)), from, dest, micros);
+      setState({ done: true, usd, signature: r.signature });
+      setAmount("");
+      setBalance((b) => (b == null ? b : Math.max(0, b - micros)));
+    } catch (e) {
+      if (e?.name === "Cancelled" || e?.name === "NotAllowedError") setState(null);
+      else if (e instanceof NoPasskeySecret) setState({ error: "This device's passkey can't open the wallet. Try again and choose your phone in the window that appears." });
+      else setState({ error: e?.message || "That didn't go through, and nothing was sent." });
+    } finally {
+      seed?.fill(0);
+    }
+  }
+
+  if (state?.done) {
+    return (
+      <div class="send-done" role="status">
+        <p class="good"><b>Sent ${state.usd}.</b> It should show up in {routeName} within a few minutes.</p>
+        <p class="muted small"><a href={`https://solscan.io/tx/${state.signature}${net === "devnet" ? "?cluster=devnet" : ""}`}
+          target="_blank" rel="noopener">See the receipt ↗</a> · <button class="link" onClick={() => setState(null)}>Send more</button></p>
+      </div>
+    );
+  }
+
+  return (
+    <div class="send-form">
+      {feesOn === false && (
+        <p class="warn small">Sending this way uses your fees account to pay the network fee, so it needs a few dollars
+          of SOL in it first. See <b>Cover your listeners' fees</b> below.</p>
+      )}
+      <Field label={`Your ${routeName} deposit address`}>
+        <Text value={to} class="mono" placeholder="Paste the address from step 1" onInput={(v) => setTo(v)} />
+      </Field>
+      {to.trim() && !toOk && <p class="warn small">That doesn't look like a deposit address. Copy it again from {routeName}.</p>}
+      <Field label="How much">
+        <div class="send-amount">
+          <span class="money">$<input type="number" min="0.01" step="0.01" value={amount} placeholder="0.00"
+            aria-label="Amount to send, in dollars" onInput={(e) => setAmount(e.target.value)} /></span>
+          {balance != null && balance > 0 && (
+            <button class="link" onClick={() => setAmount((Math.floor(balance / 10_000) / 100).toFixed(2))}>
+              All of it (${(Math.floor(balance / 10_000) / 100).toFixed(2)})</button>
+          )}
+        </div>
+      </Field>
+      {tooMuch && <p class="warn small">That's more than your payout wallet holds.</p>}
+      <button class="btn sm" disabled={state?.busy || !toOk || micros < 10_000 || tooMuch || feesOn === false} onClick={go}>
+        {state?.busy ? state.text : "Send with Face ID"}</button>
+      <p class="muted small">No fee for you: your server pays the network fee. Nothing to install.</p>
+      {state?.error && <p class="warn" role="alert">{state.error}</p>}
+    </div>
+  );
+}
+
+/**
  * Moving money to a bank, one route at a time: pick the app you use, then
  * see only its steps. Listeners pay in USDC; Cash App and Coinbase both take
  * it on Solana and turn it into dollars.
  */
-function CashOut({ payees }) {
+function CashOut({ api, payees, network }) {
   const [via, setVia] = useState(null);
   const [passkey, setPasskey] = useState(true);
   const routes = {
-    cashapp: { name: "Cash App", where: "US only, no fee", steps: [
-      <>In Cash App: tap <b>Money</b>, then <b>Deposit USDC</b>, choose <b>Solana</b>, and copy the address it shows.</>,
-      <>From your payout wallet, send your USDC to that address (how depends on your wallet; see below).</>,
-      <>It arrives in Cash App as dollars. Move it to your bank as usual.</>,
-    ] },
-    coinbase: { name: "Coinbase", where: "most countries", steps: [
-      <>In Coinbase: tap <b>Receive</b>, choose <b>USDC</b>, network <b>Solana</b>, and copy the address.</>,
-      <>From your payout wallet, send your USDC to that address (how depends on your wallet; see below).</>,
-      <>In Coinbase, sell the USDC for dollars (one for one), then withdraw to your bank.</>,
-    ] },
+    cashapp: { name: "Cash App", where: "US only, no fee",
+      first: <>In Cash App: tap <b>Money</b>, then <b>Deposit USDC</b>, choose <b>Solana</b>, and copy the address it shows.</>,
+      last: <>It arrives in Cash App as dollars. Move it to your bank as usual.</> },
+    coinbase: { name: "Coinbase", where: "most countries",
+      first: <>In Coinbase: tap <b>Receive</b>, choose <b>USDC</b>, network <b>Solana</b>, and copy the address.</>,
+      last: <>In Coinbase, sell the USDC for dollars (one for one), then withdraw to your bank.</> },
   };
   const r = via && routes[via];
   return (
@@ -2113,35 +2218,33 @@ function CashOut({ payees }) {
         ))}
       </div>
       {r && (
-        <>
-          <ol class="cash-steps">{r.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
-          <p class="muted small">When asked for a network, choose <b>Solana</b>: it's the one your money is on.</p>
-          <div class="send-how">
-            <b>Sending from your payout wallet</b>
-            <div class="choices">
-              <button class="choice" aria-pressed={passkey} onClick={() => setPasskey(true)}>I made it with Face ID</button>
-              <button class="choice" aria-pressed={!passkey} onClick={() => setPasskey(false)}>I use Phantom</button>
+        <ol class="cash-steps">
+          <li>{r.first}</li>
+          <li>
+            Send it from your payout wallet:
+            <div class="send-how">
+              {passkey ? (
+                <>
+                  <SendToBank api={api} payees={payees} network={network} routeName={r.name} />
+                  <button class="quiet-link" onClick={() => setPasskey(false)}>My payout wallet is in Phantom</button>
+                </>
+              ) : (
+                <>
+                  <p class="muted">In Phantom: tap <b>USDC</b>, then <b>Send</b>, paste the address and the amount.</p>
+                  <button class="quiet-link" onClick={() => setPasskey(true)}>I made my payout wallet with Face ID</button>
+                </>
+              )}
             </div>
-            {!passkey ? (
-              <p class="muted">In Phantom: tap <b>USDC</b>, then <b>Send</b>, paste the address and the amount.</p>
-            ) : (
-              <>
-                <p class="muted"><b>About 10 minutes, once. After that, cashing out takes a minute.</b> Sending
-                  straight from this page isn't ready yet, so for now you open your wallet in the free <b>Phantom</b>{" "}
-                  app:</p>
-                <ol class="cash-steps">
-                  <li>Install Phantom on your phone or computer.</li>
-                  <li>Tap <b>Show my backup key</b> below and copy it.</li>
-                  <li>In Phantom: Add account, then <b>Import private key</b> (Phantom's name for a backup key), choose
-                    Solana, and paste. Your earnings appear there.</li>
-                  <li>Phantom needs a few cents of SOL to send. Buy $1 of it in Phantom, once. Then send as above.</li>
-                </ol>
-                <ShowWalletKey payees={payees} />
-              </>
-            )}
-          </div>
-        </>
+          </li>
+          <li>{r.last}</li>
+        </ol>
       )}
+      <details class="cash-out-passkey">
+        <summary>Want to open your Face ID wallet in another app?</summary>
+        <p class="muted">You don't need to, but you can: Phantom calls this backup key a "private key".
+          In Phantom: Add account, then <b>Import private key</b>, choose Solana, and paste.</p>
+        <ShowWalletKey payees={payees} />
+      </details>
     </section>
   );
 }
@@ -2159,7 +2262,7 @@ function EarningsTab({ node, published, api, payees, rate, network, settleAt }) 
 
       <Listeners api={api} paid={paid} rate={rate} settleAt={settleAt} />
 
-      <CashOut payees={payees} />
+      <CashOut api={api} payees={payees} network={network} />
 
       <FeesCard api={api} network={network} payees={payees} />
 

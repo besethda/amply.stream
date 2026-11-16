@@ -221,3 +221,120 @@ export const base64 = {
     try { return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); } catch { return null; }
   },
 };
+
+// ── building a transaction ──────────────────────────────────────────────────
+
+/** Whether 32 bytes are a point on Ed25519. A program address must not be:
+ *  nobody can hold its key. The standard decoding (RFC 8032, 5.1.3). */
+const P = (1n << 255n) - 19n;
+const D = (((-121665n * inverse(121666n)) % P) + P) % P;
+const SQRT_M1 = pow(2n, (P - 1n) / 4n);
+function pow(b: bigint, e: bigint): bigint {
+  let r = 1n; b %= P;
+  while (e > 0n) { if (e & 1n) r = (r * b) % P; b = (b * b) % P; e >>= 1n; }
+  return r;
+}
+function inverse(a: bigint): bigint { return pow(((a % P) + P) % P, P - 2n); }
+
+export function onCurve(bytes: Uint8Array): boolean {
+  if (bytes.length !== 32) return false;
+  let y = 0n;
+  for (let i = 31; i >= 0; i--) y = (y << 8n) | BigInt(i === 31 ? bytes[i] & 0x7f : bytes[i]);
+  const sign = bytes[31] >> 7;
+  if (y >= P) return false;
+  const yy = (y * y) % P;
+  const u = (yy - 1n + P) % P;
+  const v = (D * yy + 1n) % P;
+  // x = u v^3 (u v^7)^((p-5)/8), then check v x^2 = ±u.
+  const v3 = (v * v % P) * v % P;
+  const v7 = (v3 * v3 % P) * v % P;
+  let x = (u * v3 % P) * pow(u * v7 % P, (P - 5n) / 8n) % P;
+  const vxx = v * (x * x % P) % P;
+  if (vxx !== u) {
+    if (vxx === (P - u) % P) x = (x * SQRT_M1) % P;
+    else return false;
+  }
+  if (x === 0n && sign === 1) return false;
+  return true;
+}
+
+const PDA_MARKER = new TextEncoder().encode("ProgramDerivedAddress");
+
+/** Solana's findProgramAddress: the first bump, from 255 down, that lands
+ *  off the curve. */
+export async function programAddress(seeds: Uint8Array[], program: string): Promise<string> {
+  const programKey = keyOf(program);
+  if (!programKey) throw new TxError("not a program address");
+  for (let bump = 255; bump >= 0; bump--) {
+    const parts = [...seeds, Uint8Array.of(bump), programKey, PDA_MARKER];
+    const all = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of parts) { all.set(p, at); at += p.length; }
+    const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", all));
+    if (!onCurve(hash)) return base58(hash);
+  }
+  throw new TxError("no program address");
+}
+
+/** The USDC (or any token's) account that belongs to `owner`. */
+export async function tokenAccountOf(owner: string, mint: string, tokenProgram: string, ataProgram: string): Promise<string> {
+  const o = keyOf(owner), m = keyOf(mint), t = keyOf(tokenProgram);
+  if (!o || !m || !t) throw new TxError("not an address");
+  return programAddress([o, t, m], ataProgram);
+}
+
+export interface Meta { key: string; signer: boolean; writable: boolean }
+export interface PlannedInstruction { program: string; accounts: Meta[]; data: Uint8Array }
+
+/**
+ * A legacy transaction, unsigned, from instructions: the fee payer first,
+ * then signers before others and writable before read-only, as Solana
+ * requires. Every signature slot is left empty.
+ */
+export function compileTransaction(feePayer: string, blockhash: string, plan: PlannedInstruction[]): Uint8Array {
+  const metas = new Map<string, Meta>();
+  const add = (m: Meta) => {
+    const had = metas.get(m.key);
+    metas.set(m.key, had ? { key: m.key, signer: had.signer || m.signer, writable: had.writable || m.writable } : { ...m });
+  };
+  add({ key: feePayer, signer: true, writable: true });
+  for (const ix of plan) { for (const a of ix.accounts) add(a); add({ key: ix.program, signer: false, writable: false }); }
+  const all = [...metas.values()];
+  const rank = (m: Meta) => (m.key === feePayer ? -1 : m.signer ? (m.writable ? 0 : 1) : (m.writable ? 2 : 3));
+  const ordered = all.map((m, i) => ({ m, i })).sort((a, b) => rank(a.m) - rank(b.m) || a.i - b.i).map((x) => x.m);
+  const index = new Map(ordered.map((m, i) => [m.key, i]));
+  const required = ordered.filter((m) => m.signer).length;
+  const readonlySigned = ordered.filter((m) => m.signer && !m.writable).length;
+  const readonlyUnsigned = ordered.filter((m) => !m.signer && !m.writable).length;
+
+  const bytes: number[] = [];
+  const push = (b: ArrayLike<number>) => { for (let i = 0; i < b.length; i++) bytes.push(b[i]); };
+  const key = (k: string) => { const raw = keyOf(k); if (!raw) throw new TxError(`not an address: ${k}`); return raw; };
+  push([required, readonlySigned, readonlyUnsigned]);
+  push(shortBytes(ordered.length));
+  for (const m of ordered) push(key(m.key));
+  push(key(blockhash));
+  push(shortBytes(plan.length));
+  for (const ix of plan) {
+    bytes.push(index.get(ix.program)!);
+    push(shortBytes(ix.accounts.length));
+    for (const a of ix.accounts) bytes.push(index.get(a.key)!);
+    push(shortBytes(ix.data.length));
+    push(ix.data);
+  }
+  const message = Uint8Array.from(bytes);
+  const head = shortBytes(required);
+  const out = new Uint8Array(head.length + required * 64 + message.length);
+  out.set(head, 0);
+  out.set(message, head.length + required * 64);
+  return out;
+}
+
+/** A little-endian u64. */
+export function u64Bytes(n: number): Uint8Array {
+  if (!Number.isSafeInteger(n) || n < 0) throw new TxError("not an amount");
+  const out = new Uint8Array(8);
+  let v = BigInt(n);
+  for (let i = 0; i < 8; i++) { out[i] = Number(v & 0xffn); v >>= 8n; }
+  return out;
+}
