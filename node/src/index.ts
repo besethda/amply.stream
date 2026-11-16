@@ -27,6 +27,7 @@ import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, 
 import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, itemFor, CHAINS, type Sale } from "./sales";
 import { settle, feeAddress, feeBalance, rpcAt, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS } from "./settle";
 import { purchaseMemo } from "./payment-check";
+import { cleanSite } from "../../spec/site.mjs";
 import { cashOutProblem, draftCashOut, CASHOUT_MIN_MICROS, CASHOUT_MAX_MICROS } from "./cashout";
 import { base64 } from "./solana-tx";
 import { TOKEN_PROGRAM, SYSTEM_PROGRAM } from "./feepay";
@@ -201,6 +202,17 @@ let cachedManifest: { at: number; body: string | null } | null = null;
  * than an edge read, so asking it each time would make a fast thing slow. A few
  * seconds is short enough that publishing still feels immediate.
  */
+/** The artist's website (spec/site.mjs), or null. Cached briefly like the
+ *  manifest: every page view reads it. */
+let cachedSite: { at: number; body: string | null } | null = null;
+async function siteText(env: Env): Promise<string | null> {
+  const now = Date.now();
+  if (cachedSite && now - cachedSite.at < MANIFEST_CACHE) return cachedSite.body;
+  const body = await setting(env.DB, "site").catch(() => null);
+  cachedSite = { at: now, body };
+  return body;
+}
+
 async function manifestText(env: Env): Promise<string | null> {
   const now = Date.now();
   if (cachedManifest && now - cachedManifest.at < MANIFEST_CACHE) return cachedManifest.body;
@@ -309,6 +321,23 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
     });
+  }
+
+  // The website: read it, or save it. Saved through cleanSite, the one gate
+  // between what the editor sends and what visitors are shown.
+  if (path === "/site" && request.method === "GET") {
+    const t = await setting(env.DB, "site");
+    return new Response(t || "null", { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+  if (path === "/site" && request.method === "POST") {
+    if (Number(request.headers.get("Content-Length") || 0) > 300_000) return fail(413, "that website is too large");
+    const body = await jsonBody(request, 300_000);
+    if (!body) return fail(400, "bad request");
+    const clean = body.site === null ? null : cleanSite(body.site);
+    if (clean === null) await env.DB.prepare("DELETE FROM settings WHERE key = 'site'").run();
+    else await putSetting(env.DB, "site", JSON.stringify(clean));
+    cachedSite = null;
+    return new Response(JSON.stringify({ site: clean }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
   }
 
   // Totals per song, for the editor's Home tab.
@@ -966,7 +995,9 @@ export default {
       const kind = q.has("song") ? "song" : q.has("album") ? "album" : null;
       const id = kind ? String(q.get(kind) || "") : "";
       const focus = kind && /^[a-z0-9-]{1,64}$/.test(id) ? { kind, id } as const : null;
-      return new Response(renderPage(manifest as never, new URL(request.url).origin, nonce, focus), {
+      let site: unknown = null;
+      try { const t = await siteText(env); site = t ? JSON.parse(t) : null; } catch { /* the plain page, then */ }
+      return new Response(renderPage(manifest as never, new URL(request.url).origin, nonce, focus, site), {
         status: 200, headers,
       });
     }

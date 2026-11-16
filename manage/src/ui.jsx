@@ -21,6 +21,7 @@ import { shrink, COVER_PX, BANNER_PX } from "./images.js";
 import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, publicKeyOf, base58, NoPasskeySecret, signWithSeed } from "../../spec/passkey-wallet.mjs";
 import { readTransaction, writeTransaction, base64, keyOf } from "../../node/src/solana-tx.ts";
 import { checkFeePayment } from "../../node/src/feepay.ts";
+import { SiteEditor } from "./site-editor.jsx";
 
 export const MAX_UPLOAD = 90 * 1024 * 1024;
 
@@ -2670,6 +2671,16 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState(initialTab);
   const [menu, setMenu] = useState(false);
+  // The website (spec/site.mjs): the draft being edited, and what's published.
+  // undefined while loading; null when there's no website yet.
+  const [site, setSite] = useState(undefined);
+  const [liveSite, setLiveSite] = useState(undefined);
+  useEffect(() => {
+    (api.readSite ? api.readSite() : Promise.resolve(null))
+      .then((s) => { setSite(s); setLiveSite(s); })
+      .catch(() => { setSite(null); setLiveSite(null); });
+  }, []);
+  const siteDirty = site !== undefined && JSON.stringify(site) !== JSON.stringify(liveSite);
   const go = (id) => { setTab(id); setMenu(false); window.scrollTo?.(0, 0); };
   useEffect(() => {
     if (!menu) return;
@@ -2686,7 +2697,8 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
   // once there is an address to pay, and that lives with the payees.
   const charging = useMemo(() => charges(next), [next]);
   const livePayment = ((live || manifest).payment || []).find((p) => p.type === "solana-usdc");
-  const changes = useMemo(() => (live ? countChanges(live, next) : 0), [live, next]);
+  const manifestChanges = useMemo(() => (live ? countChanges(live, next) : 0), [live, next]);
+  const changes = manifestChanges + (siteDirty ? 1 : 0);
   const dirty = live === null || changes > 0;
 
   const notify = (kind, text, action = null) => setMsg({ kind, text, action });
@@ -2778,7 +2790,12 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
 
     setSaving(true);
     try {
-      await api.writeManifest(out);
+      if (manifestChanges > 0 || live === null) await api.writeManifest(out);
+      // The website goes up with it, as the server cleaned it.
+      if (siteDirty && api.writeSite) {
+        const r = await api.writeSite(site);
+        setSite(r.site); setLiveSite(r.site);
+      }
       // The editor keeps its drafts (releases with no tracks yet); only what
       // was published becomes the new baseline.
       setLive(out);
@@ -2792,7 +2809,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
 
   // For the earnings checklist: music that is actually on the page, not drafted.
   const musicIsLive = !!live && (live.releases || []).some((r) => r.tracks?.length);
-  const tabs = [["home", "Home"], ["music", "Music"], ["settings", "Settings"], ["earnings", "Earnings"]];
+  const tabs = [["home", "Home"], ["website", "Website"], ["music", "Music"], ["settings", "Settings"], ["earnings", "Earnings"]];
   const links = (
     <>
       {/* The artist's page, not the manifest: it previews as a card with their
@@ -2906,6 +2923,10 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
         {tab === "home" && (
           <HomeTab api={api} manifest={live || manifest} payees={payees} live={musicIsLive}
             rate={livePayment?.ratePerMinute ?? 0} network={livePayment?.network || "solana"} onGo={go} />
+        )}
+
+        {tab === "website" && (
+          <SiteEditor site={site} setSite={setSite} manifest={next} nodeUrl={node.url} art={art} notify={notify} />
         )}
 
         {tab === "music" && (

@@ -11,6 +11,7 @@
  */
 
 import { charges, needsWallet, plans as subscriptionPlans, forSale, DOWNLOADS_PER_PURCHASE } from "../../spec/pricing.mjs";
+import { renderSite } from "../../spec/site.mjs";
 
 interface Track {
   id: string; title: string; duration: number; url: string; explicit?: boolean;
@@ -69,7 +70,7 @@ export function appLink(origin: string, focus?: Focus | null): string {
   return focus ? `https://amply.stream/app/?${focus.kind}=${m}&id=${encodeURIComponent(focus.id)}` : `https://amply.stream/app/?add=${m}`;
 }
 
-export function renderPage(manifest: Manifest, origin: string, nonce: string, focus: Focus | null = null): string {
+export function renderPage(manifest: Manifest, origin: string, nonce: string, focus: Focus | null = null, site: unknown = null): string {
   const name = esc(manifest.artist?.name || "Untitled");
   const bio = manifest.artist?.bio ? `<p class="bio">${esc(manifest.artist.bio)}</p>` : "";
   const avatar = safeUrl(manifest.artist?.image);
@@ -161,6 +162,39 @@ export function renderPage(manifest: Manifest, origin: string, nonce: string, fo
   const empty = !(manifest.releases || []).some((r) => (r.tracks || []).length)
     ? `<p class="muted">No music published yet.</p>` : "";
 
+  const linkedHtml = `${focused ? `<div class="linked">
+  ${focused.art ? `<img src="${esc(focused.art)}" alt="">` : ""}
+  <div><h2>${esc(focused.title)}</h2><p>${focused.kind === "song" ? "A song" : "An album"} by ${name}</p>
+  <a class="btn" href="${esc(inApp)}">Open in the Amply app</a></div>
+</div>` : ""}`;
+  const musicHtml = `${paid ? `<div class="listen">
+  <p>${name}'s music is paid for as you listen — <strong>$${esc(wallet?.ratePerMinute)}</strong> a
+  minute, straight to them, with nothing taken in between. Listen in the Amply app.</p>
+  <a class="btn" href="${esc(inApp)}">Open in the Amply app</a>
+</div>` : ""}
+${releases}
+${empty}
+<div class="pay">
+  <h3>Support ${name}</h3>
+  ${wallet?.ratePerMinute
+    ? `<p>Listening in an Amply player pays ${name} <strong>$${esc(wallet.ratePerMinute)}</strong> a
+       minute, directly. Nobody in between takes a cut.</p>`
+    : `<p>Payments go straight to the artist. Nothing is taken in between.</p>`}
+  ${support}
+</div>`;
+  const footerHtml = `<p>Follow in an Amply player by adding this address:<br><code>${esc(origin)}/manifest.json</code></p>
+  <p>This page is hosted by the artist, on infrastructure they own. <a href="/privacy">Privacy</a></p>
+  ${licence}`;
+  // The artist's website, when they've made one: their sections around the
+  // music, rendered by the same code the editor shows them (spec/site.mjs).
+  const built = site && typeof site === "object" && Array.isArray((site as { sections?: unknown[] }).sections)
+    && (site as { sections: unknown[] }).sections.length
+    ? renderSite(site, manifest, { slots: { music: linkedHtml + musicHtml, footer: footerHtml }, listenUrl: inApp })
+    : null;
+  const siteMode = !!built;
+  const siteBody = built ? built.body : "";
+  const siteCss = built ? built.css + "body{padding:0}" : "";
+
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -227,40 +261,19 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;ov
 .linked p{margin:0 0 10px;color:var(--mut);font-size:14px}
 .linked h2{margin:0 0 4px;font-size:21px}
 .t.focus .tt{color:var(--ac);font-weight:700}
+${siteCss}
 </style>
-</head><body><div class="w">
+</head><body>${siteMode ? siteBody : `<div class="w">
 <header>
   ${avatar ? `<img class="av" src="${esc(avatar)}" alt="">` : ""}
   <div><h1>${name}</h1></div>
 </header>
-${focused ? `<div class="linked">
-  ${focused.art ? `<img src="${esc(focused.art)}" alt="">` : ""}
-  <div><h2>${esc(focused.title)}</h2><p>${focused.kind === "song" ? "A song" : "An album"} by ${name}</p>
-  <a class="btn" href="${esc(inApp)}">Open in the Amply app</a></div>
-</div>` : ""}
+${linkedHtml}
 ${bio}
 ${links ? `<div class="links">${links}</div>` : ""}
-${paid ? `<div class="listen">
-  <p>${name}'s music is paid for as you listen — <strong>$${esc(wallet?.ratePerMinute)}</strong> a
-  minute, straight to them, with nothing taken in between. Listen in the Amply app.</p>
-  <a class="btn" href="${esc(inApp)}">Open in the Amply app</a>
-</div>` : ""}
-${releases}
-${empty}
-<div class="pay">
-  <h3>Support ${name}</h3>
-  ${wallet?.ratePerMinute
-    ? `<p>Listening in an Amply player pays ${name} <strong>$${esc(wallet.ratePerMinute)}</strong> a
-       minute, directly. Nobody in between takes a cut.</p>`
-    : `<p>Payments go straight to the artist. Nothing is taken in between.</p>`}
-  ${support}
-</div>
-<footer>
-  <p>Follow in an Amply player by adding this address:<br><code>${esc(origin)}/manifest.json</code></p>
-  <p>This page is hosted by the artist, on infrastructure they own. <a href="/privacy">Privacy</a></p>
-  ${licence}
-</footer>
-</div>
+${musicHtml}
+<footer>${footerHtml}</footer>
+</div>`}
 <script nonce="${nonce}">
 // One at a time, so a second play stops the first.
 let cur = null, btn = null;

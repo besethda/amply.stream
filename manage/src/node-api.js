@@ -74,6 +74,19 @@ export function nodeApi() {
 
     /** The wallet that pays listeners' network fees: its address, balance and
      *  today's count. Never its key: no route returns that. */
+    /** The website, as last published, or null if there isn't one. */
+    async readSite() {
+      return (await req("GET", "/site")).json();
+    },
+
+    /** Publish the website. The server cleans it and returns what it kept. */
+    async writeSite(site) {
+      return (await req("POST", "/site", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ site }),
+      })).json();
+    },
+
     /** Plays per song, from everyone together. Nothing about who. */
     async stats() {
       return (await req("GET", "/stats")).json();

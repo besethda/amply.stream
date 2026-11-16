@@ -172,5 +172,23 @@ ok("a bio can't break out of the tags", !sneaky.includes("<script>alert(1)") && 
   ok("  or something that is neither", check("call me").length === 1);
 }
 
+// ── with a website ──────────────────────────────────────────────────────────
+{
+  const site = { sections: [
+    { id: "about", type: "about", title: "About", text: "Hello there" },
+    { id: "music", type: "music", title: "Music" },
+    { id: "drafts", type: "news", title: "Drafts", hidden: true, items: [{ title: "Secret post" }] },
+  ], hero: { title: "Someone Live" } };
+  const page = renderPage(paid, ORIGIN, "n", null, site);
+  ok("with a website, its sections are on the page", page.includes("Hello there") && page.includes("Someone Live"));
+  ok("  the music is still there, playing free tracks in the browser", page.includes(`data-src="${ORIGIN}/audio/two.mp3"`));
+  ok("  and paid tracks still go to the app", !page.includes(`data-src="${ORIGIN}/audio/one.mp3"`));
+  ok("  a hidden section isn't", !page.includes("Secret post"));
+  ok("  the privacy link and following address are still in the footer", page.includes('href="/privacy"') && page.includes(`${ORIGIN}/manifest.json`));
+  ok("  styles still carry the page's nonce", page.includes('<style nonce="n">') && !/<style(?![^>]*nonce)/.test(page));
+  ok("  no editing hooks reach visitors", !page.includes("data-edit"));
+  ok("an empty website is the plain page", !renderPage(paid, ORIGIN, "n", null, { sections: [] }).includes("s-site"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
