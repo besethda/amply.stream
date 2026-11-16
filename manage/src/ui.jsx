@@ -509,10 +509,10 @@ function Release({
             />
           </label>
           <label class="side-field">
-            <span class="label">Price to own the album <span class="muted small">(one-time, optional)</span> <Help about="the album's price">What the whole album costs to buy and keep, separate from your per-minute price for listening. Leave it empty if it isn't for sale.</Help></span>
+            <span class="label">Album price <Help about="the album's price">What the whole album costs to buy and keep, separate from your per-minute price for listening. Leave it empty if it isn't for sale.</Help></span>
             <span class="release-price">
               <span>$</span>
-              <input type="number" min="0.5" max="1000" step="0.01" placeholder="Not for sale"
+              <input type="number" min="0.5" max="1000" step="0.01" placeholder="None"
                 value={release.sale?.price ?? ""} aria-label="Price to buy this album, in dollars"
                 onInput={(e) => {
                   const price = salePrice(e.target.value);
@@ -594,30 +594,41 @@ function Release({
  * top of the music tab, which is where they land, rather than anywhere they
  * would have to go looking.
  */
-function FirstSteps({ hasMusic, paid, live, url, onSettings, onAdd }) {
+function FirstSteps({ hasMusic, paid, live, url, onSettings, onAdd, folded }) {
   const step = (n, done, title, detail) => (
     <li class={done ? "done" : ""}>
       <span class="n">{done ? "✓" : n}</span>
       <span class="t">{title}{detail && <span class="detail">{detail}</span>}</span>
     </li>
   );
-  return (
-    <section class="card first-steps">
-      <h2>Getting started</h2>
+  const list = (
       <ol class="steps">
         {step(1, hasMusic, "Add your music",
           <>Make a release (an album, an EP or a single), then add your songs to it.{" "}
             <button class="quiet-link" onClick={onAdd}>+ Add a release</button></>)}
         {step(2, paid, "Choose how you're paid",
-          <>Set your price, and make a payout wallet for the money to arrive in: one tap with Face ID or a
-            passkey, about a minute. Settings shows you how. Or skip this, and your music is free.
-            <button class="btn ghost sm step-btn" onClick={onSettings}>Open Settings</button></>)}
+          <>Cash App, Coinbase or card subscriptions. Skip it and your music is free.
+            <button class="btn ghost sm step-btn" onClick={onSettings}>Open Earnings</button></>)}
         {step(3, live, "Publish",
           <>Press <b>Publish</b> at the top. Nothing is public until you do.</>)}
         {step(4, false, "Share your link",
           <>Send it to people who already listen to you.{" "}
             <CopyButton text={url} label="Copy your link" /></>)}
       </ol>
+  );
+  const done = [hasMusic, paid, live].filter(Boolean).length;
+  if (folded) {
+    return (
+      <details class="card first-steps folded">
+        <summary><b>Getting started</b> <span class="muted small">{done} of 4 done</span></summary>
+        {list}
+      </details>
+    );
+  }
+  return (
+    <section class="card first-steps">
+      <h2>Getting started</h2>
+      {list}
     </section>
   );
 }
@@ -634,8 +645,7 @@ function YoureLive({ url }) {
   return (
     <section class="card first-steps">
       <h2>You're live. Share your link.</h2>
-      <p>Send it to people who already listen to you: in your bio, a post, a message. They open
-        it, follow you, and play.</p>
+      <p>Put it in your bio, a post or a message.</p>
       <div class="copy-row">
         <CopyButton text={url} label="Copy your link" className="btn sm" />
         <code>{url.replace(/^https:\/\//, "")}</code>
@@ -670,7 +680,8 @@ function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf,
 
       <div class="stack">
         {!live && (
-          <FirstSteps hasMusic={trackCount > 0} paid={paid} live={live} url={node.url} onSettings={onSettings} onAdd={addRelease} />
+          <FirstSteps hasMusic={trackCount > 0} paid={paid} live={live} url={node.url} onSettings={onSettings} onAdd={addRelease}
+            folded={(manifest.releases || []).length > 0} />
         )}
         {live && trackCount > 0 && <YoureLive url={node.url} />}
         {(manifest.releases || []).map((r, i) => (
@@ -760,73 +771,6 @@ export function withPrice(wallet, rate) {
   const next = { ...wallet, ratePerMinute: rate };
   if (rate > 0) next.settleAt = settleFor(batchOf(wallet), rate);
   return next;
-}
-
-function Price({ wallet, onChange, hasAddress, subscribing }) {
-  const rate = wallet.ratePerMinute ?? DEFAULT_RATE;
-  const song = rate * TYPICAL_SONG_MIN;
-  const times = song / STREAM_PAYS_ELSEWHERE;
-  return (
-    <section class="card">
-      <h2>Your price <Help at="price" about="your price">Listeners pay by the minute, so a long piece is worth more than a short one.</Help></h2>
-      {!hasAddress && rate > 0 && (
-        <p class="price-pending">
-          Your price isn't on your page yet, because there's nowhere for the money to go. Make a payout
-          wallet under Where your money goes and it will publish with it. Until then your music
-          is free to listen to.
-        </p>
-      )}
-
-      <div class="price-grid">
-        <div class="price-set">
-          <div class="price-now">
-            {/* Typeable, for anyone who wants an exact figure rather than a
-                feel. Held in cents because that is the unit on screen. */}
-            <input
-              type="number" class="price-input"
-              min="0" max={RATE_MAX * 100} step="0.01"
-              value={Number((rate * 100).toFixed(2))}
-              aria-label="Price per minute, in cents"
-              onInput={(e) => {
-                const c = Number(e.target.value);
-                if (!Number.isFinite(c)) return;
-                const clamped = Math.min(Math.max(c, 0), RATE_MAX * 100);
-                // Cents to dollars, at the same hundredth-of-a-cent
-                // resolution the slider works in.
-                onChange(withPrice(wallet, Math.round(clamped * 100) / 10000));
-              }}
-            />
-            <span class="unit">¢</span>
-            <span>a minute <span class="muted small">(only while someone's listening)</span></span>
-          </div>
-          <input
-            type="range" min="0" max={SLIDER_STEPS} step="1" value={toSlider(rate)}
-            aria-label="Price per minute"
-            aria-valuetext={`${cents(rate)} a minute`}
-            onInput={(e) => onChange(withPrice(wallet, fromSlider(Number(e.target.value))))}
-          />
-          <div class="scale"><span>free</span><span>{cents(RATE_MAX)}</span></div>
-        </div>
-
-        <div class="price-says">
-          <b>
-            {rate === 0
-              ? (subscribing ? "Not charged by the minute." : "Free to listen to.")
-              : `About ${cents(song)} for a ${TYPICAL_SONG_MIN}-minute song.`}
-          </b>
-          <p>
-            {rate === 0
-              ? (subscribing
-                  ? "Listeners pay by subscription only. Set a price here to offer both."
-                  : "Nobody is charged. You can change this at any time.")
-              : `Ten songs comes to about ${cents(song * 10)}.${times >= 1.5
-                  ? ` That's about ${Math.round(times)} times what a stream pays elsewhere, and all of it is yours.`
-                  : ""}`}
-          </p>
-        </div>
-      </div>
-    </section>
-  );
 }
 
 /**
@@ -1099,37 +1043,6 @@ function Subscriptions({ manifest, update, api }) {
   );
 }
 
-function Payout({ wallet, onChange, subscribing }) {
-  const rate = wallet.ratePerMinute ?? DEFAULT_RATE;
-  const batch = batchOf(wallet);
-  const amount = settleFor(batch, rate);
-  return (
-    <section class="card">
-      <h2>How often listeners pay <Help at="batching" about="how often listeners pay">Each payment goes straight
-        from the listener to you, and Amply never touches it. Their app pays as they listen without asking each
-        time, so this is about the cost of sending money, not interruptions. Anything smaller is paid within a
-        week, the next time they open Amply.</Help></h2>
-      <div class="choices">
-        {BATCHES.map((b) => (
-          <button
-            key={b} class="choice" aria-pressed={batch === b}
-            onClick={() => onChange({ ...wallet, settleAt: settleFor(b, rate) })}
-          >
-            {b === 1 ? "Every song" : `Every ${b} songs`}
-          </button>
-        ))}
-      </div>
-      <p class="payout-says">
-        {rate === 0
-          ? (subscribing ? "You don't charge by the minute, so there's nothing here to pay in batches." : "Your music is free, so listeners never pay.")
-          : batch === 1
-            ? `You are paid after each song, about ${cents(amount)} each time.`
-            : `Listeners settle up in batches, so there are fewer tiny payments: you are paid about ${cents(amount)} every ${batch} songs.`}
-      </p>
-    </section>
-  );
-}
-
 /**
  * Real money, or play money.
  *
@@ -1363,7 +1276,6 @@ function Splits({ payees, rate, onChange, live }) {
           <p class="muted">Rather be paid by card only? Set your price to free, and offer Subscriptions instead.</p>
         </div>
       )}
-      {payees[0]?.address && <PayoutReady address={payees[0].address} live={live} />}
       <h2>Where your money goes <span class="note">and who you split it with</span>
         <Help at="wallet" about="where your money goes">Each payment goes straight to the payout wallets here; it
           never passes through Amply. Playing with a band or a producer? Add them, each with their own payout
@@ -1532,21 +1444,15 @@ function OwnDomain({ manifest, update }) {
 
 function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, dirty, saving, onPublish, api, onSignOut, liveAddresses = [] }) {
   const artist = manifest.artist || {};
-  const wallet = (manifest.payment || []).find((p) => p.type === "solana-usdc")
-    || { type: "solana-usdc", ratePerMinute: DEFAULT_RATE, settleAt: settleFor(DEFAULT_BATCH, DEFAULT_RATE) };
   const links = artist.links || [];
 
   const setArtist = (next) => update({ ...manifest, artist: { ...artist, ...next } });
-  const setWallet = (next) => {
-    const rest = (manifest.payment || []).filter((p) => p.type !== "solana-usdc");
-    update({ ...manifest, payment: [next, ...rest] });
-  };
   const setLinks = (next) =>
     setArtist({ links: next.length ? next : undefined });
 
   return (
     <>
-      <div class="page-head"><h1>Settings</h1></div>
+      <div class="page-head"><h1>Profile</h1></div>
 
       <div class="stack">
         <section class="card profile">
@@ -1604,10 +1510,9 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
             </button>
 
             <Field
-              label="Email for privacy questions"
+              label="Email for GDPR compliance"
               hint={<>
-                Where a listener can ask about the little you keep on them (how much they've listened). The law
-                expects this if you charge; it's shown on your{" "}
+                Where listeners can ask about the little you keep on them. Shown on your{" "}
                 <a href="/privacy" target="_blank" rel="noopener">privacy page</a>. Your usual email is fine.{" "}
                 <a href="https://amply.stream/why#gdpr" target="_blank" rel="noopener">Read more ↗</a>
               </>}
@@ -1628,24 +1533,10 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
           </div>
         </section>
 
-        {/* What a new artist needs first: their price, and where it goes.
-            The rest is optional and follows. */}
-        <Price wallet={wallet} onChange={setWallet} hasAddress={payees.some((p) => p.address)}
-          subscribing={(manifest.payment || []).some((p) => p.type === "stripe-subscription")} />
-        <Splits payees={payees} rate={wallet.ratePerMinute ?? 0} onChange={setPayees}
-          live={!!payees[0]?.address && liveAddresses.includes(payees[0].address)} />
-        {/* Folded away until the first publish: none of it is needed to go live. */}
-        <details class="advanced" open={everPublished}>
-          <summary>More options <span class="note">card subscriptions, how often listeners pay, your own website, your terms</span></summary>
+        <details class="advanced">
+          <summary>More <span class="note">your own website address, your terms</span></summary>
           <div class="stack">
-        <Subscriptions manifest={manifest} update={update} api={api} />
-        <Payout wallet={wallet} onChange={setWallet}
-          subscribing={(manifest.payment || []).some((p) => p.type === "stripe-subscription")} />
         <OwnDomain manifest={manifest} update={update} />
-        <details class="testing card">
-          <summary>Test mode <span class="note">try payments with pretend money</span></summary>
-          <TestMoney wallet={wallet} onChange={setWallet} />
-        </details>
 
         <section class="card">
           <h2>Your terms <Help at="free" about="your terms">What you allow others to do with your recordings: your
@@ -1685,9 +1576,7 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
                 ? "Nothing is on your page yet"
                 : dirty ? "You have changes that aren't live" : "Everything here is live"}
             </h2>
-            <p class="muted">{dirty || !everPublished
-              ? "Listeners see them once you publish."
-              : "Nothing waiting to publish. Changes you make stay here until you do."}</p>
+            {(dirty || !everPublished) && <p class="muted">Listeners see them once you publish.</p>}
           </div>
           <button class="btn" disabled={!dirty || saving} onClick={onPublish}>
             {saving ? "Publishing…" : "Publish changes"}
@@ -1929,11 +1818,10 @@ function Listeners({ api, paid, rate, settleAt }) {
           <strong>Export</strong>; if they ask you to delete it, <strong>Delete</strong>. Records are deleted
           automatically a year after someone was last here.</Help></h2>
 
-      <p class="muted small">Listeners are anonymous: fans don't sign up with a name, so they're numbered.</p>
       <div class="reconcile">
         <span class="muted">
           {!paid.addresses.length
-            ? "Choose where your money goes in Settings and this will show who has paid."
+            ? "Set up how you get paid and this will show who has paid."
             : paid.busy
               ? "Checking who has paid…"
               : paid.error
@@ -2013,9 +1901,6 @@ function Listeners({ api, paid, rate, settleAt }) {
           );})}
         </tbody>
       </table>
-      <p class="muted small listener-key"><b>Block</b> stops someone playing your paid tracks (you can undo it).{" "}
-        <b>Export data</b> and <b>Delete</b> are for when a listener asks for a copy of their data, or for it to be
-        deleted.</p>
     </section>
   );
 }
@@ -2037,7 +1922,7 @@ function FeesCard({ api, network, payees }) {
   useEffect(load, [load]);
 
   if (!api?.fees || !network || !payees?.length) return null;
-  const head = <h2>Your fees account <span class="note">needed to send to your bank · helps listeners too</span></h2>;
+  const head = <h2>Your fees account <span class="note">needed to send to your bank</span></h2>;
   if (failed) return (
     <section class="card">{head}
       <p class="muted">Couldn't check this just now. <button class="link" onClick={load}>Try again</button></p></section>
@@ -2046,6 +1931,21 @@ function FeesCard({ api, network, payees }) {
 
   // 10,000 lamports a payment; what's held back keeps the account itself open.
   const payments = fees.lamports == null ? null : Math.max(0, Math.floor((fees.lamports - 1_000_000) / 10_000));
+  if (fees.offering) {
+    return (
+      <details class="card fees-on" id="fees">
+        <summary><b>Fees account</b> <span class="pill-status on">On</span>
+          <span class="muted small">{payments != null ? `about ${payments.toLocaleString()} payments left` : ""}</span></summary>
+        <p class="muted small">Pays the tiny network fees on your fans' payments and your sends to the bank, so nobody
+          needs a coin called SOL. Never more than about $2 a day. Top it up with SOL at this address when it runs low:</p>
+        <div class="copy-row">
+          <CopyButton text={fees.address} label="Copy the fees address" className="btn sm" />
+          <code>{fees.address}</code>
+        </div>
+        <button class="btn ghost sm" onClick={load}>Refresh</button>
+      </details>
+    );
+  }
   return (
     <section class="card" id="fees">
       {head}
@@ -2113,12 +2013,10 @@ function EarningsSummary({ paid, payees }) {
           : paid.at ? <>Checked at {new Date(paid.at).toLocaleTimeString()}. <button class="link" onClick={paid.look}>Check again</button></>
           : <button class="link" onClick={paid.look}>Check payments</button>}
       </p>
-      <p class="payout-where">It goes straight into your <b>payout wallet</b>{" "}
-        <Help about="your payout wallet">The account your fans' payments land in. You own it and only you can move
-          money out of it; Amply can't touch it.</Help>, as it's paid:{" "}
+      <p class="payout-where muted small">In your payout wallet{" "}
+        <Help about="your payout wallet">Where fans' payments land. Only you can move money out of it.</Help>{" "}
         <code title={payees.find((p) => p.address)?.address}>{short(payees.find((p) => p.address)?.address)}</code>{" "}
-        <CopyButton text={payees.find((p) => p.address)?.address} label="Copy address" />
-        {payees.filter((p) => p.address).length > 1 && <span class="muted small"> (and your collaborators' shares to theirs)</span>}</p>
+        <CopyButton text={payees.find((p) => p.address)?.address} label="Copy" /></p>
       <a class="btn sm" href="#cash-out" onClick={(e) => { e.preventDefault(); const c = document.getElementById("cash-out"); c?.scrollIntoView({ behavior: "smooth", block: "start" }); c?.querySelector("button.choice")?.focus({ preventScroll: true }); }}>Move it to your bank</a>
     </section>
   );
@@ -2249,8 +2147,8 @@ function SendToBank({ api, payees, network, routeName }) {
  * see only its steps. Listeners pay in USDC; Cash App and Coinbase both take
  * it on Solana and turn it into dollars.
  */
-function CashOut({ api, payees, network }) {
-  const [via, setVia] = useState(null);
+function CashOut({ api, payees, network, via: chosen }) {
+  const [via, setVia] = useState(chosen === "cashapp" || chosen === "coinbase" ? chosen : null);
   const [passkey, setPasskey] = useState(true);
   const routes = {
     cashapp: { name: "Cash App", where: "US only, no fee",
@@ -2264,8 +2162,9 @@ function CashOut({ api, payees, network }) {
   return (
     <section class="card" id="cash-out">
       <h2>Move your money to your bank</h2>
-      <p class="muted">Listeners pay you in <b>digital dollars (USDC)</b>: each is worth exactly $1. To get them
-        into your bank, send them to an app that turns them into ordinary dollars. Which do you use?</p>
+      <p class="muted">Send it to the app you use; it turns it into dollars for your bank.{" "}
+        <Help about="digital dollars">Fans pay you in digital dollars (USDC), each worth exactly $1. Cash App and
+          Coinbase turn them into ordinary dollars.</Help></p>
       <div class="choices">
         {Object.entries(routes).map(([k, v]) => (
           <button key={k} class="choice" aria-pressed={via === k} onClick={() => setVia(k)}>
@@ -2392,35 +2291,133 @@ function HomeTab({ api, manifest, payees, rate, network, live, onGo }) {
   );
 }
 
-function EarningsTab({ node, published, api, payees, rate, network, settleAt }) {
+// ── getting paid ────────────────────────────────────────────────────────────
+
+/** Which app the artist cashes out to; only steers which steps are shown. */
+const VIA_KEY = "amply.editor.payout-via";
+const readVia = () => { try { return localStorage.getItem(VIA_KEY); } catch { return null; } };
+
+const WAYS = [
+  ["cashapp", "Cash App", "US · fans pay by the minute"],
+  ["coinbase", "Coinbase", "Most countries · fans pay by the minute"],
+  ["stripe", "Card subscriptions", "Stripe · fans subscribe by card"],
+];
+
+/** Before anything is set up: only the ways to be paid, and the one step each needs. */
+function GetPaid({ via, onVia, payees, setPayees, manifest, update, api, only }) {
+  const ways = WAYS.filter(([k]) => !only || only.includes(k));
+  const setAddress = (a) => setPayees([{ ...payees[0], address: a }, ...payees.slice(1)]);
+  const name = WAYS.find(([k]) => k === via)?.[1];
+  return (
+    <section class="card">
+      <h2>{only ? "Also take payments by the minute" : "How do you want to get paid?"}</h2>
+      <div class="pay-choices">
+        {ways.map(([k, label, sub]) => (
+          <button key={k} type="button" class="pay-choice" aria-pressed={via === k} onClick={() => onVia(k)}>
+            <b>{label}</b><span>{sub}</span>
+          </button>
+        ))}
+      </div>
+      {(via === "cashapp" || via === "coinbase") && (
+        <div class="pay-next">
+          <p>One tap makes your payout wallet. Fans' payments land there; you send them on to {name} whenever you like.</p>
+          <PasskeyWallet onAddress={setAddress} />
+          <details class="more">
+            <summary>No Face ID, or already use Phantom?</summary>
+            <Field label="Paste a Solana wallet address">
+              <Text value={payees[0]?.address || ""} class="mono" placeholder="Your wallet address" onInput={(v) => setAddress(v.trim())} />
+            </Field>
+          </details>
+        </div>
+      )}
+      {via === "stripe" && <Subscriptions manifest={manifest} update={update} api={api} />}
+      {!only && <p class="muted small">Until then, your music is free to listen to.</p>}
+    </section>
+  );
+}
+
+/** The price and how often it's paid, one line each. */
+function Pricing({ wallet, onChange }) {
+  const rate = wallet.ratePerMinute ?? DEFAULT_RATE;
+  const batch = batchOf(wallet);
+  return (
+    <section class="card pricing">
+      <h2>Your price <Help at="price" about="your price">Fans pay by the minute while they listen, straight to you.
+        Half a cent a minute is a good start: about $9 a month from a fan who listens an hour a day.</Help></h2>
+      <div class="price-line">
+        <input type="number" class="price-input" min="0" max={RATE_MAX * 100} step="0.01"
+          value={Number((rate * 100).toFixed(2))} aria-label="Price per minute, in cents"
+          onInput={(e) => {
+            const c = Number(e.target.value);
+            if (!Number.isFinite(c)) return;
+            onChange(withPrice(wallet, Math.round(Math.min(Math.max(c, 0), RATE_MAX * 100) * 100) / 10000));
+          }} />
+        <span class="unit">¢/min</span>
+        <span class="muted">{rate > 0 ? `(${cents(rate * TYPICAL_SONG_MIN)} per song)` : "(free)"}</span>
+      </div>
+      <input type="range" min="0" max={SLIDER_STEPS} step="1" value={toSlider(rate)} aria-label="Price per minute"
+        aria-valuetext={`${cents(rate)} a minute`} onInput={(e) => onChange(withPrice(wallet, fromSlider(Number(e.target.value))))} />
+      {rate > 0 && (
+        <label class="every">Pays you every{" "}
+          <select value={batch} onChange={(e) => onChange({ ...wallet, settleAt: settleFor(Number(e.target.value), rate) })}>
+            {BATCHES.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>{" "}{batch === 1 ? "song" : "songs"}{" "}
+          <Help at="batching" about="how often">Fewer, bigger payments cost less in network fees. Anything smaller is
+            paid within a week.</Help>
+        </label>
+      )}
+    </section>
+  );
+}
+
+function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rate, network, settleAt }) {
   const paid = usePayments(payees, network);
+  const [via, setViaState] = useState(readVia);
+  const setVia = (v) => { setViaState(v); try { localStorage.setItem(VIA_KEY, v); } catch { /* fine */ } };
+  const wallet = (manifest.payment || []).find((p) => p.type === "solana-usdc")
+    || { type: "solana-usdc", ratePerMinute: DEFAULT_RATE, settleAt: settleFor(DEFAULT_BATCH, DEFAULT_RATE) };
+  const setWallet = (next) => {
+    const rest = (manifest.payment || []).filter((p) => p.type !== "solana-usdc");
+    update({ ...manifest, payment: [next, ...rest] });
+  };
+  const hasWallet = payees.some((p) => p.address);
+  const subscribing = (manifest.payment || []).some((p) => p.type === "stripe-subscription");
+  const liveAddresses = readPayees(live || { payment: [] }).map((p) => p.address).filter(Boolean);
+  const head = <div class="page-head"><h1>Earnings</h1></div>;
+
+  if (!hasWallet && !subscribing) {
+    return (<>{head}<div class="stack">
+      <GetPaid via={via} onVia={setVia} payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} />
+    </div></>);
+  }
+
   return (
     <>
-      <div class="page-head">
-        <h1>Earnings</h1>
-      </div>
-
+      {head}
       <div class="stack">
-      <EarningsSummary paid={paid} payees={payees} />
-
-      <Listeners api={api} paid={paid} rate={rate} settleAt={settleAt} />
-
-      <CashOut api={api} payees={payees} network={network} />
-
-      <FeesCard api={api} network={network} payees={payees} />
-
-      <section class="card nothing">
-        <h2>Share your link</h2>
-        <p>{published
-          ? "Listeners find you through it. Send it to people who already listen to you."
-          : "Publish your music first (Music tab), then send this to people who already listen to you."}</p>
-
-        <div class="copy-row">
-          <CopyButton text={node.url} label="Copy your link" className="btn sm" />
-          <code>{node.url.replace(/^https:\/\//, "")}</code>
-        </div>
-
-      </section>
+        {/* Only until it's published: after that the card below shows the wallet. */}
+        {hasWallet && !liveAddresses.includes(payees.find((p) => p.address).address) && (
+          <PayoutReady address={payees.find((p) => p.address).address} live={false} />
+        )}
+        {hasWallet && <EarningsSummary paid={paid} payees={payees} />}
+        {hasWallet && <Pricing wallet={wallet} onChange={setWallet} />}
+        {subscribing && <Subscriptions manifest={manifest} update={update} api={api} />}
+        <Listeners api={api} paid={paid} rate={rate} settleAt={settleAt} />
+        {hasWallet && <CashOut api={api} payees={payees} network={network} via={via} />}
+        {hasWallet && <FeesCard api={api} network={network} payees={payees} />}
+        {!hasWallet && <GetPaid via={via} onVia={setVia} payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} only={["cashapp", "coinbase"]} />}
+        <details class="advanced">
+          <summary>More <span class="note">{[!subscribing && "card subscriptions", hasWallet && "split with bandmates", hasWallet && "test mode"].filter(Boolean).join(", ")}</span></summary>
+          <div class="stack">
+            {!subscribing && <Subscriptions manifest={manifest} update={update} api={api} />}
+            {hasWallet && <Splits payees={payees} rate={wallet.ratePerMinute ?? 0} onChange={setPayees} />}
+            {hasWallet && (
+              <section class="card">
+                <TestMoney wallet={wallet} onChange={setWallet} />
+              </section>
+            )}
+          </div>
+        </details>
       </div>
     </>
   );
@@ -2608,18 +2605,18 @@ export function explain(error, manifest) {
   if (/tracks\[\d+\]\.duration$/.test(path)) return `The length of ${tname} on ${rname} could not be read. Try Replace audio with the same file.`;
   if (/tracks\[\d+\]\.sale\.price$/.test(path)) return `${tname} on ${rname} needs a price from $0.50 to $1000 to sell, or choose Stop selling.`;
   if (/^releases\[\d+\]\.sale\.price$/.test(path)) return `The price of ${rname} needs to be from $0.50 to $1000, or empty if it isn't for sale.`;
-  if (/^artist\.name$/.test(path)) return "Add the name you release under, in Settings.";
+  if (/^artist\.name$/.test(path)) return "Add the name you release under, in Profile.";
   if (/^artist\.links\[(\d+)\]\.url$/.test(path)) {
     const n = Number(path.match(/links\[(\d+)\]/)[1]) + 1;
-    return `Link ${n} in Settings needs a full address, starting with https://`;
+    return `Link ${n} in Profile needs a full address, starting with https://`;
   }
   if (/^artist\.links\[(\d+)\]\.label$/.test(path)) {
     const n = Number(path.match(/links\[(\d+)\]/)[1]) + 1;
-    return `Link ${n} in Settings needs a label, like Bandcamp or Instagram.`;
+    return `Link ${n} in Profile needs a label, like Bandcamp or Instagram.`;
   }
-  if (/address$/.test(path)) return "A payment address in Settings doesn't look right. It should be a Solana address: 32 to 44 letters and numbers.";
-  if (/recipients$/.test(path) && /total/.test(detail)) return `The shares in Settings ${detail.replace(/^splits must total 100%, got /, "add up to ").replace(/$/, ", not 100%")}.`;
-  if (/^licence\.url$/.test(path)) return "Your own terms need the address where they are published, in Settings.";
+  if (/address$/.test(path)) return "A payment address in Earnings doesn't look right. It should be a Solana address: 32 to 44 letters and numbers.";
+  if (/recipients$/.test(path) && /total/.test(detail)) return `The shares in Earnings ${detail.replace(/^splits must total 100%, got /, "add up to ").replace(/$/, ", not 100%")}.`;
+  if (/^licence\.url$/.test(path)) return "Your own terms need the address where they are published, in Profile.";
   return `Something isn't valid yet: ${error}`;
 }
 
@@ -2771,8 +2768,8 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
     out = withSaleLinks(out, links);
     const wallet = (out.payment || []).some((p) => p.type === "solana-usdc");
     if (items.length && !wallet && !Object.keys(links).length) {
-      setTab("settings");
-      notify("error", "Nothing was published. To sell songs and albums, connect Stripe (for cards) or add a payment address (for USDC), in Settings.");
+      setTab("earnings");
+      notify("error", "Nothing was published. To sell songs and albums, set up how you get paid, in Earnings.");
       return;
     }
 
@@ -2781,7 +2778,8 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
     const { errors } = validate(out);
     if (errors.length) {
       const first = errors[0];
-      if (/^(artist|payment|licence)/.test(first)) setTab("settings");
+      if (/^payment/.test(first)) setTab("earnings");
+      else if (/^(artist|licence)/.test(first)) setTab("settings");
       else setTab("music");
       const more = errors.length > 1 ? ` (and ${errors.length - 1} more thing${errors.length > 2 ? "s" : ""} to fix)` : "";
       notify("error", `Nothing was published. ${explain(first, out)}${more}`);
@@ -2809,7 +2807,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
 
   // For the earnings checklist: music that is actually on the page, not drafted.
   const musicIsLive = !!live && (live.releases || []).some((r) => r.tracks?.length);
-  const tabs = [["home", "Home"], ["website", "Website"], ["music", "Music"], ["settings", "Settings"], ["earnings", "Earnings"]];
+  const tabs = [["home", "Home"], ["website", "Website"], ["music", "Music"], ["earnings", "Earnings"], ["settings", "Profile"]];
   const links = (
     <>
       {/* The artist's page, not the manifest: it previews as a card with their
@@ -2934,7 +2932,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
             manifest={manifest} node={node} update={update}
             upload={upload} art={art} notify={notify} player={player}
             sizeOf={api.sizeOf} charging={charging}
-            live={musicIsLive} onSettings={() => setTab("settings")}
+            live={musicIsLive} onSettings={() => setTab("earnings")}
             paid={payees.some((p) => p.address) || (next.payment || []).some((p) => p.type === "stripe-subscription")}
           />
         )}
@@ -2948,7 +2946,8 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
         )}
         {tab === "earnings" && (
           <EarningsTab
-            node={node} published={musicIsLive} api={api} payees={payees}
+            node={node} api={api} payees={payees} setPayees={setPayees}
+            manifest={manifest} update={update} live={live}
             // What listeners are actually charged is what is published, not
             // what is in the editor: a price changed and not yet published
             // must not make a listener look like they are underpaying.

@@ -170,5 +170,23 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
   cmp("overdue first, then behind, then everyone else", order.join(","), "late,behind,fine");
 }
 
+// ── where money lives ───────────────────────────────────────────────────────
+{
+  const show = (manifest, tab) => renderToString(h(Editor, { api, node: { slug: "coolartist", url: NODE },
+    initial: manifest, published: true, initialTab: tab, onSignOut() {} }));
+  const check = (name, cond) => { cond ? pass++ : fail++; console.log(`${cond ? "ok  " : "FAIL"}  ${name}`); };
+  const fresh = show(empty, "earnings");
+  check("not set up: Earnings shows only the ways to be paid", fresh.includes("How do you want to get paid?")
+    && fresh.includes("Cash App") && fresh.includes("Coinbase") && fresh.includes("Card subscriptions"));
+  check("  and no price yet", !fresh.includes("Your price") && !fresh.includes("Pays you every"));
+  const paid = show(full, "earnings");
+  check("set up: Earnings shows the price per minute and per song", paid.includes("¢/min") && paid.includes("per song)"));
+  check("  and how often, in songs", paid.includes("Pays you every"));
+  check("  not the setup choices", !paid.includes("How do you want to get paid?"));
+  const profile = show(full, "settings");
+  check("Profile holds the profile, without prices", profile.includes(">Profile<") && !profile.includes("¢/min"));
+  check("  the email is for GDPR compliance", profile.includes("Email for GDPR compliance"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
