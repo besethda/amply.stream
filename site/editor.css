@@ -753,3 +753,6 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .send-done { margin: 10px 0; }
 .cash-steps .send-how { border-top: 0; margin-top: 8px; padding-top: 0; }
 .send-how .quiet-link { justify-self: start; text-align: left; }
+.send-setup { display: grid; gap: 8px; justify-items: start; margin: 10px 0; padding: 14px 16px; border-radius: 12px; background: var(--bg2); max-width: 560px; }
+.send-setup p { margin: 0; }
+.send-how > .btn { justify-self: start; }

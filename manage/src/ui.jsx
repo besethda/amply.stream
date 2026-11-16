@@ -1358,7 +1358,7 @@ function Splits({ payees, rate, onChange }) {
             <div class="where">
               <Field label="Payout wallet address">
                 <Text
-                  value={p.address} class="mono" placeholder={i === 0 ? "Filled in when you make your wallet above" : "Ask them for their Solana address"}
+                  value={p.address} class="mono" placeholder={i === 0 ? "Filled in when you make your wallet above" : "Their Solana address, e.g. from their Amply editor or Phantom"}
                   onInput={(v) => set(i, { ...p, address: v.trim() })}
                 />
               </Field>
@@ -1996,7 +1996,7 @@ function FeesCard({ api, network, payees }) {
   useEffect(load, [load]);
 
   if (!api?.fees || !network || !payees?.length) return null;
-  const head = <h2>Cover your listeners' fees <span class="note">optional</span></h2>;
+  const head = <h2>Your fees account <span class="note">needed to send to your bank · helps listeners too</span></h2>;
   if (failed) return (
     <section class="card">{head}
       <p class="muted">Couldn't check this just now. <button class="link" onClick={load}>Try again</button></p></section>
@@ -2006,14 +2006,15 @@ function FeesCard({ api, network, payees }) {
   // 10,000 lamports a payment; what's held back keeps the account itself open.
   const payments = fees.lamports == null ? null : Math.max(0, Math.floor((fees.lamports - 1_000_000) / 10_000));
   return (
-    <section class="card">
+    <section class="card" id="fees">
       {head}
-      <p class="lead"><b>Pay about $5 once, so new listeners don't have to buy a coin before they can pay you.</b></p>
+      <p class="lead"><b>Add about $5 once.</b> It pays the tiny network fees when you send money to your bank, and lets
+        new listeners pay you without buying a coin first.</p>
       <p class={`fee-status ${fees.offering ? "on" : "off"}`}>
         <span class={`pill-status ${fees.offering ? "on" : "off"}`}>{fees.offering ? "On" : "Off"}</span>
         {fees.offering
-          ? <> You're covering your listeners' fees.{payments != null && <> Enough left for about {payments.toLocaleString()} payments.</>}</>
-          : <> Listeners pay their own tiny fees. That's fine; it's just one more step for them.</>}
+          ? <> Paying network fees for you and your listeners.{payments != null && <> Enough left for about {payments.toLocaleString()} payments.</>}</>
+          : <> Empty. Add SOL to send to your bank; until then, listeners pay their own tiny fees.</>}
       </p>
       <p class="muted">$5 lasts thousands of payments, usually months.{" "}
         <Help about="why listeners need a coin">Every payment has a tiny processing fee, a fraction of a cent,
@@ -2160,12 +2161,21 @@ function SendToBank({ api, payees, network, routeName }) {
     );
   }
 
+  if (feesOn === false) {
+    return (
+      <div class="send-setup">
+        <p><b>One-time setup before your first send.</b> Your fees account pays the tiny network fee on each
+          transfer, so nothing comes out of your earnings. It needs about $5 of SOL first, which lasts a long time.</p>
+        <button class="btn sm" onClick={() => document.getElementById("fees")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+          Set up my fees account</button>
+        <p class="muted small">Takes about 5 minutes. Come back here when it says <b>On</b>.</p>
+      </div>
+    );
+  }
+
+  const disabled = state?.busy || !toOk || micros < 10_000 || tooMuch;
   return (
     <div class="send-form">
-      {feesOn === false && (
-        <p class="warn small">Sending this way uses your fees account to pay the network fee, so it needs a few dollars
-          of SOL in it first. See <b>Cover your listeners' fees</b> below.</p>
-      )}
       <Field label={`Your ${routeName} deposit address`}>
         <Text value={to} class="mono" placeholder="Paste the address from step 1" onInput={(v) => setTo(v)} />
       </Field>
@@ -2181,9 +2191,13 @@ function SendToBank({ api, payees, network, routeName }) {
         </div>
       </Field>
       {tooMuch && <p class="warn small">That's more than your payout wallet holds.</p>}
-      <button class="btn sm" disabled={state?.busy || !toOk || micros < 10_000 || tooMuch || feesOn === false} onClick={go}>
+      <button class="btn sm" disabled={disabled} onClick={go}>
         {state?.busy ? state.text : "Send with Face ID"}</button>
-      <p class="muted small">No fee for you: your server pays the network fee. Nothing to install.</p>
+      {disabled && !state?.busy && !tooMuch && (
+        <p class="muted small">{!toOk ? "Paste your deposit address to continue." : "Enter an amount (at least 1¢) to continue."}</p>
+      )}
+      <p class="muted small">You'll confirm the details, then Face ID. Your fees account pays the tiny network fee, so
+        nothing comes out of your earnings. It usually arrives within a minute or two.</p>
       {state?.error && <p class="warn" role="alert">{state.error}</p>}
     </div>
   );
@@ -2226,12 +2240,12 @@ function CashOut({ api, payees, network }) {
               {passkey ? (
                 <>
                   <SendToBank api={api} payees={payees} network={network} routeName={r.name} />
-                  <button class="quiet-link" onClick={() => setPasskey(false)}>My payout wallet is in Phantom</button>
+                  <button class="btn ghost sm" onClick={() => setPasskey(false)}>My payout wallet is in the Phantom app</button>
                 </>
               ) : (
                 <>
                   <p class="muted">In Phantom: tap <b>USDC</b>, then <b>Send</b>, paste the address and the amount.</p>
-                  <button class="quiet-link" onClick={() => setPasskey(true)}>I made my payout wallet with Face ID</button>
+                  <button class="btn ghost sm" onClick={() => setPasskey(true)}>I made my payout wallet with Face ID</button>
                 </>
               )}
             </div>

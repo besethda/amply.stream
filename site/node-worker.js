@@ -2239,7 +2239,7 @@ async function handleManage(request, env, path) {
     const json = (v) => new Response(JSON.stringify(v), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
     if (path === "/send/prepare") {
       if (await feeBalance(rpc, feePayer, { fresh: true }).catch(() => 0) < OFFER_ABOVE_LAMPORTS) {
-        return fail(409, "your fees account needs a few dollars of SOL first (see Cover your listeners' fees)");
+        return fail(409, "your fees account needs about $5 of SOL first (see Your fees account, under Earnings)");
       }
       try {
         const info = await rpc("getAccountInfo", [to, { encoding: "base64", commitment: "confirmed" }]);

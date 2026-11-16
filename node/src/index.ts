@@ -348,7 +348,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     if (path === "/send/prepare") {
       if ((await feeBalance(rpc, feePayer, { fresh: true }).catch(() => 0)) < OFFER_ABOVE_LAMPORTS) {
-        return fail(409, "your fees account needs a few dollars of SOL first (see Cover your listeners' fees)");
+        return fail(409, "your fees account needs about $5 of SOL first (see Your fees account, under Earnings)");
       }
       try {
         // A deposit address is a plain wallet. A token account pasted by
