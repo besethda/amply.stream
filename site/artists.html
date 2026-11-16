@@ -55,6 +55,7 @@
   .how-link .eyebrow { margin-bottom: 12px; }
   .how-link .arrow { font-size: clamp(36px, 5vw, 64px); color: var(--orange); transition: transform .15s ease; }
   .how-link a:hover .arrow { transform: translateX(8px); }
+  .needs { display: grid; gap: 14px; padding-left: 20px; max-width: 46em; font-size: clamp(17px, 1.6vw, 20px); }
 </style>
 </head>
 <body>
@@ -72,7 +73,7 @@
     <div class="actions">
       <a class="btn" href="/start#try">Try it free</a>
       <span class="note">See your own page live in about a minute. No sign-up, no card.
-        It's a trial: it lasts an hour, and you keep it if you like it.</span>
+        It lasts an hour; to keep it, sign up with Cloudflare (free) within that hour.</span>
     </div>
   </div>
 </div>
@@ -104,7 +105,7 @@
       <div>
         <div class="tile b">2</div>
         <h3>Keep it</h3>
-        <p>Like it? Sign up with Cloudflare, the host, within the hour, so it's in your name. Then Amply's access ends. If not, it deletes itself.</p>
+        <p>Like it? Sign up with Cloudflare, the host, within the hour, so it's in your name. From then on only you can get in; Amply can't. If you don't, it deletes itself.</p>
       </div>
       <div>
         <div class="tile c">3</div>
@@ -112,6 +113,23 @@
         <p>Then send your link out.</p>
       </div>
     </div>
+  </div>
+</section>
+
+<section>
+  <div class="col">
+    <h2 style="margin-bottom:24px">What you'll need</h2>
+    <ul class="needs">
+      <li><strong>A free Cloudflare account.</strong> Cloudflare hosts your music. The free plan has room for
+        about 250 songs; for more (about a thousand), Cloudflare asks for a card, but the free plan still
+        charges nothing.</li>
+      <li><strong>A way to be paid.</strong> One tap with Face ID makes a payout wallet, and you can move the
+        money to Cash App or Coinbase, then your bank. Card subscriptions through your own Stripe account are
+        optional.</li>
+      <li><strong>Your own listeners.</strong> Amply doesn't promote anyone or run a chart. You share your link
+        with the people who already listen to you.</li>
+    </ul>
+    <p class="muted"><a href="/why">The awkward questions</a> · <a href="/paying">How listeners pay</a></p>
   </div>
 </section>
 
@@ -131,12 +149,8 @@
   <div class="footer-in">
     <span>amply</span>
     <div class="footer-links">
-      <a href="/how">How it works</a>
-      <a href="/protect">Protecting your music</a>
-      <a href="/privacy">Privacy</a>
-      <a href="/terms">Terms</a>
-      <a href="https://github.com/besethda/amply.stream">Source</a>
-    </div>
+<a href="/">Home</a><a href="/paying">Paying</a><a href="/artists">For artists</a><a href="/why">Questions</a><a href="/protect">Protecting your music</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/besethda/amply.stream">Source</a>
+</div>
   </div>
 </footer>
 

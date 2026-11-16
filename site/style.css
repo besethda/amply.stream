@@ -229,3 +229,13 @@ footer { border-top: 1px solid var(--line); }
 /* `hidden` always wins. Without this, a rule like `ul.marks { display: grid }`
    shows an element the page meant to hide. */
 [hidden] { display: none !important; }
+
+/* Folded detail in long pages: the summary reads first, the rest on request. */
+.prose details { border: 1px solid var(--line, rgba(0,0,0,.12)); border-radius: var(--r, 14px); padding: 14px 18px; margin: 18px 0; }
+.prose details > summary { cursor: pointer; font-weight: 600; list-style: none; }
+.prose details > summary::-webkit-details-marker { display: none; }
+.prose details > summary::before { content: "+ "; color: var(--orange); font-weight: 700; }
+.prose details[open] > summary::before { content: "\2212 "; }
+.prose details[open] > summary { margin-bottom: 10px; }
+.prose .note ul { margin: 6px 0 0; }
+.prose .note p:first-child { margin-top: 0; }
