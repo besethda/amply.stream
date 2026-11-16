@@ -667,3 +667,6 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 
 /* A passkey that couldn't make a wallet: what to do instead. */
 .note-box { border: 1px solid var(--line); background: var(--bg2); border-radius: 12px; padding: 12px 14px; }
+
+/* An artist whose service isn't answering. */
+.unreachable { margin: 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg2); }
