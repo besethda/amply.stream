@@ -2857,7 +2857,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
                     : "Everything is live"}
               </span>
               <span class="short">
-                {live === null ? "Not live" : dirty ? `${changes} not live` : "Live"}
+                {live === null ? "Not live" : dirty ? "Unpublished" : "Live"}
               </span>
             </span>
             <button class="btn sm publish" disabled={!dirty || saving} onClick={publish}>

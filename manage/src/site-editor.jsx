@@ -319,11 +319,17 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
   const [view, setView] = useState("desktop");
   const [adding, setAdding] = useState(null); // index to insert at, or null
   const [sheet, setSheet] = useState(false); // phones: is the side panel open
+  const [preview, setPreview] = useState(false); // seeing it as visitors do
+  // Undo: earlier versions of the draft. Typing in one place within a moment
+  // counts as one step, so undo takes back a word, not a letter.
+  const history = useRef([]);
+  const lastPush = useRef({ at: 0, path: null });
   const hostRef = useRef(null);
   const sideRef = useRef(null);
   const siteRef = useRef(site);
   siteRef.current = site;
   const selRef = useRef(sel);
+  const undoRef = useRef(null);
 
   const ok = site && sel && (sel === "@hero" || (sel[0] === "@" ? !!site.sections?.[Number(sel.slice(1))] : getAt(site, sel) !== undefined));
   const cur = ok ? sel : null;
@@ -331,12 +337,17 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
 
   const doc = useMemo(() => {
     if (!site) return { css: "", body: "" };
-    const r = renderSite(site, manifest, { edit: true });
+    const r = renderSite(site, manifest, { edit: !preview, listenUrl: preview ? "#" : "" });
     return { css: r.css, body: r.body };
-  }, [site, manifest]);
+  }, [site, manifest, preview]);
 
   useEffect(() => {
     const onKey = (e) => {
+      // Cmd/Ctrl+Z undoes a change, except while typing, where the browser's
+      // own undo is the right one.
+      const typing = e.target?.isContentEditable || /^(INPUT|TEXTAREA)$/.test(e.target?.tagName || "")
+        || hostRef.current?.shadowRoot?.activeElement?.isContentEditable;
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !typing) { e.preventDefault(); undoRef.current?.(); return; }
       if (e.key !== "Escape") return;
       if (adding !== null) setAdding(null);
       else if (sheet) setSheet(false);
@@ -364,8 +375,24 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
   }
 
   // ── changes ──
-  const commit = (fn) => setSite(fn(siteRef.current));
-  const setPath = (path, v) => commit((s) => setAt(s, path, v));
+  const commit = (fn, path = null) => {
+    const before = siteRef.current;
+    const now = Date.now();
+    const same = path && lastPush.current.path === path && now - lastPush.current.at < 1500;
+    if (!same) {
+      history.current.push(before);
+      if (history.current.length > 60) history.current.shift();
+    }
+    lastPush.current = { at: now, path };
+    setSite(fn(before));
+  };
+  const undo = () => {
+    const prev = history.current.pop();
+    if (prev === undefined) return;
+    lastPush.current = { at: 0, path: null };
+    setSite(prev);
+  };
+  const setPath = (path, v) => commit((s) => setAt(s, path, v), path);
   const patchSec = (i, patch) => commit((s) => ({ ...s, sections: s.sections.map((x, k) => (k === i ? { ...x, ...patch } : x)) }));
   const setLook = (patch) => commit((s) => ({ ...s, look: { ...s.look, ...patch } }));
   const taken = () => (siteRef.current.sections || []).map((s) => s.id);
@@ -398,7 +425,7 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
   };
   const remove = (i) => {
     const s = site.sections[i];
-    if (!window.confirm(`Delete the "${s.title}" section? Everything in it goes too.`)) return;
+    if (!window.confirm(`Delete the "${s.title}" section? Everything in it goes too. (You can undo this.)`)) return;
     commit((x) => ({ ...x, sections: x.sections.filter((_, k) => k !== i) }));
     setSel(null);
   };
@@ -426,6 +453,7 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
   };
 
   const openAdd = (i) => { setAdding(i); setSheet(true); };
+  undoRef.current = undo;
 
   const canvasCb = {
     sel: cur, site, select,
@@ -460,8 +488,17 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
     panel = (
       <section class="se-panel" aria-label="Selected">
         <h3>Selected: {labelOf(cur)}</h3>
-        {kind === "image" && imageSel && !getAt(site, cur) && pics.length > 0 && <p class="se-hint">Or pick one you already use, below.</p>}
         <Field path={cur} label={labelOf(cur)} kind={kind} value={getAt(site, cur)} onInput={(v) => setPath(cur, v)} art={art} />
+        {kind === "image" && pics.length > 0 && (
+          <>
+            <div class="se-label">Or use one you already have</div>
+            <div class="se-grid">
+              {pics.map((u) => (
+                <button key={u} type="button" aria-label="Use this picture" onClick={() => usePic(u)}><img src={u} alt="" loading="lazy" /></button>
+              ))}
+            </div>
+          </>
+        )}
         <button type="button" class="se-btn ghost" onClick={() => setSel(null)}>Done</button>
       </section>
     );
@@ -479,16 +516,12 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
   } else if (cur) {
     const i = Number(cur.slice(1));
     const s = site.sections[i];
-    const n = site.sections.length;
     panel = (
       <section class="se-panel" aria-label="Selected">
         <h3>Selected: {SECTION_TYPES[s.type].label} section</h3>
         <Field path={`sections.${i}.title`} label="Section title" kind="text" value={s.title}
           onInput={(v) => setPath(`sections.${i}.title`, v)} />
-        <label class="se-check">
-          <input type="checkbox" checked={!s.hidden} onChange={() => toggle(i)} />
-          <span>Show on page</span>
-        </label>
+        {s.hidden && <p class="se-hint">Hidden from your page. Use the eye in Sections below to show it again.</p>}
         {s.type === "about" && (
           <>
             <div class="se-f"><span>Picture</span>
@@ -513,14 +546,9 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
             <button type="button" class="se-btn" onClick={() => addItem(i)}>+ Add one</button>
           </div>
         )}
-        <div class="se-row">
-          <button type="button" class="se-btn ghost" disabled={i === 0} onClick={() => move(i, -1)}>Move up</button>
-          <button type="button" class="se-btn ghost" disabled={i === n - 1} onClick={() => move(i, 1)}>Move down</button>
-        </div>
-        <div class="se-row">
-          <button type="button" class="se-btn ghost danger" onClick={() => remove(i)}>Delete section</button>
-          <button type="button" class="se-btn" onClick={() => setSel(null)}>Done</button>
-        </div>
+        <button type="button" class="se-btn" onClick={() => setSel(null)}>Done</button>
+        <p class="se-hint">To move or hide it, use the arrows and the eye in Sections below.</p>
+        <button type="button" class="se-delete" onClick={() => remove(i)}>Delete this section</button>
       </section>
     );
   }
@@ -535,6 +563,18 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
           <button type="button" class="se-btn" onClick={() => setSheet(false)}>Back to my page</button>
         </div>
 
+        <div class="se-where">
+          <span>Your website</span>
+          <a href={nodeUrl} target="_blank" rel="noopener">{String(nodeUrl || "").replace(/^https:\/\//, "")} ↗</a>
+          <small>This link shows what you last published, not these edits yet.</small>
+        </div>
+        <div class="se-tools">
+          <button type="button" class="se-btn ghost" disabled={!history.current.length} onClick={undo} title="Undo (Ctrl/Cmd+Z)">↶ Undo</button>
+          <button type="button" class="se-btn ghost" aria-pressed={preview} onClick={() => { setPreview((p) => !p); setSel(null); setAdding(null); }}>
+            {preview ? "Back to editing" : "See it as visitors do"}</button>
+        </div>
+
+        <div class="se-label se-pad-x">Preview on</div>
         <div class="se-view" role="group" aria-label="Preview size">
           <button type="button" aria-pressed={view === "desktop"} onClick={() => setView("desktop")}>Desktop</button>
           <button type="button" aria-pressed={view === "phone"} onClick={() => setView("phone")}>Phone</button>
@@ -557,24 +597,25 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
         )}
 
         {adding === null && panel}
-        {!panel && adding === null && <p class="se-hint se-pad">Click anything on your page to change it.</p>}
+        {!panel && adding === null && <p class="se-hint se-pad">{preview ? "This is how visitors see it. Press Back to editing to change things." : "Click anything on your page to change it."}</p>}
 
         <section class="se-block" aria-label="Sections">
           <h3>Sections</h3>
           <ul class="se-secs">
             <li class={cur === "@hero" ? "on" : ""}>
               <button type="button" class="se-sec-main" onClick={() => pickSection("hero")}>
-                <b>{site.hero.title || "Top of the page"}</b><span>Top of the page</span>
+                <b>Top of the page</b><span>Your name, line and banner (always first)</span>
               </button>
             </li>
             {site.sections.map((s, i) => (
               <li key={s.id} class={`${cur === "@" + i ? "on" : ""}${s.hidden ? " off" : ""}`}>
                 <button type="button" class="se-sec-main" onClick={() => pickSection(i)}>
-                  <b>{s.title}</b><span>{SECTION_TYPES[s.type].label}{s.hidden ? " · hidden" : ""}</span>
+                  <b>{s.title}</b>{(s.title !== SECTION_TYPES[s.type].label || s.hidden) && (
+                    <span>{s.title !== SECTION_TYPES[s.type].label ? SECTION_TYPES[s.type].label : ""}{s.title !== SECTION_TYPES[s.type].label && s.hidden ? " · " : ""}{s.hidden ? "hidden" : ""}</span>)}
                 </button>
-                <button type="button" class="se-ico" aria-pressed={!s.hidden}
+                <button type="button" class="se-ico se-eye" aria-pressed={!s.hidden} title={s.hidden ? "Show it" : "Hide it"}
                   aria-label={s.hidden ? `Show ${s.title} on the page` : `Hide ${s.title} from the page`} onClick={() => toggle(i)}>
-                  <Eye off={s.hidden} />
+                  <Eye off={s.hidden} /><small>{s.hidden ? "Show" : "Hide"}</small>
                 </button>
                 <button type="button" class="se-ico" aria-label={`Move ${s.title} up`} disabled={i === 0} onClick={() => move(i, -1)}>↑</button>
                 <button type="button" class="se-ico" aria-label={`Move ${s.title} down`} disabled={i === site.sections.length - 1} onClick={() => move(i, 1)}>↓</button>
@@ -609,6 +650,9 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
               <button key={c} type="button" aria-label={`Accent ${c}`} aria-pressed={L.accent === c}
                 style={{ background: c }} onClick={() => setLook({ accent: c })} />
             ))}
+            {L.accent !== "#f6711e" && (
+              <button type="button" class="se-reset" onClick={() => setLook({ accent: "#f6711e" })}>Reset</button>
+            )}
             <label class="se-custom">
               <span class="se-sr">Pick any colour</span>
               <input type="color" value={L.accent || "#f6711e"} onInput={(e) => setLook({ accent: e.currentTarget.value })} />
@@ -616,25 +660,11 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
           </div>
         </section>
 
-        <section class="se-block" aria-label="Pictures">
-          <h3>Pictures</h3>
-          <p class="se-hint">{imageSel ? "Click one to use it here." : "Click a picture spot on your page first, then pick one here."}</p>
-          {pics.length > 0 && (
-            <div class="se-grid">
-              {pics.map((u) => (
-                <button key={u} type="button" disabled={!imageSel} aria-label="Use this picture" onClick={() => usePic(u)}>
-                  <img src={u} alt="" loading="lazy" />
-                </button>
-              ))}
-            </div>
-          )}
-          <label class="se-btn se-upload">
-            Upload a picture
-            <input type="file" accept="image/*" hidden onChange={uploadPic} />
-          </label>
-        </section>
 
         <p class="se-note">Changes go live when you press Publish at the top.</p>
+        <div class="se-sheet-foot">
+          <button type="button" class="btn sm" onClick={() => setSheet(false)}>Done</button>
+        </div>
       </aside>
 
       <div class="se-stage">
