@@ -184,7 +184,7 @@
   <div class="actions">
     <button class="btn ghost" id="claimed-btn">I've claimed it, carry on</button>
   </div>
-  <p class="muted" id="claim-said" role="status" hidden></p>
+  <p id="claim-said" role="status" hidden style="margin:14px 0 0;color:var(--ink)"></p>
 </section>
 
 <!-- 2 ─────────────────────────────────────────────────────────────── -->
@@ -613,7 +613,8 @@ $("#claimed-btn").addEventListener("click", async () => {
       claimAsked = true;
       said.hidden = false;
       said.textContent = "Cloudflare doesn't show it as claimed yet. Finish in the Cloudflare tab " +
-        "(it asks whether to claim the account: say yes), then press the button again.";
+        "(it asks whether to claim the account: say yes), then press the button again. " +
+        "If you're sure you've claimed it, pressing again carries on anyway.";
       return;
     }
   }
