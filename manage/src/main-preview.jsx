@@ -82,6 +82,7 @@ const api = {
   async sizeOf(url) { return url.endsWith("/a.mp3") ? 46101094 : 6_500_000; },
   async listeners() { return [{ pubkey: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", plays: 12, seconds: 2880, first_seen: Date.now() - 864e5 * 9, last_seen: Date.now() - 864e5, blocked: 0, subscribed_until: null }]; },
   async stripeStatus() { return { connected: false }; },
+  async stats() { return { songs: [] }; },
   async fees() { return { address: "8hQv3TnKcR2xWm7LpYd9FsJa4UeGbZ6NkMt5HwCqXoVr", network: "solana", lamports: 4_200_000, offering: true, offerAbove: 3_000_000, paidToday: 0, dailyCap: 1000 }; },
   async connectStripe(key, plans) {
     await wait(900);

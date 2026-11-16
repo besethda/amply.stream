@@ -241,6 +241,21 @@ export async function signedPost(pair, origin, path, extra = {}) {
   });
 }
 
+/** Tell the artist's node a song finished, for its per-song total. Nothing
+ *  about the listener is sent: no wallet, no token. */
+export async function reportHeard(origin, track, seconds) {
+  if (!(seconds >= 30)) return;
+  try {
+    await fetch(`${origin}/listen/heard`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ track, seconds: Math.round(seconds) }),
+      keepalive: true,
+      credentials: "omit",
+    });
+  } catch { /* not worth interrupting playback for */ }
+}
+
 /** Tell the node a track finished, so the artist can see how much was played. */
 export async function reportPlayed(pair, origin, seconds) {
   const token = await tokenFor(pair, origin).catch(() => null);

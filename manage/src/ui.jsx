@@ -1291,7 +1291,45 @@ function ShowWalletKey({ payees }) {
   );
 }
 
-function Splits({ payees, rate, onChange }) {
+/**
+ * Once the payout wallet is filled in: say so plainly, remind to publish if it
+ * isn't live yet, and let the artist check their Face ID really opens it
+ * (the passkey makes the key again; only the address is compared).
+ */
+function PayoutReady({ address, live }) {
+  const [check, setCheck] = useState(null);   // { ok } | { other } | { error } | "busy"
+  const [canPasskey, setCanPasskey] = useState(false);
+  useEffect(() => { mayOfferPasskey().then(setCanPasskey); }, []);
+  async function verify() {
+    setCheck("busy");
+    try {
+      const seed = await restorePasskeySeed();
+      const mine = await addressOf(seed);
+      seed.fill(0);
+      setCheck(mine === address ? { ok: true } : { other: mine });
+    } catch (e) {
+      if (e?.name === "Cancelled" || e?.name === "NotAllowedError") setCheck(null);
+      else if (e instanceof NoPasskeySecret) setCheck({ error: "This device's passkey can't open it. Try again and choose your phone." });
+      else setCheck({ error: e?.message || "Couldn't check just now." });
+    }
+  }
+  return (
+    <div class="payout-ready" role="status">
+      <p><b>✓ Your payout wallet is set up</b> <span class="mono muted small">{address.slice(0, 4)}…{address.slice(-4)}</span></p>
+      {!live && <p class="warn small">Press <b>Publish</b> at the top so listeners can start paying into it.</p>}
+      {canPasskey && (
+        check?.ok ? <p class="good small">Your Face ID opens this wallet. All good.</p>
+          : check?.other ? <p class="warn small">That Face ID opens a different wallet ({check.other.slice(0, 4)}…{check.other.slice(-4)}).
+              Try again and pick the passkey you made for Amply payouts.</p>
+          : <button class="quiet-link" disabled={check === "busy"} onClick={verify}>
+              {check === "busy" ? "Waiting for Face ID…" : "Check it opens with my Face ID"}</button>
+      )}
+      {check?.error && <p class="warn small">{check.error}</p>}
+    </div>
+  );
+}
+
+function Splits({ payees, rate, onChange, live }) {
   const total = payees.reduce((n, p) => n + (Number(p.split) || 0), 0);
   const ok = Math.abs(total - 100) <= 0.01;
   const perSong = rate * TYPICAL_SONG_MIN;
@@ -1324,6 +1362,7 @@ function Splits({ payees, rate, onChange }) {
           <p class="muted">Rather be paid by card only? Set your price to free, and offer Subscriptions instead.</p>
         </div>
       )}
+      {payees[0]?.address && <PayoutReady address={payees[0].address} live={live} />}
       <h2>Where your money goes <span class="note">and who you split it with</span>
         <Help at="wallet" about="where your money goes">Each payment goes straight to the payout wallets here; it
           never passes through Amply. Playing with a band or a producer? Add them, each with their own payout
@@ -1490,7 +1529,7 @@ function OwnDomain({ manifest, update }) {
   );
 }
 
-function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, dirty, saving, onPublish, api, onSignOut }) {
+function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, dirty, saving, onPublish, api, onSignOut, liveAddresses = [] }) {
   const artist = manifest.artist || {};
   const wallet = (manifest.payment || []).find((p) => p.type === "solana-usdc")
     || { type: "solana-usdc", ratePerMinute: DEFAULT_RATE, settleAt: settleFor(DEFAULT_BATCH, DEFAULT_RATE) };
@@ -1592,7 +1631,8 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
             The rest is optional and follows. */}
         <Price wallet={wallet} onChange={setWallet} hasAddress={payees.some((p) => p.address)}
           subscribing={(manifest.payment || []).some((p) => p.type === "stripe-subscription")} />
-        <Splits payees={payees} rate={wallet.ratePerMinute ?? 0} onChange={setPayees} />
+        <Splits payees={payees} rate={wallet.ratePerMinute ?? 0} onChange={setPayees}
+          live={!!payees[0]?.address && liveAddresses.includes(payees[0].address)} />
         {/* Folded away until the first publish: none of it is needed to go live. */}
         <details class="advanced" open={everPublished}>
           <summary>More options <span class="note">card subscriptions, how often listeners pay, your own website, your terms</span></summary>
@@ -2263,6 +2303,94 @@ function CashOut({ api, payees, network }) {
   );
 }
 
+/**
+ * The editor's front page: how it's going, at a glance. Listener totals come
+ * from the server's ledger (a tally per wallet, never a history), song totals
+ * from its per-song counts (nothing about who), and what's been paid from the
+ * public payment records, read here in the browser.
+ */
+function HomeTab({ api, manifest, payees, rate, network, live, onGo }) {
+  const [rows, setRows] = useState(null);
+  const [songs, setSongs] = useState(null);
+  const paid = usePayments(payees, network);
+  useEffect(() => {
+    api.listeners().then(setRows).catch(() => setRows([]));
+    (api.stats ? api.stats() : Promise.resolve({ songs: [] })).then((s) => setSongs(s.songs || [])).catch(() => setSongs([]));
+  }, []);
+
+  const titles = new Map((manifest.releases || []).flatMap((r) => (r.tracks || []).map((t) => [t.id, t.title || "Untitled"])));
+  const listeners = rows?.length ?? null;
+  const minutes = rows ? Math.round(rows.reduce((n, r) => n + (r.seconds || 0), 0) / 60) : null;
+  const now = Date.now();
+  // What the listening of people paying by the minute would have cost at
+  // today's price. Subscribers pay by card, so they're left out.
+  const owed = rows && rate > 0
+    ? rows.filter((r) => !(r.subscribed_until > now)).reduce((n, r) => n + ((r.seconds || 0) / 60) * rate * 1_000_000, 0)
+    : 0;
+  const ratio = paid.at && owed > 0 ? Math.min(999, Math.round(((paid.total || 0) / owed) * 100)) : null;
+  const top = (songs || []).filter((s) => titles.has(s.track)).slice(0, 5);
+  const most = top[0]?.plays || 1;
+
+  return (
+    <>
+      <div class="page-head"><h1>Home</h1></div>
+      <div class="stack">
+        {!live && (
+          <section class="card first-steps">
+            <h2>Start here</h2>
+            <p>Add your music and publish it, then your numbers show up here.</p>
+            <button class="btn sm" onClick={() => onGo("music")}>Add your music</button>
+          </section>
+        )}
+
+        <div class="stat-row">
+          <div class="card stat"><span class="label">LISTENERS</span><b>{listeners ?? "…"}</b>
+            <span class="muted small">who've played your paid songs</span></div>
+          <div class="card stat"><span class="label">MINUTES LISTENED</span><b>{minutes == null ? "…" : minutes.toLocaleString()}</b>
+            <span class="muted small">on your paid songs</span></div>
+          <div class="card stat"><span class="label">PAID TO YOU</span>
+            <b>{paid.at ? `$${((paid.total || 0) / 1_000_000).toFixed(2)}` : paid.busy ? "…" : "—"}</b>
+            <span class="muted small">{paid.error ? "couldn't check just now" : "by listeners, all time"}</span></div>
+        </div>
+
+        <section class="card">
+          <h2>Are listeners paying? <Help about="the paying rate">What listeners have paid you, compared with what their
+            listening cost at your current price. It's rough: payments include tips and purchases, people pay every few
+            songs (so recent listening isn't paid yet), and a price change shifts the comparison.</Help></h2>
+          {rate === 0 ? <p class="muted">Your music is free, so nobody is charged.</p>
+            : ratio == null ? <p class="muted">{paid.busy || !rows ? "Working it out…" : "Nothing to compare yet: no paid listening so far."}</p>
+            : (
+              <>
+                <div class="pay-bar" aria-hidden="true"><i style={`width:${Math.min(100, ratio)}%`} /></div>
+                <p><b>{ratio}%</b> of what their listening cost has been paid
+                  {ratio >= 90 ? ". Looking healthy." : ratio >= 60 ? ". Some is probably just not due yet." : ". Worth a look at your listeners."}</p>
+                {ratio < 90 && <button class="link" onClick={() => onGo("earnings")}>See who hasn't paid</button>}
+              </>
+            )}
+        </section>
+
+        <section class="card">
+          <h2>Most played</h2>
+          {songs == null ? <p class="muted">Loading…</p>
+            : !top.length ? <p class="muted">Song counts start once people play your music in the latest Amply app.</p>
+            : (
+              <ol class="top-songs">
+                {top.map((s) => (
+                  <li key={s.track}>
+                    <span class="name">{titles.get(s.track)}</span>
+                    <span class="bar"><i style={`width:${Math.max(4, Math.round((s.plays / most) * 100))}%`} /></span>
+                    <span class="muted small">{s.plays.toLocaleString()} play{s.plays === 1 ? "" : "s"} · {Math.round(s.seconds / 60).toLocaleString()} min</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+          <p class="muted small">Counted for each song, from everyone together: nothing about who played what.</p>
+        </section>
+      </div>
+    </>
+  );
+}
+
 function EarningsTab({ node, published, api, payees, rate, network, settleAt }) {
   const paid = usePayments(payees, network);
   return (
@@ -2534,13 +2662,21 @@ export function isNewer(latest, mine) {
   return false;
 }
 
-export function Editor({ api, node, initial, published = true, initialTab = "music", version = null, onSignOut }) {
+export function Editor({ api, node, initial, published = true, initialTab = "home", version = null, onSignOut }) {
   const [manifest, setManifest] = useState(initial);
   const [payees, setPayees] = useState(() => readPayees(initial));
   // What the page is actually serving. null on a node that has never published.
   const [live, setLive] = useState(() => (published ? initial : null));
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState(initialTab);
+  const [menu, setMenu] = useState(false);
+  const go = (id) => { setTab(id); setMenu(false); window.scrollTo?.(0, 0); };
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e) => { if (e.key === "Escape") setMenu(false); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [menu]);
   const [msg, setMsg] = useState(null);
   const player = usePlayer();
   const newer = useUpdate(version);
@@ -2656,7 +2792,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "mus
 
   // For the earnings checklist: music that is actually on the page, not drafted.
   const musicIsLive = !!live && (live.releases || []).some((r) => r.tracks?.length);
-  const tabs = [["music", "Music"], ["settings", "Settings"], ["earnings", "Earnings"]];
+  const tabs = [["home", "Home"], ["music", "Music"], ["settings", "Settings"], ["earnings", "Earnings"]];
   const links = (
     <>
       {/* The artist's page, not the manifest: it previews as a card with their
@@ -2711,6 +2847,12 @@ export function Editor({ api, node, initial, published = true, initialTab = "mus
               <span class="long">{saving ? "Publishing…" : "Publish changes"}</span>
               <span class="short">{saving ? "…" : "Publish"}</span>
             </button>
+            <button class="menu-btn" aria-expanded={menu} aria-controls="menu-pop" aria-label={menu ? "Close menu" : "Menu"}
+              onClick={() => setMenu((m) => !m)}>
+              {menu
+                ? <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                : <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>}
+            </button>
           </div>
         </div>
 
@@ -2719,7 +2861,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "mus
             {tabs.map(([id, label]) => (
               <button
                 key={id} class="tab" role="tab" aria-selected={tab === id}
-                onClick={() => setTab(id)}
+                onClick={() => go(id)}
               >
                 {label}
               </button>
@@ -2727,6 +2869,19 @@ export function Editor({ api, node, initial, published = true, initialTab = "mus
           </div>
           <div class="tabs-right">{links}</div>
         </nav>
+
+        {/* On a phone: the sections and links in a pop-out menu instead. */}
+        {menu && (
+          <div class="menu-pop" id="menu-pop">
+            <nav aria-label="Sections">
+              {tabs.map(([id, label]) => (
+                <button key={id} class={`menu-item${tab === id ? " on" : ""}`} aria-current={tab === id ? "page" : undefined}
+                  onClick={() => go(id)}>{label}</button>
+              ))}
+            </nav>
+            <div class="menu-links">{links}</div>
+          </div>
+        )}
       </header>
 
       <main class="page">
@@ -2746,6 +2901,13 @@ export function Editor({ api, node, initial, published = true, initialTab = "mus
           </div>
         )}
 
+        {menu && <button class="menu-scrim" aria-label="Close menu" onClick={() => setMenu(false)} />}
+
+        {tab === "home" && (
+          <HomeTab api={api} manifest={live || manifest} payees={payees} live={musicIsLive}
+            rate={livePayment?.ratePerMinute ?? 0} network={livePayment?.network || "solana"} onGo={go} />
+        )}
+
         {tab === "music" && (
           <MusicTab
             manifest={manifest} node={node} update={update}
@@ -2760,6 +2922,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "mus
             manifest={manifest} payees={payees} setPayees={setPayees}
             update={update} art={art} everPublished={live !== null} api={api}
             dirty={dirty} saving={saving} onPublish={publish} onSignOut={onSignOut}
+            liveAddresses={readPayees(live || { payment: [] }).map((p) => p.address).filter(Boolean)}
           />
         )}
         {tab === "earnings" && (

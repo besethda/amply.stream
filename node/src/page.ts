@@ -332,6 +332,8 @@ wallet that plays their paid tracks:</p>
 <p><strong>What is not kept:</strong> which tracks you played, or when you played any one of
 them. This server does not record that at all. Nothing is kept for tracks ${name} has made
 free, which anyone can play without a wallet.</p>
+<p>Separately, each song keeps a count of how often it has been played by everyone together, so
+${name} can see what's popular. It holds no wallet and nothing about who played it.</p>
 <p>No account, email address or name is asked for. A wallet address does not say who you are
 by itself, but it can sometimes be linked to a person, so it is treated as personal data.</p>
 

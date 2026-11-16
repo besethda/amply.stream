@@ -391,6 +391,8 @@ wallet that plays their paid tracks:</p>
 <p><strong>What is not kept:</strong> which tracks you played, or when you played any one of
 them. This server does not record that at all. Nothing is kept for tracks ${name} has made
 free, which anyone can play without a wallet.</p>
+<p>Separately, each song keeps a count of how often it has been played by everyone together, so
+${name} can see what's popular. It holds no wallet and nothing about who played it.</p>
 <p>No account, email address or name is asked for. A wallet address does not say who you are
 by itself, but it can sometimes be linked to a person, so it is treated as personal data.</p>
 
@@ -560,6 +562,21 @@ async function updateSubscription(db, subscription, until, now = Date.now()) {
 }
 async function pruneSubscriptions(db, now = Date.now()) {
   await db.prepare("DELETE FROM subscriptions WHERE until < ?").bind(now - KEEP_FOR).run();
+}
+async function heard(db, track, seconds) {
+  const clean = Math.max(0, Math.min(Math.round(seconds), 3600));
+  await db.prepare(
+    `INSERT INTO track_plays (track, plays, seconds) VALUES (?, 1, ?)
+     ON CONFLICT(track) DO UPDATE SET plays = plays + 1, seconds = seconds + excluded.seconds`
+  ).bind(track, clean).run();
+}
+async function songTotals(db) {
+  try {
+    const r = await db.prepare("SELECT track, plays, seconds FROM track_plays ORDER BY plays DESC LIMIT 500").all();
+    return r.results || [];
+  } catch {
+    return [];
+  }
 }
 
 // src/identity.ts
@@ -2203,6 +2220,12 @@ async function handleManage(request, env, path) {
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
     });
   }
+  if (request.method === "GET" && path === "/stats") {
+    return new Response(JSON.stringify({ songs: await songTotals(env.DB) }), {
+      status: 200,
+      headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
+    });
+  }
   if (request.method === "GET" && path === "/fees") {
     const address = await feeAddress(env.DB);
     const text = await manifestText(env);
@@ -2659,6 +2682,16 @@ async function handleListen(request, env, path) {
     const body = await jsonBody(request);
     await counted(env.DB, who, Number(body?.seconds) || 0);
     if (Math.random() < 0.02) await pruneStale(env.DB);
+    return new Response(null, { status: 204, headers: noStore() });
+  }
+  if (path === "/heard" && request.method === "POST") {
+    const body = await jsonBody(request);
+    const track = String(body?.track || "");
+    const seconds = Number(body?.seconds) || 0;
+    const manifest = await manifestNowOf(env);
+    const known = (manifest?.releases || []).some((r) => (r.tracks || []).some((t) => t.id === track));
+    if (known && seconds >= 30) await heard(env.DB, track, seconds).catch(() => {
+    });
     return new Response(null, { status: 204, headers: noStore() });
   }
   if (path === "/forget" && request.method === "POST") {

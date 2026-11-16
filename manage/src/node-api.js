@@ -74,6 +74,11 @@ export function nodeApi() {
 
     /** The wallet that pays listeners' network fees: its address, balance and
      *  today's count. Never its key: no route returns that. */
+    /** Plays per song, from everyone together. Nothing about who. */
+    async stats() {
+      return (await req("GET", "/stats")).json();
+    },
+
     async fees() {
       return (await req("GET", "/fees")).json();
     },

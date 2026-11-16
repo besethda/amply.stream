@@ -756,3 +756,57 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .send-setup { display: grid; gap: 8px; justify-items: start; margin: 10px 0; padding: 14px 16px; border-radius: 12px; background: var(--bg2); max-width: 560px; }
 .send-setup p { margin: 0; }
 .send-how > .btn { justify-self: start; }
+
+/* ── Home: the numbers at a glance ───────────────────────────────── */
+.stat-row { display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.stat { display: grid; gap: 4px; }
+.stat .label { font-size: 12px; letter-spacing: .08em; color: var(--ink3); font-weight: 600; }
+.stat b { font-size: 34px; line-height: 1.1; color: var(--ink); }
+.pay-bar { height: 12px; border-radius: 99px; background: var(--bg2); overflow: hidden; margin: 6px 0 10px; }
+.pay-bar i { display: block; height: 100%; background: var(--orange); border-radius: 99px; }
+.top-songs { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; counter-reset: song; }
+.top-songs li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, 2fr) auto; align-items: center; gap: 12px; counter-increment: song; }
+.top-songs .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.top-songs .name::before { content: counter(song) ". "; color: var(--ink3); }
+.top-songs .bar { height: 8px; border-radius: 99px; background: var(--bg2); overflow: hidden; }
+.top-songs .bar i { display: block; height: 100%; background: var(--orange); }
+
+/* ── the phone menu ──────────────────────────────────────────────── */
+.menu-btn, .menu-pop, .menu-scrim { display: none; }
+
+@media (max-width: 700px) {
+  .stat-row { grid-template-columns: 1fr; }
+  .stat b { font-size: 28px; }
+  .top-songs li { grid-template-columns: minmax(0, 1fr) auto; }
+  .top-songs .bar { grid-column: 1 / -1; grid-row: 2; }
+
+  /* The tabs and links move into a pop-out menu behind a button. */
+  .tabs-in { display: none; }
+  .page-links { display: none; }
+  .menu-btn {
+    display: inline-grid; place-items: center; width: 44px; height: 44px; flex: none;
+    border: 1px solid var(--line); border-radius: 50%; background: var(--bg); color: var(--ink); cursor: pointer;
+  }
+  .menu-btn[aria-expanded="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .menu-pop {
+    display: grid; gap: 4px; padding: 10px var(--gut) 18px;
+    border-top: 1px solid var(--line); background: var(--bg);
+    box-shadow: 0 18px 40px rgba(0, 0, 0, .12);
+  }
+  .menu-pop nav { display: grid; gap: 2px; }
+  .menu-item {
+    text-align: left; background: none; border: 0; font: inherit; font-size: 22px; font-weight: 700;
+    letter-spacing: -0.02em; color: var(--ink3); padding: 12px 4px; cursor: pointer; border-radius: 10px;
+  }
+  .menu-item.on { color: var(--ink); }
+  .menu-item.on::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 10px;
+    border-radius: 50%; background: var(--orange); vertical-align: middle; }
+  .menu-links { display: flex; flex-wrap: wrap; gap: 10px 22px; padding: 12px 4px 0; border-top: 1px solid var(--line); margin-top: 6px; }
+  .menu-scrim {
+    display: block; position: fixed; inset: 0; z-index: 5; border: 0; padding: 0;
+    background: rgba(0, 0, 0, .25); cursor: pointer;
+  }
+}
+
+.payout-ready { padding: 12px 16px; border-radius: 12px; background: var(--bg2); margin-bottom: 16px; display: grid; gap: 6px; justify-items: start; }
+.payout-ready p { margin: 0; }

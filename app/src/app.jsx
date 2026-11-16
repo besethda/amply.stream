@@ -19,7 +19,7 @@ import {
 } from "./paying.js";
 import { agreeRate } from "./spend.js";
 import {
-  tokenFor, reportPlayed, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
+  tokenFor, reportPlayed, reportHeard, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
   manageSubscription, claimSubscription,
 } from "./identify.js";
 import { perMinute, subscriptionOnly, plans as plansOf } from "../../spec/pricing.mjs";
@@ -248,6 +248,9 @@ export function App() {
         return audioUrl(track.url, token);
       },
       onFinished(track, seconds) {
+        // The song's own count, for the artist's "most played": nothing about
+        // who, so free tracks count too. Songs on this phone aren't anyone's.
+        if (track.id && /^https:/.test(track.url || "")) reportHeard(originOf(track.url), track.id, seconds);
         if (!track.needsWallet || !holder.current) return;
         reportPlayed(holder.current, originOf(track.url), seconds);
       },

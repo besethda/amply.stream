@@ -19,7 +19,7 @@ import { verifyAccess, type AccessConfig } from "./access";
 import { renderPage, renderPrivacy, pageCsp } from "./page";
 import {
   setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale,
-  subscribedUntil, pruneSubscriptions,
+  subscribedUntil, pruneSubscriptions, heard, songTotals,
 } from "./store";
 import { introduce, readToken, guardedKeys, proveOwnership } from "./listen";
 import { challenge } from "./identity";
@@ -308,6 +308,13 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     return new Response(JSON.stringify({ email, version: VERSION, home }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
+    });
+  }
+
+  // Totals per song, for the editor's Home tab.
+  if (request.method === "GET" && path === "/stats") {
+    return new Response(JSON.stringify({ songs: await songTotals(env.DB) }), {
+      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
     });
   }
 
@@ -826,6 +833,20 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     // Now and then, clear out wallets not heard from in a year. Here rather
     // than on a timer, so there is nothing for an artist to set up.
     if (Math.random() < 0.02) await pruneStale(env.DB);
+    return new Response(null, { status: 204, headers: noStore() });
+  }
+
+  // A song finished playing: counted for the song, by nobody in particular.
+  // No wallet, no token, nothing about who: free tracks count too. Only a
+  // track on the published page is counted, so made-up names can't fill the
+  // table, and each address can only report so fast (limits.ts).
+  if (path === "/heard" && request.method === "POST") {
+    const body = await jsonBody(request);
+    const track = String(body?.track || "");
+    const seconds = Number(body?.seconds) || 0;
+    const manifest = await manifestNowOf(env) as { releases?: { tracks?: { id: string }[] }[] } | null;
+    const known = (manifest?.releases || []).some((r) => (r.tracks || []).some((t) => t.id === track));
+    if (known && seconds >= 30) await heard(env.DB, track, seconds).catch(() => {});
     return new Response(null, { status: 204, headers: noStore() });
   }
 

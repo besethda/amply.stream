@@ -60,6 +60,14 @@ export const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS sales_by_owner ON sales (owner)`,
   `CREATE INDEX IF NOT EXISTS sales_by_buyer ON sales (buyer)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS sales_by_gift ON sales (gift)`,
+  // How much each song has been played, by everyone together: a number per
+  // song, never per listener, so the artist can see what's popular without
+  // anyone's listening being recorded.
+  `CREATE TABLE IF NOT EXISTS track_plays (
+     track TEXT PRIMARY KEY,
+     plays INTEGER NOT NULL DEFAULT 0,
+     seconds INTEGER NOT NULL DEFAULT 0
+   )`,
   // How many listeners' network fees the node paid each day (settle.ts): a
   // number per day, to cap what the fee wallet can spend. Not who, not what.
   `CREATE TABLE IF NOT EXISTS fee_days (
@@ -346,4 +354,24 @@ export async function updateSubscription(
 /** Subscriptions that ended more than KEEP_FOR ago. */
 export async function pruneSubscriptions(db: D1Database, now = Date.now()): Promise<void> {
   await db.prepare("DELETE FROM subscriptions WHERE until < ?").bind(now - KEEP_FOR).run();
+}
+
+/** One more finished play of a song, by nobody in particular. */
+export async function heard(db: D1Database, track: string, seconds: number): Promise<void> {
+  const clean = Math.max(0, Math.min(Math.round(seconds), 3600));
+  await db.prepare(
+    `INSERT INTO track_plays (track, plays, seconds) VALUES (?, 1, ?)
+     ON CONFLICT(track) DO UPDATE SET plays = plays + 1, seconds = seconds + excluded.seconds`,
+  ).bind(track, clean).run();
+}
+
+/** Every song's totals, most played first. Empty on a database built before
+ *  the table existed. */
+export async function songTotals(db: D1Database): Promise<{ track: string; plays: number; seconds: number }[]> {
+  try {
+    const r = await db.prepare("SELECT track, plays, seconds FROM track_plays ORDER BY plays DESC LIMIT 500").all<{ track: string; plays: number; seconds: number }>();
+    return r.results || [];
+  } catch {
+    return [];
+  }
 }
