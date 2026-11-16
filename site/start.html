@@ -102,13 +102,21 @@
 
 <!-- 1 ─────────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="intro">
-  <h1 class="step">Your own page,<br>in a few minutes.</h1>
+  <h1 class="step">Try it first.<br>See your page in a minute.</h1>
 
   <ul class="rows stack">
-    <li><span class="n">1</span><span class="t">Name your page. We put it up straight away.</span></li>
-    <li><span class="n">2</span><span class="t">Make it yours: sign up with Cloudflare, the free hosting it runs on. Google or Apple sign-in works.</span></li>
+    <li><span class="n">1</span><span class="t">Try it: name your page and watch it go up. No sign-up, no card.</span></li>
+    <li><span class="n">2</span><span class="t">Like it? Keep it: sign up with Cloudflare, the free hosting it runs on. Google or Apple sign-in works.</span></li>
     <li><span class="n">3</span><span class="t">Make your editor private to you, then add your music.</span></li>
   </ul>
+
+  <p class="lead" style="margin-bottom:30px">It's a trial page. You can open it, look around and send it to a friend.
+  If you don't keep it, Cloudflare deletes it after an hour and nothing is left behind.</p>
+
+  <div class="actions" style="margin-bottom:38px">
+    <button class="btn" data-go="instant">Try it free</button>
+    <a class="link" href="/">Not now</a>
+  </div>
 
   <div class="card orange" style="margin-bottom:30px">
     <h2 style="font-size:clamp(28px,3.4vw,44px);margin-bottom:22px">No card needed.</h2>
@@ -123,10 +131,6 @@
   nobody can take your music down or change the terms on you. It also means the account is
   yours to look after.</p>
 
-  <div class="actions">
-    <button class="btn" data-go="instant">Let's go</button>
-    <a class="link" href="/">Not now</a>
-  </div>
   <p class="muted" style="margin-top:26px">Already have a Cloudflare account?
     <button class="link" data-go="cloudflare">Use it instead</button> (Cloudflare asks for a card on
     that route; nothing is charged).</p>
@@ -135,7 +139,7 @@
 <!-- 2, instant ──────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="instant">
   <h1 class="step">Name your page.</h1>
-  <p class="lead">We'll put it up straight away, in a new Cloudflare account. You make it yours next.</p>
+  <p class="lead">We'll put it up straight away, in a new Cloudflare account, so you can see it. It lasts an hour. Keep it if you like it.</p>
 
   <label class="f" for="instant-name">
     <span>Your name</span>
@@ -158,8 +162,9 @@
 
 <!-- 3, claim ────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="claim">
-  <h1 class="step">Your page is up.<br><span class="orange">Now make it yours.</span></h1>
-  <p class="lead">It's empty for now: you'll add your music in a few minutes, once it's yours.</p>
+  <h1 class="step">Your page is up.<br><span class="orange">Like it? Keep it.</span></h1>
+  <p class="lead">Open it and have a look. It's empty for now: you'll add your music in a few minutes, once it's yours.
+  Not for you? Do nothing, and it deletes itself.</p>
 
   <p class="live-url"><a id="live-link" href="#" target="_blank" rel="noopener"></a></p>
 
@@ -917,7 +922,10 @@ async function watchCertificate(url) {
     if (state.step === "claim") paintClaim();
     // A page interrupted while being made goes back to where it started.
     const back = state.path === "instant" && !pendingPreview() ? "instant" : "connect";
-    show(["working", "error", "choose"].includes(state.step) ? back : state.step);
+    // "Try it free" links (/start#try) go straight to naming the page,
+    // unless a setup is already under way in this browser.
+    const trying = location.hash === "#try" && state.step === "intro";
+    show(trying ? "instant" : ["working", "error", "choose"].includes(state.step) ? back : state.step);
     return;
   }
 
