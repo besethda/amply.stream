@@ -4,7 +4,7 @@
 import { useState } from "preact/hooks";
 import { Icon } from "./icons.jsx";
 import { money, SetUp, TopUp, SendBack, SaveBackup } from "./wallet-ui.jsx";
-import { backupSaved, machinery } from "./paying.js";
+import { backupSaved, machinery, passkeyWallet } from "./paying.js";
 import { NETWORKS, networkName, useNetwork } from "./networks.js";
 import { isSubscribed, subscriptionUntil, originOf } from "./identify.js";
 import { nameOf } from "./screens.jsx";
@@ -93,7 +93,10 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
       <div class="head"><h1>You</h1></div>
       <div class="pad stack">
         {!pair ? <SetUp onMade={setPair} /> : <>
-          {!saved && (
+          {passkeyWallet(pair.publicKey.toBase58()) ? (
+            <p class="note-line good-ink small"><Icon.check size={14} /> Protected by your passkey. Use it to open this
+              wallet on your other devices.</p>
+          ) : !saved && (
             <button class="alert" onClick={() => setView("backup")}>
               <Icon.warn size={18} /><span>Backup key not saved</span><b>Save</b>
             </button>

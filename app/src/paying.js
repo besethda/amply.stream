@@ -43,6 +43,12 @@ export function markBackupSaved(address) {
   try { localStorage.setItem(SAVED, address); } catch { /* asked again next time */ }
 }
 
+/** Whether this wallet came from a passkey (wallet.js adoptSeed). Cheap: no
+ *  wallet library needed to ask. */
+export function passkeyWallet(address) {
+  try { return !!address && localStorage.getItem("amply.wallet.passkey") === address; } catch { return false; }
+}
+
 /** Opened from the home screen rather than a browser tab. Deleting that icon
  *  deletes everything the app keeps — the wallet included. */
 export const onHomeScreen = () => {

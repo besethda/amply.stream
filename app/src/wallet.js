@@ -92,9 +92,33 @@ export function restoreWallet(secret) {
   return pair;
 }
 
+/**
+ * Keep a wallet that came from a passkey (spec/passkey-wallet.mjs). The
+ * passkey can always make it again, on this device or another, so the copy
+ * kept here is only for everyday use. If this device already has a different
+ * wallet, it is never replaced: that would hide the money in it.
+ */
+export function adoptSeed(seed) {
+  const pair = Keypair.fromSeed(seed);
+  const existing = loadWallet();
+  if (existing && existing.publicKey.toBase58() !== pair.publicKey.toBase58()) {
+    throw new Error("This device already has a different wallet. Send its money to the new one first, or remove it.");
+  }
+  save(pair);
+  try { localStorage.setItem(PASSKEY_KEY, pair.publicKey.toBase58()); } catch { /* shown as unprotected */ }
+  return pair;
+}
+
+const PASSKEY_KEY = "amply.wallet.passkey";
+
+/** Whether this wallet came from a passkey, so it can be made again anywhere. */
+export function fromPasskey(pair) {
+  try { return !!pair && localStorage.getItem(PASSKEY_KEY) === pair.publicKey.toBase58(); } catch { return false; }
+}
+
 /** Deliberately explicit, and never called without asking first. */
 export function forgetWallet() {
-  try { localStorage.removeItem(KEY); } catch { /* nothing to do */ }
+  try { localStorage.removeItem(KEY); localStorage.removeItem(PASSKEY_KEY); } catch { /* nothing to do */ }
 }
 
 // ── what's in it ────────────────────────────────────────────────────────────
