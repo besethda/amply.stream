@@ -115,8 +115,9 @@ who has subscribed, and never shown again — not to you, and not to Amply. You 
 its wallet's address to Stripe with the payment. Afterwards, your streaming service asks Stripe
 about that payment, and checks each subscription again when it's due to renew, and once a day,
 so renewals and cancellations are noticed. The wallet is only used as a name here:
-a subscriber doesn't need any money in it. That's also why they should keep its backup key —
-it's what carries the subscription to a new phone.</p>
+a subscriber doesn't need any money in it. That's also why the wallet matters: made with a
+passkey, it follows them to a new phone on its own; made with a backup code, the code is what
+carries the subscription across.</p>
 
 <p><strong>Cancelling and refunds</strong> happen on Stripe's own page, which listeners open
 from your page in the app. Refunds are up to you, in your Stripe dashboard. Selling
@@ -126,13 +127,18 @@ can't give you tax or legal advice.</p>
 
 <h2 id="setup-wallet">Which wallet should I use?</h2>
 
-<p><strong>Phantom.</strong> It's free, it works on your phone or in your browser, and
-setting it up takes a couple of minutes. Copy the address it gives you into <em>Who gets
-paid</em> in your editor, and you're done. You don't need to put anything in it to start
-receiving.</p>
+<p><strong>The one your editor makes with Face ID.</strong> In <em>Who gets paid</em>, tap
+<em>Make my wallet with Face ID or a passkey</em>. On a computer that's Touch ID, Windows Hello,
+or your phone. There's no app to install and no recovery words: your passkey makes the wallet's
+key whenever it's needed, and it syncs to your other devices. You don't need to put anything in
+it to start receiving. Moving money out of it from the editor is still being built; until then,
+<em>Show my wallet key</em> in <em>Earnings</em> opens it in a wallet app.</p>
 
-<p>Any Solana wallet works — Solflare and others are fine — and your listeners don't need to
-use the same one as you. Money goes from any Solana wallet to any Solana address.</p>
+<p><strong>Or a wallet app, like Phantom.</strong> It's free, it works on your phone or in your
+browser, and setting it up takes a couple of minutes. Copy the address it gives you into
+<em>Who gets paid</em>. Any Solana wallet works, Solflare and others too, and your listeners
+don't need to use the same one as you. Money goes from any Solana wallet to any Solana
+address.</p>
 
 <p><strong>The one rule that matters: USDC on Solana.</strong> USDC is the digital dollar
 Amply uses, and it exists on several different blockchains that can't reach each other.
@@ -146,14 +152,18 @@ large deposits, not a steady trickle of small ones, and many have a minimum belo
 deposit isn't credited. Receive into your own wallet, and move money to an exchange when you
 want to cash out.</p>
 
-<p><strong>Getting it into your bank.</strong> Send USDC from your wallet to an exchange that
-operates where you live — choosing Solana as the network — sell it for your own currency,
-and withdraw. Doing that occasionally, in larger amounts, keeps the fees down.</p>
+<p><strong>Getting it into your bank.</strong> Send USDC from your wallet to an app that
+turns it into dollars, choosing Solana as the network. In the US, Cash App does it for free
+for now: in Cash App, <em>Money</em> → <em>Deposit USDC</em> → <em>Solana</em> gives you an
+address, and what arrives becomes dollars in your balance. Coinbase works in most countries:
+receive USDC on Solana, sell it one-for-one for dollars, and withdraw. Doing it occasionally,
+in larger amounts, keeps fees down. Your editor's <em>Earnings</em> tab has the steps.</p>
 
-<p><strong>Your recovery phrase is the money.</strong> When you set up your wallet it will
-show you a list of words. Anyone who has them can take everything in it, and if you lose
-them and your phone, it's gone. Write them down on paper and keep them somewhere safe.
-Amply can't recover them. Nobody can.</p>
+<p><strong>Your key is the money.</strong> With a passkey, that's the passkey: keep your
+phone's or computer's keychain safe, and if you ever lose all your passkeys, the wallet goes
+with them, so cash out now and then. With a wallet app, it's the recovery words it shows you:
+write them down on paper and keep them somewhere safe. Anyone who has them can take
+everything, and Amply can't recover either. Nobody can.</p>
 
 <h2 id="batching">Why do payments arrive in batches?</h2>
 
@@ -181,12 +191,13 @@ your amount.</p>
 <h2 id="price">How should I choose a price?</h2>
 
 <p>For reference, a stream on Spotify pays an artist somewhere around a third of a cent,
-before anyone else takes their share. A cent a minute on Amply is about four cents for a
-four-minute song, and all of it is yours.</p>
+before anyone else takes their share. Half a cent a minute on Amply, the price your editor
+starts you at, is about two cents for a four-minute song, and all of it is yours.</p>
 
 <p>So the honest framing is not "how do I match Spotify" but "what would a listener who
-actually likes me be glad to pay". Most artists should start at a cent a minute and ignore
-the slider afterwards.</p>
+actually likes me be glad to pay". Half a cent a minute means a fan who listens to you for
+an hour a day pays you about $9 a month. Most artists should start there and ignore the slider
+afterwards.</p>
 
 <h2 id="identity">Why does a listener need a wallet?</h2>
 

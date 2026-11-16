@@ -18,7 +18,7 @@ import { bareDomain, recordFor, lookup, confirms } from "../../spec/domain.mjs";
 import { makeWaves, wavesKey } from "./waves.js";
 import { coverColors } from "./colors.js";
 import { shrink, COVER_PX, BANNER_PX } from "./images.js";
-import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, NoPasskeySecret } from "../../spec/passkey-wallet.mjs";
+import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, publicKeyOf, base58, NoPasskeySecret } from "../../spec/passkey-wallet.mjs";
 
 export const MAX_UPLOAD = 90 * 1024 * 1024;
 
@@ -1232,6 +1232,57 @@ function PasskeyWallet({ onAddress }) {
   );
 }
 
+/**
+ * Opening a passkey wallet somewhere else. Until cashing out is built into
+ * the editor, an artist moves their money with a wallet app: the passkey
+ * makes the key again, and it's shown once, for importing into Phantom or
+ * Solflare. The key is checked against Who gets paid first, so the artist
+ * knows it's the right wallet, and it's never stored or sent anywhere.
+ */
+function ShowWalletKey({ payees }) {
+  const [state, setState] = useState(null);   // { key, address, ours } | { error }
+  const [busy, setBusy] = useState(false);
+
+  async function reveal() {
+    setBusy(true); setState(null);
+    try {
+      const seed = await restorePasskeySeed();
+      const pub = await publicKeyOf(seed);
+      const secret = new Uint8Array(64);
+      secret.set(seed); secret.set(pub, 32);
+      const address = base58(pub);
+      setState({ key: base58(secret), address, ours: payees.some((p) => p.address === address) });
+      seed.fill(0); secret.fill(0);
+    } catch (e) {
+      if (e instanceof NoPasskeySecret) setState({ error: "This device's passkey can't open the wallet. Try again and choose your phone." });
+      else if (e.name !== "Cancelled") setState({ error: e.message });
+    } finally { setBusy(false); }
+  }
+
+  if (!state?.key) {
+    return (
+      <div class="passkey-wallet">
+        <button class="btn ghost sm" disabled={busy} onClick={reveal}>{busy ? "Waiting for you…" : "Show my wallet key"}</button>
+        {state?.error && <p class="warn" role="alert">{state.error}</p>}
+      </div>
+    );
+  }
+  return (
+    <div class="passkey-wallet">
+      <p class={state.ours ? "good" : "warn"}>{state.ours
+        ? "This is the wallet your listeners pay into."
+        : `This passkey opens a wallet (${state.address.slice(0, 4)}…${state.address.slice(-4)}) that isn't in Who gets paid.`}</p>
+      <p class="mono key-box">{state.key}</p>
+      <div class="row">
+        <CopyButton text={state.key} label="Copy key" className="btn ghost sm" />
+        <button class="quiet-link" onClick={() => setState(null)}>Hide it</button>
+      </div>
+      <p class="muted">In Phantom: Add account → <b>Import private key</b> → Solana → paste. Anyone with this key can
+        take the money, so never send it to anyone, and hide it when you're done. Amply never sees it.</p>
+    </div>
+  );
+}
+
 function Splits({ payees, rate, onChange }) {
   const total = payees.reduce((n, p) => n + (Number(p.split) || 0), 0);
   const ok = Math.abs(total - 100) <= 0.01;
@@ -1267,8 +1318,8 @@ function Splits({ payees, rate, onChange }) {
       )}
       <h2>Who gets paid <span class="note">split every payment</span>
         <Help at="wallet" about="who gets paid">Each payment is divided the moment it's made and sent straight to
-          these Solana addresses; it never passes through Amply. No address yet? <strong>Phantom</strong> is free
-          and takes a couple of minutes. Use your own wallet, not an exchange's deposit address.</Help></h2>
+          these Solana addresses; it never passes through Amply. No address yet? Make one with Face ID or a passkey,
+          or use a wallet app like <strong>Phantom</strong>. Use your own wallet, not an exchange's deposit address.</Help></h2>
 
       <div class="split-bar">
         {payees.map((p, i) => (
@@ -1916,6 +1967,10 @@ function EarningsTab({ node, published, api, payees, rate, network, settleAt }) 
         <p class="muted">Listeners pay straight into your wallet. To move dollars to your bank, send them from
           your wallet to an app that turns them back into dollars. Always choose the <b>Solana</b> network:
           sending on another network can't be undone.</p>
+        <p class="muted"><b>Made your wallet with Face ID or a passkey?</b> Sending from it in the editor is coming.
+          Until then, open it in a wallet app (Phantom or Solflare) with its key, and send from there. Sending
+          needs a few cents of SOL for the network fee, which you can buy in the wallet app.</p>
+        <ShowWalletKey payees={payees} />
         <ol class="steps">
           <li><span class="n">A</span><span class="t">Cash App <span class="note">US · free for now</span>
             <span class="detail">In Cash App: Money → <b>Deposit USDC</b> → choose <b>Solana</b> → copy the address.

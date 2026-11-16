@@ -705,3 +705,4 @@ details.advanced > .stack { margin-top: 26px; }
 .card-note details > summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }
 .passkey-wallet .good { color: var(--good); margin: 0; font-weight: 600; }
 .passkey-wallet .warn { color: var(--bad); margin: 0; }
+.key-box { overflow-wrap: anywhere; background: var(--bg2); border-radius: 10px; padding: 10px 12px; margin: 0; font-size: 14px; }

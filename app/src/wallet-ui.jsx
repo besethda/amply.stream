@@ -123,7 +123,7 @@ export function SetUp({ onMade }) {
       <h2>Pay as you listen</h2>
       <ol class="steps">
         <li><Icon.key size={18} /> Make a wallet: a pocket for money, kept on this phone. One tap, nothing to sign up for.</li>
-        <li><Icon.card size={18} /> Add a few dollars by card. At 1¢ a minute, $10 is about 16 hours of listening.</li>
+        <li><Icon.card size={18} /> Add a few dollars. At ½¢ a minute, a common price, $10 is about 33 hours of listening.</li>
         <li><Icon.send size={18} /> Listen. Artists are paid straight from it as you go.</li>
       </ol>
       <p class="dim small">Artists keep everything except small card and network fees. Amply takes nothing.</p>
@@ -277,7 +277,7 @@ export function TopUp({ address, balance, network, pair }) {
           <li>Pay by card. The first time, Stripe may ask for ID: that's Stripe's own check, not Amply's, and usually takes a couple of minutes. Then come back here.</li>
         </ol>
         <span class="dim small">The words look technical, but this is the standard way to do it, and it's safe.</span>
-        <span class="dim small">At 1¢ a minute, $10 is about 16 hours of listening.</span>
+        <span class="dim small">At ½¢ a minute, a common price, $10 is about 33 hours of listening.</span>
         <div class="row">
           {CARD_AMOUNTS.map((n) => (
             <a key={n} class={n === 20 ? "btn-primary sm" : "pill"} href={topupUrl(address, { amount: n })}
