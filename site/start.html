@@ -352,7 +352,7 @@
   </div>
 </section>
 
-<div class="devbar">
+<div class="devbar" id="devbar" hidden>
   For testing only, not part of what an artist sees.
   <div style="margin-top:12px"><button id="reset">Reset and start over</button></div>
 </div>
@@ -901,6 +901,12 @@ $("#share").addEventListener("click", (ev) => {
     .then(() => { btn.textContent = "Link copied"; setTimeout(() => (btn.textContent = "Share"), 1600); })
     .catch(() => { btn.textContent = "Press ⌘C"; });
 });
+
+// The reset bar is for working on this page, never for artists: shown only on
+// a local server, or with ?dev in the address.
+if (["localhost", "127.0.0.1"].includes(location.hostname) || new URLSearchParams(location.search).has("dev")) {
+  $("#devbar").hidden = false;
+}
 
 $("#reset").addEventListener("click", () => {
   try { localStorage.removeItem(KEY); } catch {}
