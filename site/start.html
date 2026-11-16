@@ -184,6 +184,7 @@
   <div class="actions">
     <button class="btn ghost" id="claimed-btn">I've claimed it, carry on</button>
   </div>
+  <p class="muted" id="claim-said" role="status" hidden></p>
 </section>
 
 <!-- 2 ─────────────────────────────────────────────────────────────── -->
@@ -379,7 +380,7 @@
 <script type="module">
 import { beginAuthorization, readCallback, completeAuthorization, revoke, ALL_SCOPES }
   from "/js/pkce.js";
-import { provision, provisionInstant, pendingPreview, claimLink, clearProgress, toSlug, ProvisionError, STEPS }
+import { provision, provisionInstant, pendingPreview, claimLink, stillTemporary, clearProgress, toSlug, ProvisionError, STEPS }
   from "/js/provision.js";
 
 const CONFIG = {
@@ -417,6 +418,12 @@ function show(step) {
   if (step === "instant") idx = 1;
   if (step === "claim") idx = 2;
   if (["working", "error", "choose"].includes(step)) idx = session.mode === "instant" ? 1 : 2;
+  // On the page-first path each segment is one real step: making the page
+  // (with what comes before it), claiming it, the private editor, done.
+  if (state.path === "instant") {
+    idx = { intro: 0, instant: 0, claim: 1, connect: 2, done: 3 }[step]
+      ?? (session.mode === "instant" ? 0 : 2);
+  }
   stepEls.forEach((li, i) => {
     li.removeAttribute("data-on"); li.removeAttribute("data-done");
     if (i < idx) li.setAttribute("data-done", "");
@@ -424,15 +431,10 @@ function show(step) {
   });
   // The segments carry no text, so the label under them says where you are.
   const NAMES = state.path === "instant"
-    ? ["What happens", "Your page", "Make it yours", "Done"]
+    ? ["Your page", "Claim it", "Private editor", "Done"]
     : ["What happens", "Your storage", "Connect", "Your page"];
   const name = document.getElementById("stepname");
-  // "Make it yours" spans two screens on the page-first path, so it says which.
-  let part = "";
-  if (state.path === "instant" && idx === 2) {
-    part = step === "claim" ? ": claim your account" : ": make your editor private";
-  }
-  if (name) name.textContent = `Step ${idx + 1} of 4 \u2014 ${NAMES[idx]}${part}`;
+  if (name) name.textContent = `Step ${idx + 1} of 4 \u2014 ${NAMES[idx]}`;
   window.scrollTo({ top: 0, behavior: "instant" });
 }
 
@@ -596,7 +598,28 @@ function paintClaim() {
   claimTimer = setInterval(tick, 30000);
 }
 
-$("#claimed-btn").addEventListener("click", () => show("connect"));
+// Check the claim before moving on: learning it hadn't happened only after
+// signing in again is a long way round. A second press carries on regardless,
+// in case Cloudflare is slow to end the old token.
+let claimAsked = false;
+$("#claimed-btn").addEventListener("click", async () => {
+  const btn = $("#claimed-btn");
+  const said = $("#claim-said");
+  if (!claimAsked) {
+    btn.disabled = true;
+    const temporary = await stillTemporary({ relay: CONFIG.relay });
+    btn.disabled = false;
+    if (temporary === true) {
+      claimAsked = true;
+      said.hidden = false;
+      said.textContent = "Cloudflare doesn't show it as claimed yet. Finish in the Cloudflare tab " +
+        "(it asks whether to claim the account: say yes), then press the button again.";
+      return;
+    }
+  }
+  said.hidden = true;
+  show("connect");
+});
 
 // The claim link is only in this tab. While it's needed, closing or
 // reloading away from it asks first.

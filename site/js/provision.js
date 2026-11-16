@@ -126,6 +126,23 @@ export function claimLink() {
 }
 
 /**
+ * Whether the temporary account still looks unclaimed.
+ *
+ * Claiming it ends its token, so a token that still works means the claim
+ * hasn't happened (yet). true: still temporary; false: the token is refused,
+ * so it has been claimed (or has expired); null: can't tell from here.
+ */
+export async function stillTemporary({ relay }) {
+  const preview = loadPreview();
+  if (!preview) return null;
+  try {
+    const res = await fetch(`${relay}/api/accounts`, { headers: { Authorization: `Bearer ${preview.token}` } });
+    if (res.status === 401 || res.status === 403) return false;
+    return res.ok ? true : null;
+  } catch { return null; }
+}
+
+/**
  * Cloudflare answers 200 with `success: false` for application-level errors, so
  * the HTTP status alone is not enough to tell whether a call worked.
  */

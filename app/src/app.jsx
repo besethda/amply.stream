@@ -304,13 +304,29 @@ export function App() {
     });
   }, []);
 
+  const lastBalance = useRef(null);
   const refresh = useCallback(async () => {
     if (!pair) return;
     const { wallet } = await machinery();
-    try { setBalance(await wallet.balances(pair)); }
+    try {
+      const next = await wallet.balances(pair);
+      // Money bought on Stripe's page arrives while the fan is away: say so
+      // when it lands, rather than quietly changing a number.
+      const was = lastBalance.current;
+      if (was && next.usdc > was.usdc + 0.001) flash({ text: `${money(next.usdc - was.usdc)} has arrived. Paid songs will play now.` });
+      else if (was && !(was.sol > 0.001) && next.sol > 0.001) flash({ text: "Fees are covered. You're all set." });
+      lastBalance.current = next;
+      setBalance(next);
+    }
     catch { setBalance(null); flash({ bad: true, text: "Couldn't check your wallet" }); }
   }, [pair]);
   useEffect(() => { refresh(); }, [pair, refresh]);
+  // Coming back from Stripe's page is coming back to this tab: look again.
+  useEffect(() => {
+    const back = () => { if (document.visibilityState === "visible") refresh(); };
+    document.addEventListener("visibilitychange", back);
+    return () => document.removeEventListener("visibilitychange", back);
+  }, [refresh]);
 
   /** Pay whoever is due: at the artist's amount, or a week after listening. */
   const settleNow = useCallback(async () => {

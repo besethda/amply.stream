@@ -470,7 +470,7 @@ export function ArtistPage({
 
         {entry.domain
           ? <p class="trust good"><Icon.check size={14} /> <span>{entry.domain}</span></p>
-          : why && <p class="trust warn trust-why"><Icon.warn size={14} /> <span>No website — only listen if the artist sent you this link</span></p>}
+          : why && <p class="trust warn trust-why"><Icon.warn size={14} /> <span>This artist hasn't linked a website yet, so Amply can't show it's really them. Fine if they sent you this link themselves.</span></p>}
 
         <Subscribe entry={entry} pair={pair} onSubscribe={onSubscribe} onManage={onManage}
           ensureWallet={ensureWallet} onClaimed={onClaimed} toast={toast} />

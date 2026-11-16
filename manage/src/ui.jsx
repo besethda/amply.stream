@@ -606,7 +606,7 @@ function FirstSteps({ hasMusic, paid, live, url, onSettings, onAdd }) {
             <button class="quiet-link" onClick={onAdd}>+ Add a release</button></>)}
         {step(2, paid, "Choose how you're paid",
           <>Set your price, and paste the address of a free wallet app (Phantom) for the money to
-            arrive in. Settings shows you how. Or skip this, and your music is free.
+            arrive in: free, and about 3 minutes. Settings shows you how. Or skip this, and your music is free.
             <button class="btn ghost sm step-btn" onClick={onSettings}>Open Settings</button></>)}
         {step(3, live, "Publish",
           <>Press <b>Publish</b> at the top. Nothing is public until you do.</>)}
@@ -1250,7 +1250,7 @@ function Splits({ payees, rate, onChange }) {
             <div class="where">
               <Field label="Wallet address">
                 <Text
-                  value={p.address} class="mono" placeholder="Their Solana address, from Phantom"
+                  value={p.address} class="mono" placeholder="Paste a Solana address"
                   onInput={(v) => set(i, { ...p, address: v.trim() })}
                 />
               </Field>

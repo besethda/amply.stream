@@ -15,7 +15,7 @@ import { ask } from "./sheets.jsx";
 export const money = (usd) =>
   usd >= 1 || usd === 0 ? `$${usd.toFixed(2)}` : `${Number((usd * 100).toFixed(2))}¢`;
 
-export function Copy({ text, label = "Copy" }) {
+export function Copy({ text, label = "Copy", onCopied }) {
   const [done, setDone] = useState(false);
   useEffect(() => {
     if (!done) return;
@@ -26,6 +26,7 @@ export function Copy({ text, label = "Copy" }) {
     <button class="pill" onClick={async () => {
       try { await navigator.clipboard.writeText(text); setDone(true); }
       catch { window.prompt("Copy this:", text); }
+      onCopied?.();
     }}>
       {done ? <Icon.check size={15} /> : <Icon.copy size={15} />} {done ? "Copied" : label}
     </button>
@@ -38,6 +39,7 @@ export function Copy({ text, label = "Copy" }) {
  */
 export function SaveBackup({ pair, onSaved, cta = "Saved" }) {
   const [key, setKey] = useState(null);
+  const [kept, setKept] = useState(false);   // copied or shared somewhere, at least once
 
   async function reveal() {
     const { wallet } = await machinery();
@@ -60,13 +62,16 @@ export function SaveBackup({ pair, onSaved, cta = "Saved" }) {
         <>
           <p class="mono-box secret">{key}</p>
           <div class="row">
-            <Copy text={key} />
             {typeof navigator !== "undefined" && navigator.share && (
-              <button class="pill" onClick={() => navigator.share({ title: "My Amply backup key", text: key }).catch(() => {})}>
-                <Icon.send size={15} /> Save to…
+              <button class="pill" onClick={() => navigator.share({ title: "My Amply backup key", text: key }).then(() => setKept(true), () => {})}>
+                <Icon.send size={15} /> Save to Notes…
               </button>
             )}
-            <button class="btn-primary" onClick={done}>{cta}</button>
+            <Copy text={key} onCopied={() => setKept(true)} />
+            <button class="btn-primary" onClick={done} disabled={!kept}>{cta}</button>
+          </div>
+          {!kept && <p class="dim small">Copy it or save it first, then paste it somewhere private.</p>}
+          <div>
           </div>
         </>
       ) : (
@@ -152,9 +157,13 @@ export function TopUp({ address, balance, network }) {
   return (
     <div class="stack">
       <div class="stack">
+        <div class="row two-steps">
+          <span class={`tick${hasDollars ? " done" : ""}`}>{hasDollars ? <Icon.check size={13} /> : 1}</span> Dollars
+          <span class={`tick${hasFee ? " done" : ""}`}>{hasFee ? <Icon.check size={13} /> : 2}</span> $1 for fees, once
+        </div>
         <b>Add money by card</b>
         <ol class="dim small setup-steps">
-          <li>Pick an amount. Stripe's secure page opens, and we copy your wallet's address for you.</li>
+          <li>Pick an amount. Stripe's secure page opens, and we copy your wallet's address (a long code, like an account number) for you.</li>
           <li>When Stripe asks where to send it, paste the address. If it asks for a network, choose <b>Solana</b>.</li>
           <li>Pay by card. The first time, Stripe may ask for ID. Then come back here.</li>
         </ol>
@@ -179,7 +188,7 @@ export function TopUp({ address, balance, network }) {
       </div>
 
       <details class="more">
-        <summary>Or send it from Phantom</summary>
+        <summary>Already use a crypto wallet? Send from it instead</summary>
       <ol class="setup">
         <li>{tick(hasDollars || hasFee, 1)}<div>
           <b>Phantom</b> <a class="link-dim" href="https://phantom.com" target="_blank" rel="noopener">phantom.com <Icon.external size={13} /></a>
