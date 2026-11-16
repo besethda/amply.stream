@@ -706,3 +706,24 @@ details.advanced > .stack { margin-top: 26px; }
 .passkey-wallet .good { color: var(--good); margin: 0; font-weight: 600; }
 .passkey-wallet .warn { color: var(--bad); margin: 0; }
 .key-box { overflow-wrap: anywhere; background: var(--bg2); border-radius: 10px; padding: 10px 12px; margin: 0; font-size: 14px; }
+
+/* Earnings: what listeners have paid, first. */
+.earnings-top .label { font-size: 12px; letter-spacing: .08em; color: var(--ink3); font-weight: 600; }
+.earnings-top .earned { display: flex; align-items: baseline; gap: 10px; margin: 4px 0 6px; }
+.earnings-top .earned b { font-size: 40px; line-height: 1.1; color: var(--ink); }
+.earnings-top .btn { margin-top: 6px; }
+
+/* Covering listeners' fees: on or off at a glance. */
+.fee-status { padding: 10px 14px; border-radius: 12px; background: var(--bg2); margin: 4px 0 12px; }
+.fee-status.on b { color: var(--good); }
+.fee-how { margin: 10px 0; }
+.fee-how > summary, .cash-out-passkey > summary { cursor: pointer; font-weight: 600; color: var(--ink); }
+.fee-how ol, .cash-out-passkey ol { padding-left: 22px; display: grid; gap: 8px; margin: 10px 0; }
+.fee-how .copy-row { margin-top: 8px; }
+.fee-how code { word-break: break-all; }
+.cash-out-passkey { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+
+/* Testing, folded away. */
+details.testing > summary { cursor: pointer; font-weight: 600; }
+details.testing > summary .note { font-weight: 400; color: var(--ink3); margin-left: 6px; }
+details.testing .test-money { margin-top: 12px; }
