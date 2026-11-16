@@ -677,3 +677,5 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
   font: inherit; font-size: 13px; font-weight: 700; line-height: 1; cursor: pointer; vertical-align: middle; }
 .hint-q.on { background: var(--ink, currentColor); color: var(--bg); }
 .hint-text { display: block; margin-top: 6px; font-weight: 400; }
+.tag-cheap { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 99px; font-size: 12px;
+  font-weight: 700; background: rgba(44, 160, 90, .18); color: #3fbf73; vertical-align: middle; }

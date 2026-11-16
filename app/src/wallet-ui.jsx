@@ -249,9 +249,9 @@ export function TopUp({ address, balance, network, pair, needsFee = true }) {
 
         {coinbase && (
           <section class="choice stack">
-            <b>Coinbase <span class="dim small">· most countries</span> <Hint label="About Coinbase">Opens Coinbase
-              with everything filled in. About 0.5% from a bank, 2.5% by card. You'll need a Coinbase account;
-              it's free.</Hint></b>
+            <b>Coinbase <span class="dim small">· most countries · fee 0.5% from a bank, 2.5% by card</span>{" "}
+              <Hint label="About Coinbase">Opens Coinbase with everything filled in. Paying from your bank is the
+              cheaper way. You'll need a Coinbase account; it's free.</Hint></b>
             <div class="row">
               {COINBASE_AMOUNTS.map((n) => (
                 <button key={n} class={n === 30 ? "btn-primary sm" : "pill"} disabled={opening !== null}
@@ -263,7 +263,7 @@ export function TopUp({ address, balance, network, pair, needsFee = true }) {
         )}
 
         <details class="choice more" onToggle={showCashQr}>
-          <summary>Cash App <span class="dim small">· US</span></summary>
+          <summary>Cash App <span class="dim small">· US · no fee right now</span> <span class="tag-cheap">cheapest</span></summary>
           <span class="dim small">Copy your address, then pay it in Cash App.{" "}
             <Hint label="How Cash App works">In Cash App, go to <b>Pay</b>, paste the address in the search box,
               enter an amount and pay. Cash App sends it as digital dollars (USDC) for you, and it arrives here in a
@@ -281,7 +281,7 @@ export function TopUp({ address, balance, network, pair, needsFee = true }) {
         </details>
 
         <details class="choice more" open={!coinbase}>
-          <summary>Card <span class="dim small">· US</span></summary>
+          <summary>Card <span class="dim small">· US · Stripe's fee, shown before you pay</span></summary>
         <span class="dim small">Pick an amount and pay on Stripe's page.{" "}
           <Hint label="How paying by card works">Stripe's secure page opens. If it asks where to send it, paste your
             address; if it asks for a network, choose <b>Solana</b>. The first time, Stripe may ask for ID: that's
