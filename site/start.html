@@ -115,7 +115,7 @@
     <ul class="marks">
       <li class="yes"><span class="m">&rarr;</span><span>Your page runs on Cloudflare's free plan, in an account in your name.</span></li>
       <li class="yes"><span class="m">&rarr;</span><span><strong>Amply never charges you anything, and keeps no way into your account.</strong></span></li>
-      <li class="yes"><span class="m">&rarr;</span><span>Room for about <strong>250 songs</strong> on the free plan. If you outgrow it, you can switch on bigger storage later (over a thousand songs). That's the only step that asks for a card, and it still costs nothing.</span></li>
+      <li class="yes"><span class="m">&rarr;</span><span>Room for about <strong>250 songs</strong> free. Need more later? Bigger storage is free too, but Cloudflare asks for a card to switch it on.</span></li>
     </ul>
   </div>
 
@@ -128,8 +128,8 @@
     <a class="link" href="/">Not now</a>
   </div>
   <p class="muted" style="margin-top:26px">Already have a Cloudflare account?
-    <button class="link" data-go="cloudflare">Use it instead</button>. That route sets up the bigger
-    storage from the start, so Cloudflare asks for a card. Nothing is charged.</p>
+    <button class="link" data-go="cloudflare">Use it instead</button> (Cloudflare asks for a card on
+    that route; nothing is charged).</p>
 </section>
 
 <!-- 2, instant ──────────────────────────────────────────────────────── -->
@@ -427,7 +427,12 @@ function show(step) {
     ? ["What happens", "Your page", "Make it yours", "Done"]
     : ["What happens", "Your storage", "Connect", "Your page"];
   const name = document.getElementById("stepname");
-  if (name) name.textContent = `Step ${idx + 1} of 4 \u2014 ${NAMES[idx]}`;
+  // "Make it yours" spans two screens on the page-first path, so it says which.
+  let part = "";
+  if (state.path === "instant" && idx === 2) {
+    part = step === "claim" ? ": claim your account" : ": make your editor private";
+  }
+  if (name) name.textContent = `Step ${idx + 1} of 4 \u2014 ${NAMES[idx]}${part}`;
   window.scrollTo({ top: 0, behavior: "instant" });
 }
 
@@ -576,7 +581,9 @@ function paintClaim() {
     // The claim link lives only as long as the tab it was made in. Without
     // it, either it has been claimed already or the hour has run out.
     btn.hidden = true;
-    deadline.textContent = "This tab no longer has the claim link. If you've claimed the account, carry on below. If not, start again: unclaimed accounts are deleted after an hour.";
+    deadline.textContent = "This tab no longer has the claim link. If you've claimed the account, carry on below. " +
+      "If not, start again: the page was in a temporary account, which Cloudflare deletes after an hour. " +
+      "You hadn't added any music yet, so nothing of yours is lost, and starting again takes a minute.";
     return;
   }
   btn.hidden = false;
@@ -590,6 +597,12 @@ function paintClaim() {
 }
 
 $("#claimed-btn").addEventListener("click", () => show("connect"));
+
+// The claim link is only in this tab. While it's needed, closing or
+// reloading away from it asks first.
+window.addEventListener("beforeunload", (e) => {
+  if (state.step === "claim" && claimLink()) { e.preventDefault(); e.returnValue = ""; }
+});
 // Once Cloudflare has been opened, coming back is the next thing to do, so
 // that button becomes the main one.
 $("#claim-link").addEventListener("click", () => {
@@ -601,14 +614,17 @@ $("#claim-link").addEventListener("click", () => {
 function paintConnect() {
   const finishing = !!pendingPreview();
   $("#connect-title").textContent = finishing ? "Make your editor private." : "Connect it.";
-  // A claimed page already has everything on that list: only the lock is new.
+  // A claimed page already has everything on that list, and a name: only the
+  // lock is new, and the email is all it needs.
   $("#connect-makes").hidden = finishing;
+  document.querySelector('label[for="artist-name"]').hidden = finishing;
+  $("#slug-preview").hidden = finishing;
   connectBtn.textContent = finishing ? "Make my editor private" : "Set up my streaming service";
   // Back from here is back to claiming, for a page that's already live.
   document.querySelector('[data-panel="connect"] .back .link').dataset.go = finishing ? "claim" : "cloudflare";
   $("#connect-lead").textContent = finishing
-    ? "Sign in with the Cloudflare account you just claimed, and approve Amply on Cloudflare's page. We'll set your editor so only your email can open it, then remove our own access. That's the last step."
-    : "We set your streaming up for you, then remove our own access.";
+    ? "Sign in with the Cloudflare account you just claimed. Cloudflare then shows a list of what Amply is asking to do: approve it. We'll set your editor so only your email can open it, then remove our own access. That's the last step."
+    : "We set your streaming up for you, then remove our own access. Cloudflare will show a list of what Amply is asking to do: approve it.";
 }
 paintConnect();
 
@@ -625,10 +641,10 @@ const ERRORS = {
   },
   d1_disabled: {
     title: "One more switch to flip",
-    body: "Your account hasn't opened its database yet, which is where your track list " +
+    body: "Your account hasn't switched on the place where your track list " +
           "lives. Cloudflare switches it on the first time you open its page. Open it, let it " +
           "load, then come back here. There's nothing to set up on that page.",
-    action: { label: "Open the database page ↗", href: "https://dash.cloudflare.com/?to=/:account/workers/d1" },
+    action: { label: "Open the track list page ↗", href: "https://dash.cloudflare.com/?to=/:account/workers/d1" },
     retry: "Done, try again",
   },
   declined: {

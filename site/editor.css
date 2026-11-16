@@ -687,3 +687,15 @@ input[type=range] {
 .card-note p:last-child { margin-bottom: 0; }
 .card-note b { color: var(--ink); }
 .card-note ol { margin: 0 0 12px; padding-left: 22px; display: grid; gap: 6px; }
+
+/* Settings that aren't needed to go live, folded until the first publish. */
+details.advanced > summary {
+  cursor: pointer; list-style: none; padding: 18px 22px; border-radius: var(--r);
+  background: var(--bg2); font-weight: 700; font-size: 18px;
+}
+details.advanced > summary::-webkit-details-marker { display: none; }
+details.advanced > summary::before { content: "+ "; color: var(--orange); }
+details.advanced[open] > summary::before { content: "\2212 "; }
+details.advanced > summary .note { display: block; font-weight: 400; font-size: 15px; color: var(--ink3); margin-top: 4px; }
+details.advanced > .stack { margin-top: 26px; }
+.steps .step-btn { display: block; margin-top: 10px; font-size: 15px; padding: 9px 18px; }

@@ -225,3 +225,7 @@ footer { border-top: 1px solid var(--line); }
 .footer-links { display: flex; gap: 26px; flex-wrap: wrap; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* `hidden` always wins. Without this, a rule like `ul.marks { display: grid }`
+   shows an element the page meant to hide. */
+[hidden] { display: none !important; }

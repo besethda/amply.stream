@@ -605,9 +605,9 @@ function FirstSteps({ hasMusic, paid, live, url, onSettings, onAdd }) {
           <>Make a release (an album, an EP or a single), then add your songs to it.{" "}
             <button class="quiet-link" onClick={onAdd}>+ Add a release</button></>)}
         {step(2, paid, "Choose how you're paid",
-          <>Set your price in{" "}
-            <button class="quiet-link" onClick={onSettings}>Settings</button>, and paste the address of a free
-            wallet app (Phantom) for the money to arrive in. Settings shows you how. Or skip this, and your music is free.</>)}
+          <>Set your price, and paste the address of a free wallet app (Phantom) for the money to
+            arrive in. Settings shows you how. Or skip this, and your music is free.
+            <button class="btn ghost sm step-btn" onClick={onSettings}>Open Settings</button></>)}
         {step(3, live, "Publish",
           <>Press <b>Publish</b> at the top. Nothing is public until you do.</>)}
         {step(4, false, "Share your link",
@@ -1210,7 +1210,7 @@ function Splits({ payees, rate, onChange }) {
             straight into it, never through Amply.</p>
           <ol>
             <li>Install <a href="https://phantom.com/download" target="_blank" rel="noopener">Phantom ↗</a> on
-              your phone or computer, and sign up with Google or Apple. There are no words to write down.</li>
+              your phone or computer, and sign up with Google or Apple, then choose a PIN. There are no recovery words to write down, but don't forget the PIN.</li>
             <li>In Phantom, tap <b>Receive</b>, choose <b>Solana</b>, and copy the address.</li>
             <li>Paste it below, under <b>Wallet address</b>.</li>
           </ol>
@@ -1484,6 +1484,10 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
         <Price wallet={wallet} onChange={setWallet} hasAddress={payees.some((p) => p.address)}
           subscribing={(manifest.payment || []).some((p) => p.type === "stripe-subscription")} />
         <Splits payees={payees} rate={wallet.ratePerMinute ?? 0} onChange={setPayees} />
+        {/* Folded away until the first publish: none of it is needed to go live. */}
+        <details class="advanced" open={everPublished}>
+          <summary>More options <span class="note">card subscriptions, how often listeners pay, your own domain, your terms</span></summary>
+          <div class="stack">
         <Subscriptions manifest={manifest} update={update} api={api} />
         <Payout wallet={wallet} onChange={setWallet}
           subscribing={(manifest.payment || []).some((p) => p.type === "stripe-subscription")} />
@@ -1517,6 +1521,8 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
             </Field>
           )}
         </section>
+          </div>
+        </details>
 
         <section class="card publish-card">
           <div>
