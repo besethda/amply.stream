@@ -22,7 +22,7 @@ import {
   tokenFor, reportPlayed, originOf, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
   manageSubscription, claimSubscription,
 } from "./identify.js";
-import { perMinute, subscriptionOnly } from "../../spec/pricing.mjs";
+import { perMinute, subscriptionOnly, plans as plansOf } from "../../spec/pricing.mjs";
 import { Icon } from "./icons.jsx";
 import { money } from "./wallet-ui.jsx";
 import { recent, played, forgetRecent, theme, setTheme, waveStyle, setWaveStyle, WAVE_STYLES } from "./looks.js";
@@ -211,7 +211,12 @@ export function App() {
         }
         if (!track.needsWallet) return track.url;
         const artist = library.current.find((e) => e.url === track.from);
-        const data = { url: track.from, name: nameOf(artist), art: artist?.manifest?.artist?.image || track.art || null };
+        const data = {
+          url: track.from, name: nameOf(artist), art: artist?.manifest?.artist?.image || track.art || null,
+          // For the sheet that asks a fan with no wallet: what it costs, and whether a card will do.
+          rate: (artist && rateOf(artist.manifest)?.perMinute) || null,
+          plans: artist ? plansOf(artist.manifest) : [],
+        };
         const onlySub = artist && subscriptionOnly(artist.manifest);
         if (!holder.current) throw refuse(onlySub ? "subscribe" : "nowallet", "", data);
 

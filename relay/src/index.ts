@@ -190,19 +190,27 @@ const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt
 function topupPage(p: { address: string; currency: "usdc" | "sol"; amount: string | null }): string {
   const what = p.currency === "usdc"
     ? `${p.amount ? `$${p.amount} of ` : ""}USDC`
-    : "a little SOL, for network fees";
+    : "a little SOL, the currency that pays payment fees ($1 is plenty)";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>Add money - Amply</title></head>
 <body style="font:18px/1.5 system-ui,sans-serif;max-width:34rem;margin:0 auto;padding:32px 16px;color:#1b1813;background:#fbf8f3">
+<p style="font-weight:800;letter-spacing:-0.02em;margin:0 0 18px">amply</p>
 <h1 style="font-size:28px;margin:0 0 12px">Add money to your Amply wallet</h1>
-<p style="margin:0 0 20px">You're buying ${escapeHtml(what)} by card, through Stripe. On the next page, choose <b>Solana</b> as the network, and paste this as the wallet address:</p>
+<p style="margin:0 0 16px">You're buying ${escapeHtml(what)} by card, through Stripe.${p.currency === "usdc" ? " USDC is a digital dollar: $1 of it is worth $1." : ""} Three steps:</p>
+<ol style="margin:0 0 20px;padding-left:22px">
+<li>Press the button below. We copy your wallet's address, and Stripe's page opens.</li>
+<li>When Stripe asks where to send it, paste the address. If it asks for a network, choose <b>Solana</b>.</li>
+<li>Pay by card. The first time, Stripe may ask for ID. Then go back to the Amply app.</li>
+</ol>
+<p style="color:#6b6257;font-size:15px;margin:0 0 6px">Your wallet's address:</p>
 <p id="address" style="font:15px ui-monospace,monospace;overflow-wrap:anywhere;background:#fff;border:1px solid #e4dccf;border-radius:12px;padding:14px 16px;margin:0 0 20px">${escapeHtml(p.address)}</p>
 <button id="go" disabled style="font:inherit;font-weight:700;padding:14px 26px;border:0;border-radius:999px;background:#f26b1d;color:#1b1813;cursor:pointer">Copy address and continue</button>
 <p id="said" style="color:#6b6257;font-size:15px;margin:16px 0 0">Loading Stripe…</p>
 <p style="color:#6b6257;font-size:15px;margin:28px 0 0">Stripe handles the payment and any identity check. Amply never sees your card and takes nothing.</p>
+<p style="font-size:15px;margin:20px 0 0"><a href="https://amply.stream/app/" style="color:#1b1813">&larr; Back to Amply</a></p>
 <script id="params" type="application/json">${JSON.stringify(p).replace(/</g, "\\u003c")}</script>
 <script src="${STRIPE_ONRAMP_SCRIPT}"></script>
 <script src="/topup.js"></script>

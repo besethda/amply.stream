@@ -41,7 +41,7 @@ export function Sheet({ sheet, onClose }) {
         {sheet.mono && <p class="mono-box">{sheet.mono}</p>}
         {sheet.children}
         {sheet.primary && <button class={`btn-primary wide${sheet.danger ? " danger" : ""}`} onClick={sheet.primary}>{sheet.primaryLabel}</button>}
-        <button class="btn-quiet wide" onClick={onClose}>{sheet.secondaryLabel || "Not now"}</button>
+        <button class="btn-quiet wide" onClick={sheet.secondary || onClose}>{sheet.secondaryLabel || "Not now"}</button>
       </div>
     </div>
   );
@@ -81,23 +81,38 @@ export function refusalSheet(r, { money, go }) {
       body: r.was ? `Up from ${money(r.was)}.` : null,
       primaryLabel: "Agree and play", primary: go.agree,
     };
-    case "nowallet": return {
-      icon: <Icon.card size={22} />, title: "Set up paying",
-      body: "Paid songs need it. Free ones don't.",
-      primaryLabel: "Set up", primary: go.you,
-    };
+    case "nowallet": {
+      // A fan who can subscribe by card never has to touch a wallet, so
+      // that comes first wherever the artist offers it.
+      const cheapest = (r.plans || []).slice().sort((a, b) => a.price / a.months - b.price / b.months)[0];
+      const rate = r.rate > 0
+        ? `${money(r.rate)} a minute (about ${money(r.rate * 4)} a song), paid straight to ${r.name || "the artist"}.`
+        : `This song is paid for, straight to ${r.name || "the artist"}.`;
+      if (cheapest) return {
+        icon: <Icon.card size={22} />, title: `Support ${r.name || "this artist"} to listen`,
+        body: `Subscribe by card and listen to everything, or pay as you go: ${rate}`,
+        primaryLabel: "Subscribe by card", primary: go.artist,
+        secondaryLabel: "Pay by the minute instead", secondary: go.you,
+      };
+      return {
+        icon: <Icon.card size={22} />, title: `Pay ${r.name || "the artist"} as you listen`,
+        body: `${rate} You add a few dollars to Amply by card first. Free songs stay free.`,
+        primaryLabel: "Set up paying", primary: go.you,
+      };
+    }
     case "subscribe": return {
       icon: <Icon.card size={22} />, title: "Subscribers only",
       primaryLabel: "See plans", primary: go.artist,
     };
     case "empty": return {
-      icon: <Icon.card size={22} />, title: "Nothing left to spend",
-      primaryLabel: "Top up", primary: go.topUp,
+      icon: <Icon.card size={22} />, title: "Add money to keep listening",
+      body: "Top up by card. It's paid out to artists as you listen, and free songs stay free.",
+      primaryLabel: "Add money", primary: go.topUp,
     };
     case "nosol": return {
-      icon: <Icon.card size={22} />, title: "Add a little SOL",
-      body: "It pays the network fee.",
-      primaryLabel: "Top up", primary: go.topUp,
+      icon: <Icon.card size={22} />, title: "One last thing: payment fees",
+      body: "Each payment needs a tiny fee, paid in a currency called SOL. A one-off $1 top-up covers thousands of payments.",
+      primaryLabel: "Add $1 for fees", primary: go.topUp,
     };
     case "mismatch": return {
       icon: <Icon.warn size={22} />, tone: "warn", title: "Wrong network",

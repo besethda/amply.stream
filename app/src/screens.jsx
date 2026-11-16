@@ -120,7 +120,7 @@ export function FirstRun({ onAdd, onScan }) {
     <div class="first">
       <Logo size={40} />
       <h1>Add your first<br />artist.</h1>
-      <p class="dim">Artists run their own streaming service. You pay them directly.</p>
+      <p class="dim">Follow artists you love and hear their music here. Free songs are free; paid ones cost a few cents, straight to the artist, with nobody in between.</p>
       <AddForm onAdd={onAdd} autoFocus={false} />
       <button class="scan-cta" onClick={onScan}><Icon.qr size={22} /><span>Scan a QR code</span></button>
       <span class="mono-dim first-foot">No account. Nothing to sign up for.</span>

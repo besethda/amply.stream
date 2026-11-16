@@ -51,6 +51,11 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
     back();
   }
 
+  // Money goes in only once the key that can bring it back is saved: losing
+  // an empty wallet costs nothing, losing a topped-up one costs real money.
+  if (view === "topup" && pair && !saved && network.real) {
+    return <Sub title="First, save your key" onBack={back}><SaveBackup pair={pair} onSaved={() => setView("topup")} cta="Saved. Now add money" /></Sub>;
+  }
   if (view === "topup" && pair) return <Sub title="Top up" onBack={back}><TopUp address={pair.publicKey.toBase58()} balance={balance} network={network} /></Sub>;
   if (view === "send" && pair) return <Sub title="Send back" onBack={back}><SendBack pair={pair} balance={balance} onRefresh={onRefresh} /></Sub>;
   if (view === "backup" && pair) return <Sub title="Backup key" onBack={back}><SaveBackup pair={pair} onSaved={back} /></Sub>;
@@ -100,7 +105,7 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
               {owed > 0 && <span class="mono-dim">{money(owed)} owed</span>}
               <button class="icon-btn dim" onClick={onRefresh} aria-label="Refresh"><Icon.refresh size={16} /></button>
             </div>
-            {balance && !(balance.sol > 0.001) && <span class="note-line warn-ink small"><Icon.warn size={13} /> No SOL for fees</span>}
+            {balance && !(balance.sol > 0.001) && <span class="note-line warn-ink small"><Icon.warn size={13} /> Add $1 for payment fees before your first payment</span>}
             <div class="row">
               <button class="btn-primary sm" onClick={() => setView("topup")}><Icon.plus size={15} /> Top up</button>
               <button class="pill" onClick={() => setView("send")}><Icon.send size={15} /> Send back</button>

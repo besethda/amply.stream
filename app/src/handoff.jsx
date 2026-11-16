@@ -61,11 +61,12 @@ export function Handoff({ link, url, onStay }) {
       <button class="btn-primary wide" onClick={copy}>
         {copied ? <><Icon.check size={16} /> Copied — now open Amply</> : <><Icon.copy size={16} /> Copy link</>}
       </button>
+      <p class="dim small center">New to Amply? You don't need the app to start.</p>
       <button class="btn-quiet wide" onClick={() => { stay(); onStay(); }}>
-        {gift ? "Open it here in Safari" : "Continue in Safari"}
+        {gift ? "Open it here in Safari" : "Listen here in Safari"}
       </button>
-      <p class="mono-dim small center">
-        {gift ? "Opened here, it's kept in Safari, not in your app. " : ""}No Amply yet? Continue, then Share → Add to Home Screen.
+      <p class="dim small center">
+        {gift ? "Opened here, it's kept in Safari, not in your app. " : ""}To keep Amply, tap Share, then Add to Home Screen.
       </p>
     </div>
   );

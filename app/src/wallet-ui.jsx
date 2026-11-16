@@ -50,14 +50,22 @@ export function SaveBackup({ pair, onSaved, cta = "Saved" }) {
 
   return (
     <div class="stack">
-      <p class="dim">Your key is your wallet. Keep it private — it's how you get back in, or use
+      <p class="dim">Your money lives on this phone, and this key is the only way back to it.
+      Save it in your Notes or password manager, somewhere private. You'll also need it to use
       Amply on another device.</p>
-      {onHomeScreen() && <p class="note-line warn-ink"><Icon.warn size={15} /> Deleting this app deletes the wallet.</p>}
+      <p class="note-line warn-ink"><Icon.warn size={15} /> {onHomeScreen()
+        ? "Deleting this app deletes the wallet. Without the key, the money in it is gone."
+        : "Clearing your browser's data deletes the wallet. Without the key, the money in it is gone."}</p>
       {key ? (
         <>
           <p class="mono-box secret">{key}</p>
           <div class="row">
             <Copy text={key} />
+            {typeof navigator !== "undefined" && navigator.share && (
+              <button class="pill" onClick={() => navigator.share({ title: "My Amply backup key", text: key }).catch(() => {})}>
+                <Icon.send size={15} /> Save to…
+              </button>
+            )}
             <button class="btn-primary" onClick={done}>{cta}</button>
           </div>
         </>
@@ -88,13 +96,13 @@ export function SetUp({ onMade }) {
 
   return (
     <div class="panel stack">
-      <h2>Pay by the minute</h2>
+      <h2>Pay as you listen</h2>
       <ol class="steps">
-        <li><Icon.key size={18} /> Make a wallet here: one tap</li>
-        <li><Icon.card size={18} /> Add money by card: $20 lasts months</li>
-        <li><Icon.send size={18} /> Listen: artists are paid as you go</li>
+        <li><Icon.key size={18} /> Make a wallet: a pocket for money, kept on this phone. One tap, nothing to sign up for.</li>
+        <li><Icon.card size={18} /> Add a few dollars by card. At 1¢ a minute, $10 is about 16 hours of listening.</li>
+        <li><Icon.send size={18} /> Listen. Artists are paid straight from it as you go.</li>
       </ol>
-      <p class="mono-dim">Stripe's card fee on top-ups · ~0.1¢ a payment · 0% to Amply</p>
+      <p class="dim small">Artists keep everything except small card and network fees. Amply takes nothing.</p>
       {!restoring ? (
         <div class="row">
           <button class="btn-primary" onClick={make} disabled={busy}>{busy ? "…" : "Make my wallet"}</button>
@@ -145,8 +153,12 @@ export function TopUp({ address, balance, network }) {
     <div class="stack">
       <div class="stack">
         <b>Add money by card</b>
-        <span class="dim small">Through Stripe. Paste your address when it asks, and choose Solana.
-          $20 lasts months of everyday listening.</span>
+        <ol class="dim small setup-steps">
+          <li>Pick an amount. Stripe's secure page opens, and we copy your wallet's address for you.</li>
+          <li>When Stripe asks where to send it, paste the address. If it asks for a network, choose <b>Solana</b>.</li>
+          <li>Pay by card. The first time, Stripe may ask for ID. Then come back here.</li>
+        </ol>
+        <span class="dim small">At 1¢ a minute, $10 is about 16 hours of listening.</span>
         <div class="row">
           {CARD_AMOUNTS.map((n) => (
             <a key={n} class={n === 20 ? "btn-primary sm" : "pill"} href={topupUrl(address, { amount: n })}
@@ -154,9 +166,15 @@ export function TopUp({ address, balance, network }) {
           ))}
         </div>
         {!hasFee && (
-          <span class="dim small">Also add about $1 of SOL once: it pays the network fee on thousands of payments.{" "}
-            <a class="link-dim" href={topupUrl(address, { currency: "sol" })} target="_blank" rel="noopener noreferrer">Add SOL <Icon.external size={13} /></a>
-          </span>
+          <div class="stack">
+            <b>{hasDollars ? "One last thing: $1 for fees" : "Then, once: $1 for fees"}</b>
+            <span class="dim small">Each payment needs a tiny fee, paid in a currency called SOL.
+              A one-off $1 covers thousands of payments. Same steps, on the same Stripe page.</span>
+            <div class="row">
+              <a class={hasDollars ? "btn-primary sm" : "pill"} href={topupUrl(address, { currency: "sol" })}
+                target="_blank" rel="noopener noreferrer">Add $1 for fees <Icon.external size={13} /></a>
+            </div>
+          </div>
         )}
       </div>
 
