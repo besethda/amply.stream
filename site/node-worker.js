@@ -275,7 +275,11 @@ function renderSite(input, manifest, { edit = false, slots = {}, listenUrl = "" 
     const head = `<h2${e(`${p}.title`, "text")}>${esc(s.title)}</h2>`;
     let inner = "";
     if (s.type === "music") {
-      inner = slots.music || `<p class="muted">Your releases appear here.</p>`;
+      const rel = (manifest?.releases || []).filter((r) => (r.tracks || []).length);
+      inner = slots.music || (rel.length ? `<div class="s-rel">${rel.map((r) => `<div class="s-rel-one">
+        ${httpsUrl(r.art) ? `<img src="${esc(httpsUrl(r.art))}" alt="">` : `<div class="s-rel-art"></div>`}
+        <div><b>${esc(r.title)}</b><p class="muted">${(r.tracks || []).map((t2) => esc(t2.title)).join(" \xB7 ")}</p></div>
+      </div>`).join("")}</div>` : `<p class="muted">Your releases appear here once you add music.</p>`);
     } else if (s.type === "about") {
       inner = `<div class="s-about">${img(s.image, `${p}.image`, "s-about-img", "Add a picture")}
         <div class="s-text"${e(`${p}.text`, "long")}>${s.text ? paras(s.text) : edit ? `<p class="ph">Write a few lines about you</p>` : ""}</div></div>`;
@@ -304,7 +308,7 @@ function renderSite(input, manifest, { edit = false, slots = {}, listenUrl = "" 
       const items = (s.items || []).filter((x) => edit || x.url);
       inner = `<div class="s-links">${items.map((x, k) => edit ? `<span class="s-link" data-item="${p}.items.${k}"><span${e(`${p}.items.${k}.label`, "text")}>${ph(x.label, "Label")}</span> <span class="s-url"${e(`${p}.items.${k}.url`, "url")}>${x.url ? "\u2197" : "add link"}</span></span>` : `<a class="s-link" href="${esc(x.url)}" rel="noopener">${esc(x.label || x.url)} \u2197</a>`).join("")}</div>`;
     }
-    return `<section class="s-sec s-${s.type}${s.hidden ? " is-hidden" : ""}" id="${esc(s.id)}" data-section="${i}">${head}${inner}</section>`;
+    return `<section class="s-sec s-sec-${s.type}${s.hidden ? " is-hidden" : ""}" id="${esc(s.id)}" data-section="${i}">${head}${inner}</section>`;
   }).join("\n");
   const css = `
 .s-site{--bg:${t.bg};--bg2:${t.bg2};--ink:${t.ink};--ink2:${t.ink2};--mut:${t.mut};--line:${t.line};--ac:${site.look.accent};
@@ -346,6 +350,10 @@ function renderSite(input, manifest, { edit = false, slots = {}, listenUrl = "" 
 .s-card-img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:14px;background:var(--bg2)}
 .s-card .s-btn{justify-self:start;margin-top:6px}
 .s-links{display:flex;flex-wrap:wrap;gap:12px}
+.s-rel{display:grid;gap:22px}
+.s-rel-one{display:flex;gap:20px;align-items:center}
+.s-rel-one img,.s-rel-art{width:96px;height:96px;border-radius:12px;object-fit:cover;background:var(--bg2);flex:none}
+.s-rel-one p{margin:4px 0 0;font-size:15px}
 .s-link{display:inline-flex;gap:6px;padding:12px 20px;border:1.5px solid var(--line);border-radius:999px;color:var(--ink) !important;text-decoration:none;font-weight:600}
 .s-foot{max-width:960px;margin:0 auto;padding:40px clamp(20px,4vw,48px) 80px;border-top:1px solid var(--line);color:var(--mut);font-size:14.5px}
 .s-site .ph{color:var(--mut);opacity:.7;font-style:italic}
