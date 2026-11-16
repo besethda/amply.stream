@@ -737,3 +737,8 @@ details.testing .test-money { margin-top: 12px; }
 .payout-where code { font-size: 13px; }
 .cash-steps { padding-left: 22px; display: grid; gap: 8px; margin: 12px 0; }
 .send-how { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; display: grid; gap: 8px; }
+
+/* The heavy-file mark, now with a word: a pill rather than a dot. */
+.warn-toggle, .track-tags .warn-toggle { width: auto; padding: 0 10px; border-radius: 99px; white-space: nowrap; font-size: 13px; }
+.listener-key { margin: 10px 0 0; }
+details.testing { padding: 16px 20px; }

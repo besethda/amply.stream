@@ -1023,7 +1023,7 @@ function Subscriptions({ manifest, update, api }) {
 
       {!status?.connected && (
         <p class="muted">Only want card payments for songs and albums people buy, no subscriptions?{" "}
-          <button class="link" disabled={busy} onClick={salesOnly}>Connect without plans</button></p>
+          <button class="link" disabled={busy} onClick={salesOnly}>Connect for one-time sales only</button></p>
       )}
       <div class="row-actions">
         <button class="btn sm" disabled={busy} onClick={go}>
@@ -1152,7 +1152,7 @@ function TestMoney({ wallet, onChange }) {
             onChange(e.target.checked ? { ...rest, network: "devnet" } : rest);
           }}
         />
-        <span>Test mode: use pretend money while I try things out</span>
+        <span>Use pretend money for now</span>
       </label>
       {testing && <p class="warn">Test network: nothing anyone sends you is worth anything, and apps set to
         real money pay you nothing. Turn this off before you release.</p>}
@@ -1600,7 +1600,7 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
           subscribing={(manifest.payment || []).some((p) => p.type === "stripe-subscription")} />
         <OwnDomain manifest={manifest} update={update} />
         <details class="testing card">
-          <summary>Testing <span class="note">for trying payments before you release</span></summary>
+          <summary>Test mode <span class="note">try payments with pretend money</span></summary>
           <TestMoney wallet={wallet} onChange={setWallet} />
         </details>
 
@@ -1830,7 +1830,7 @@ function Listeners({ api, paid, rate, settleAt }) {
    *  they no longer want. Takes any bar with it. */
   async function removeRow(row) {
     const barred = row.blocked ? " They're blocked now, and deleting lifts the block too." : "";
-    if (!window.confirm(`Delete this listener's record (${row.pubkey.slice(0, 6)}…${row.pubkey.slice(-4)})? Use this when someone asks you to delete their data.${barred} This can't be undone.`)) return;
+    if (!window.confirm(`Delete Listener ${numberOf.get(row.pubkey) ?? ""}'s data? Use this when someone asks you to delete it.${barred} This can't be undone.`)) return;
     setBusy(row.pubkey);
     try {
       await api.removeListener(row.pubkey);
@@ -1969,6 +1969,9 @@ function Listeners({ api, paid, rate, settleAt }) {
           );})}
         </tbody>
       </table>
+      <p class="muted small listener-key"><b>Block</b> stops someone playing your paid tracks (you can undo it).{" "}
+        <b>Export data</b> and <b>Delete</b> are for when a listener asks for a copy of their data, or for it to be
+        deleted.</p>
     </section>
   );
 }
@@ -2009,9 +2012,10 @@ function FeesCard({ api, network, payees }) {
           ? <> You're covering your listeners' fees.{payments != null && <> Enough left for about {payments.toLocaleString()} payments.</>}</>
           : <> Listeners pay their own tiny fees. That's fine; it's just one more step for them.</>}
       </p>
-      <p>Why: every payment to you has a tiny processing fee (a fraction of a cent) charged by Solana, the
-        payment network your money travels on. It's paid in <b>SOL</b>, a coin used only for these fees, which
-        new listeners otherwise have to buy first. $5 of SOL covers thousands of payments, usually months.</p>
+      <p class="muted">$5 lasts thousands of payments, usually months.{" "}
+        <Help about="why listeners need a coin">Every payment has a tiny processing fee, a fraction of a cent,
+          charged by the payment network (Solana). It's paid in SOL, a coin used only for these fees. Without
+          this, each new listener has to buy a little SOL first.</Help></p>
       <details class="fee-how" open={!fees.offering}>
         <summary>How to turn it on (about 5 minutes)</summary>
         <ol>
@@ -2021,7 +2025,8 @@ function FeesCard({ api, network, payees }) {
               <code>{fees.address}</code>
             </div></li>
           <li>In the <b>Coinbase</b> app (free to join): tap <b>Buy</b>, search for <b>Solana (SOL)</b>, buy $5
-            (Coinbase adds a small fee). Then open SOL, tap <b>Send</b>, paste the address, and send it all.
+            (Coinbase adds a small fee, under a dollar). Then open SOL, tap <b>Send</b>, paste the address, and send
+            all of the SOL you just bought.
             If it asks for a network, choose <b>Solana</b>.</li>
           <li>Come back here. It switches on by itself within a few minutes.</li>
         </ol>
@@ -2030,7 +2035,7 @@ function FeesCard({ api, network, payees }) {
       </details>
       <p class="muted small">
         {fees.paidToday ? `Covered ${fees.paidToday} payment${fees.paidToday === 1 ? "" : "s"} today. ` : ""}
-        It only ever pays for payments to you, with a daily limit, so it can't run up.
+        It only pays for payments to you, and never more than about $2 of fees in a day.
         {fees.network !== "solana" ? ` Test network (${fees.network}).` : ""}</p>
       <button class="btn ghost sm" onClick={load}>{fees.offering ? "Refresh" : "I've sent it: check now"}</button>
     </section>
@@ -2063,11 +2068,13 @@ function EarningsSummary({ paid, payees }) {
           : paid.at ? <>Checked at {new Date(paid.at).toLocaleTimeString()}. <button class="link" onClick={paid.look}>Check again</button></>
           : <button class="link" onClick={paid.look}>Check payments</button>}
       </p>
-      <p class="payout-where">It goes straight into your <b>payout wallet</b>, as it's paid:{" "}
+      <p class="payout-where">It goes straight into your <b>payout wallet</b>{" "}
+        <Help about="your payout wallet">The account your fans' payments land in. You own it and only you can move
+          money out of it; Amply can't touch it.</Help>, as it's paid:{" "}
         <code title={payees.find((p) => p.address)?.address}>{short(payees.find((p) => p.address)?.address)}</code>{" "}
         <CopyButton text={payees.find((p) => p.address)?.address} label="Copy address" />
         {payees.filter((p) => p.address).length > 1 && <span class="muted small"> (and your collaborators' shares to theirs)</span>}</p>
-      <a class="btn sm" href="#cash-out">Move it to your bank</a>
+      <a class="btn sm" href="#cash-out" onClick={(e) => { e.preventDefault(); const c = document.getElementById("cash-out"); c?.scrollIntoView({ behavior: "smooth", block: "start" }); c?.querySelector("button.choice")?.focus({ preventScroll: true }); }}>Move it to your bank</a>
     </section>
   );
 }
@@ -2079,9 +2086,9 @@ function EarningsSummary({ paid, payees }) {
  */
 function CashOut({ payees }) {
   const [via, setVia] = useState(null);
-  const [passkey, setPasskey] = useState(false);
+  const [passkey, setPasskey] = useState(true);
   const routes = {
-    cashapp: { name: "Cash App", where: "US only, currently free", steps: [
+    cashapp: { name: "Cash App", where: "US only, no fee", steps: [
       <>In Cash App: tap <b>Money</b>, then <b>Deposit USDC</b>, choose <b>Solana</b>, and copy the address it shows.</>,
       <>From your payout wallet, send your USDC to that address (how depends on your wallet; see below).</>,
       <>It arrives in Cash App as dollars. Move it to your bank as usual.</>,
@@ -2111,15 +2118,16 @@ function CashOut({ payees }) {
           <div class="send-how">
             <b>Sending from your payout wallet</b>
             <div class="choices">
-              <button class="choice" aria-pressed={!passkey} onClick={() => setPasskey(false)}>I use Phantom</button>
               <button class="choice" aria-pressed={passkey} onClick={() => setPasskey(true)}>I made it with Face ID</button>
+              <button class="choice" aria-pressed={!passkey} onClick={() => setPasskey(false)}>I use Phantom</button>
             </div>
             {!passkey ? (
               <p class="muted">In Phantom: tap <b>USDC</b>, then <b>Send</b>, paste the address and the amount.</p>
             ) : (
               <>
-                <p class="muted">Sending straight from this page isn't ready yet. Until it is, a one-time setup in
-                  the free <b>Phantom</b> app (about 5 minutes) lets you send from it:</p>
+                <p class="muted"><b>About 10 minutes, once. After that, cashing out takes a minute.</b> Sending
+                  straight from this page isn't ready yet, so for now you open your wallet in the free <b>Phantom</b>
+                  app:</p>
                 <ol class="cash-steps">
                   <li>Install Phantom on your phone or computer.</li>
                   <li>Tap <b>Show my backup key</b> below and copy it.</li>
