@@ -960,3 +960,11 @@ select { max-width: 100%; text-overflow: ellipsis; }
   .se-bar { position: fixed; left: 0; right: 0; bottom: 16px; padding: 0; pointer-events: none; }
   .se-bar .btn { pointer-events: auto; box-shadow: 0 10px 30px rgba(0, 0, 0, .25); }
 }
+
+.se-pad-x { padding: 6px 16px 0; }
+.se-reset { background: none; border: 0; color: #9ca3af; font: inherit; font-size: 13px; text-decoration: underline; cursor: pointer; padding: 0 4px; }
+.se-sheet-foot { display: none; }
+@media (max-width: 700px) {
+  .se-sheet-foot { display: block; position: sticky; bottom: 0; padding: 12px 16px; background: #111827; border-top: 1px solid #1f2937; }
+  .se-sheet-foot .btn { width: 100%; }
+}

@@ -566,7 +566,7 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
         <div class="se-where">
           <span>Your website</span>
           <a href={nodeUrl} target="_blank" rel="noopener">{String(nodeUrl || "").replace(/^https:\/\//, "")} ↗</a>
-          <small>Shows your last published version.</small>
+          <small>This link shows what you last published, not these edits yet.</small>
         </div>
         <div class="se-tools">
           <button type="button" class="se-btn ghost" disabled={!history.current.length} onClick={undo} title="Undo (Ctrl/Cmd+Z)">↶ Undo</button>
@@ -574,6 +574,7 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
             {preview ? "Back to editing" : "See it as visitors do"}</button>
         </div>
 
+        <div class="se-label se-pad-x">Preview on</div>
         <div class="se-view" role="group" aria-label="Preview size">
           <button type="button" aria-pressed={view === "desktop"} onClick={() => setView("desktop")}>Desktop</button>
           <button type="button" aria-pressed={view === "phone"} onClick={() => setView("phone")}>Phone</button>
@@ -603,7 +604,7 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
           <ul class="se-secs">
             <li class={cur === "@hero" ? "on" : ""}>
               <button type="button" class="se-sec-main" onClick={() => pickSection("hero")}>
-                <b>Top of the page</b><span>Your name, line and banner</span>
+                <b>Top of the page</b><span>Your name, line and banner (always first)</span>
               </button>
             </li>
             {site.sections.map((s, i) => (
@@ -649,6 +650,9 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
               <button key={c} type="button" aria-label={`Accent ${c}`} aria-pressed={L.accent === c}
                 style={{ background: c }} onClick={() => setLook({ accent: c })} />
             ))}
+            {L.accent !== "#f6711e" && (
+              <button type="button" class="se-reset" onClick={() => setLook({ accent: "#f6711e" })}>Reset</button>
+            )}
             <label class="se-custom">
               <span class="se-sr">Pick any colour</span>
               <input type="color" value={L.accent || "#f6711e"} onInput={(e) => setLook({ accent: e.currentTarget.value })} />
@@ -658,6 +662,9 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
 
 
         <p class="se-note">Changes go live when you press Publish at the top.</p>
+        <div class="se-sheet-foot">
+          <button type="button" class="btn sm" onClick={() => setSheet(false)}>Done</button>
+        </div>
       </aside>
 
       <div class="se-stage">
