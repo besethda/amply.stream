@@ -189,10 +189,18 @@ export async function settle(
     // so one that would fail isn't sent.
     const sim = await rpc("simulateTransaction", [signed, { encoding: "base64", sigVerify: true, commitment: "confirmed" }]);
     if (sim?.value?.err) return refuse(422, failureOf(sim.value));
-
-    await rpc("sendTransaction", [signed, { encoding: "base64", skipPreflight: true, maxRetries: 5 }]);
   } catch (e) {
+    // Nothing was sent: the listener can safely try again, or pay otherwise.
     return refuse(502, e instanceof RpcError ? e.message : "couldn't reach the network");
+  }
+
+  try {
+    await rpc("sendTransaction", [signed, { encoding: "base64", skipPreflight: true, maxRetries: 5 }]);
+  } catch {
+    // It may have gone anyway: an answer lost is not a payment unsent. So the
+    // listener gets the signature to look up, never a "try again" that could
+    // pay twice.
+    return { ok: true, signature, micros: verdict.micros, confirmed: false };
   }
 
   // Wait for it to land, briefly. If it hasn't yet, the listener's app can

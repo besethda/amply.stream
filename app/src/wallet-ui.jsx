@@ -178,7 +178,7 @@ export function SetUp({ onMade }) {
  * hand the first time, because a request can't reach an account that doesn't
  * exist yet.
  */
-export function TopUp({ address, balance, network, pair }) {
+export function TopUp({ address, balance, network, pair, needsFee = true }) {
   const [qr, setQr] = useState(null);
   const [coinbase, setCoinbase] = useState(false);       // set up on the relay?
   const [opening, setOpening] = useState(null);           // the amount being opened
@@ -207,7 +207,9 @@ export function TopUp({ address, balance, network, pair }) {
     setCashQr(renderSVG(address));
   }
   const hasDollars = balance?.usdc > 0;
-  const hasFee = balance?.sol > 0.001;
+  // Where every artist followed pays its listeners' network fees, there's no
+  // SOL to add: the step isn't shown at all.
+  const hasFee = balance?.sol > 0.001 || !needsFee;
   const tick = (done, n) => <span class={`tick${done ? " done" : ""}`}>{done ? <Icon.check size={13} /> : n}</span>;
 
   async function showQr(e) {
@@ -228,7 +230,7 @@ export function TopUp({ address, balance, network, pair }) {
       <div class="stack">
         <div class="row two-steps">
           <span class={`tick${hasDollars ? " done" : ""}`}>{hasDollars ? <Icon.check size={13} /> : 1}</span> Dollars
-          <span class={`tick${hasFee ? " done" : ""}`}>{hasFee ? <Icon.check size={13} /> : 2}</span> $1 for fees, once
+          {needsFee && <><span class={`tick${hasFee ? " done" : ""}`}>{hasFee ? <Icon.check size={13} /> : 2}</span> $1 for fees, once</>}
         </div>
         <b>Add money</b>
         <span class="dim small">Use whichever you already have. Amply never sees your bank or card details.</span>

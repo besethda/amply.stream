@@ -12,14 +12,14 @@
  */
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "preact/hooks";
 import { fetchManifest, tracksOf, rateOf, verifiedDomain } from "./manifest.js";
-import { loadLibrary, saveLibrary, addArtist, addKnown, removeArtist, followedOnly, isFollowed, setFollowed, noteReach, reachable, CHECK_EVERY_MS } from "./library.js";
+import { loadLibrary, saveLibrary, addArtist, addKnown, removeArtist, followedOnly, isFollowed, setFollowed, noteReach, reachable, CHECK_EVERY_MS, feesCovered } from "./library.js";
 import { createPlayer } from "./player.js";
 import {
   loadLedger, bank, owing, settle, settleAll, backupSaved, totalOwed, hasWallet, machinery, rateStatus, mismatch,
 } from "./paying.js";
 import { agreeRate } from "./spend.js";
 import {
-  tokenFor, reportPlayed, originOf, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
+  tokenFor, reportPlayed, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
   manageSubscription, claimSubscription,
 } from "./identify.js";
 import { perMinute, subscriptionOnly, plans as plansOf } from "../../spec/pricing.mjs";
@@ -50,6 +50,7 @@ import {
 import { BuyForm, Purchases } from "./buy-ui.jsx";
 import { Handoff, needsHandoff, SHARED_LINK } from "./handoff.jsx";
 import { toMicros } from "./money.js";
+import { networkName } from "./networks.js";
 import { tipsFor, amplyTips, tipBlocked, tipMicros } from "./tips.js";
 import { createUpdater, IDLE_MS as UPDATE_IDLE_MS } from "./update.js";
 import {
@@ -236,7 +237,7 @@ export function App() {
           // known: a slow network is no reason to stop someone who pays.
           const b = funds.current;
           if (b && !(b.usdc > 0)) throw refuse("empty", "", data);
-          if (b && !(b.sol > 0.001)) throw refuse("nosol", "", data);
+          if (b && !(b.sol > 0.001) && !feesCovered(artist)) throw refuse("nosol", "", data);
           // No agreed price, no playing: otherwise never agreeing would mean
           // free listening.
           if (rate) {
@@ -292,7 +293,9 @@ export function App() {
           // Checked afresh each time: a domain pointed elsewhere stops vouching.
           const domain = await verifiedDomain(e.url, manifest, e.domain);
           const { domain: _was, ...rest } = e;
-          return noteReach({ ...rest, manifest, ...(domain ? { domain } : {}) }, true);
+          // Whether their node pays the network fee, so paying them needs no SOL.
+          const feesPaid = await nodePaysFees(originOf(e.url), networkName());
+          return noteReach({ ...rest, manifest, feesPaid, ...(domain ? { domain } : {}) }, true);
         } catch {
           return noteReach(e, false);
         }
@@ -435,7 +438,7 @@ export function App() {
    * is confirmed, then sent straight to them.
    */
   const tip = async (to, dollars) => {
-    const blocked = tipBlocked(dollars, { hasWallet: !!pair, balance, mismatch: pair ? mismatch(to) : null });
+    const blocked = tipBlocked(dollars, { hasWallet: !!pair, balance, mismatch: pair ? mismatch(to) : null, feesCovered: !!to.feesPaid });
     if (blocked === "amount") return;
     if (blocked) {
       setSheet(refusalSheet({ kind: blocked, message: pair ? mismatch(to) : "" }, {
@@ -452,7 +455,7 @@ export function App() {
     if (!yes) return;
     try {
       const { pay } = await machinery();
-      await pay.payArtist(pair, to.recipients, tipMicros(dollars), { artistName: to.name });
+      await pay.payArtist(pair, to.recipients, tipMicros(dollars), { artistName: to.name, node: to.origin ? { origin: to.origin } : undefined });
       flash({ text: `Sent ${money(dollars)} → ${to.name}` });
       refresh();
     } catch (e) {
@@ -469,7 +472,7 @@ export function App() {
     return {
       name,
       links: artist.links,
-      artist: artist.wallet ? (d) => tip({ name, ...artist.wallet }, d) : null,
+      artist: artist.wallet ? (d) => tip({ name, ...artist.wallet, origin: entry ? originOf(entry.url) : undefined, feesPaid: feesCovered(entry) }, d) : null,
       amply: amply ? (d) => tip({ name: "Amply", ...amply }, d) : null,
     };
   }, [state.track, entries, pair, balance]);
@@ -946,7 +949,7 @@ export function App() {
     const block = !pair ? "nowallet"
       : mismatch({ network: o.wallet.network }) ? "mismatch"
       : balance && !(balance.usdc - owedAll >= o.price) ? "empty"
-      : balance && !(balance.sol > 0.001) ? "nosol" : null;
+      : balance && !(balance.sol > 0.001) && !feesCovered(e) ? "nosol" : null;
     if (block) {
       setSheet(refusalSheet({ kind: block, message: block === "mismatch" ? mismatch({ network: o.wallet.network }) : "", name: nameOf(e) }, {
         money, go: { you: () => goYou(), topUp: () => goYou("topup"), retry: () => startBuy(e, o) },
@@ -957,7 +960,7 @@ export function App() {
     let tx;
     try {
       const { pay } = await machinery();
-      ({ signature: tx } = await pay.payArtist(pair, o.wallet.recipients, toMicros(o.price), { artistName: nameOf(e), memo: purchaseMemo(e, o.id) }));
+      ({ signature: tx } = await pay.payArtist(pair, o.wallet.recipients, toMicros(o.price), { artistName: nameOf(e), memo: purchaseMemo(e, o.id), node: { origin: originOf(e.url), item: o.id } }));
     } catch (err) {
       setSheet(null);
       flash({ bad: true, text: err.kind === "network" ? "Couldn't reach the network, so nothing was sent." : err.message || "The payment didn't go through, so nothing was sent." });

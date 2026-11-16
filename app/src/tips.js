@@ -47,13 +47,13 @@ export const amplyTips = () => (AMPLY.recipients.some((r) => r.address) ? { reci
  * What stands between this listener and sending `dollars`, as the kind of
  * refusal the app already has a sheet for — or null if nothing does.
  */
-export function tipBlocked(dollars, { hasWallet, balance, mismatch }) {
+export function tipBlocked(dollars, { hasWallet, balance, mismatch, feesCovered = false }) {
   if (!(dollars > 0) || dollars > MAX_TIP) return "amount";
   if (!hasWallet) return "nowallet";
   if (mismatch) return "mismatch";
   // Only once the balance is known: a slow network is no reason to refuse.
   if (balance && !(balance.usdc >= dollars)) return "empty";
-  if (balance && !(balance.sol > 0.001)) return "nosol";
+  if (balance && !(balance.sol > 0.001) && !feesCovered) return "nosol";
   return null;
 }
 

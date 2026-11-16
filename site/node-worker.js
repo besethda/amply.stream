@@ -1600,9 +1600,13 @@ async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) =
   try {
     const sim = await rpc("simulateTransaction", [signed, { encoding: "base64", sigVerify: true, commitment: "confirmed" }]);
     if (sim?.value?.err) return refuse(422, failureOf(sim.value));
-    await rpc("sendTransaction", [signed, { encoding: "base64", skipPreflight: true, maxRetries: 5 }]);
   } catch (e) {
     return refuse(502, e instanceof RpcError ? e.message : "couldn't reach the network");
+  }
+  try {
+    await rpc("sendTransaction", [signed, { encoding: "base64", skipPreflight: true, maxRetries: 5 }]);
+  } catch {
+    return { ok: true, signature, micros: verdict.micros, confirmed: false };
   }
   const until = Date.now() + confirmWithinMs;
   while (Date.now() < until) {

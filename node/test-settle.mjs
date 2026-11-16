@@ -153,9 +153,15 @@ const today = (db = sqlite) => db.prepare("SELECT count FROM fee_days").get()?.c
 }
 
 {
+  const net = network({ down: ["simulateTransaction"] });
+  const r = await settle(DB, net.rpc, payment(), expect, quick);
+  ok("a network that can't be reached is reported, with nothing sent", !r.ok && r.status === 502 && !net.methods().includes("sendTransaction"));
+}
+
+{
   const net = network({ down: ["sendTransaction"] });
   const r = await settle(DB, net.rpc, payment(), expect, quick);
-  ok("a network that can't be reached is reported as such", !r.ok && r.status === 502);
+  ok("a send whose answer is lost returns the signature, unconfirmed, never \"try again\"", r.ok && r.confirmed === false && !!r.signature);
 }
 
 {
