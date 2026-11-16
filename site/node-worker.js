@@ -263,11 +263,11 @@ function renderSite(input, manifest, { edit = false, slots = {}, listenUrl = "" 
   const nav = shown.filter((s) => !s.hidden).map((s) => `<a href="#${esc(s.id)}">${esc(s.title)}</a>`).join("");
   const heroImg = site.hero.image;
   const hero = `<header class="s-hero${heroImg ? " has-img" : ""}" data-section="hero">
-  ${heroImg ? `<img class="s-hero-img" src="${esc(heroImg)}" alt=""${e("hero.image", "image")}>` : edit ? `<div class="s-hero-img ph-img"${e("hero.image", "image")}>Add a banner picture</div>` : ""}
+  ${heroImg ? `<img class="s-hero-img" src="${esc(heroImg)}" alt=""${e("hero.image", "image")}>` : edit ? `<div class="s-hero-img ph-img"${e("hero.image", "image")}>Click to add a banner picture</div>` : ""}
   <div class="s-hero-in">
     <h1${e("hero.title", "text")}>${ph(name, "Your name")}</h1>
-    ${site.hero.tagline || edit ? `<p class="s-tag"${e("hero.tagline", "long")}>${ph(site.hero.tagline, "A line about you")}</p>` : ""}
-    ${listenUrl ? `<a class="s-btn" href="${esc(listenUrl)}">Listen in Amply</a>` : edit ? `<span class="s-btn">Listen in Amply</span>` : ""}
+    ${site.hero.tagline || edit ? `<p class="s-tag"${e("hero.tagline", "long")}>${ph(site.hero.tagline, "Click to add a line about you")}</p>` : ""}
+    ${listenUrl ? `<a class="s-btn" href="${esc(listenUrl)}">Listen to my music</a>` : edit ? `<span class="s-btn">Listen to my music</span>` : ""}
   </div>
 </header>`;
   const sections = shown.map((s, i) => {
@@ -281,14 +281,14 @@ function renderSite(input, manifest, { edit = false, slots = {}, listenUrl = "" 
         <div><b>${esc(r.title)}</b><p class="muted">${(r.tracks || []).map((t2) => esc(t2.title)).join(" \xB7 ")}</p></div>
       </div>`).join("")}</div>` : `<p class="muted">Your releases appear here once you add music.</p>`);
     } else if (s.type === "about") {
-      inner = `<div class="s-about">${img(s.image, `${p}.image`, "s-about-img", "Add a picture")}
-        <div class="s-text"${e(`${p}.text`, "long")}>${s.text ? paras(s.text) : edit ? `<p class="ph">Write a few lines about you</p>` : ""}</div></div>`;
+      inner = `<div class="s-about">${img(s.image, `${p}.image`, "s-about-img", "Click to add a picture")}
+        <div class="s-text"${e(`${p}.text`, "long")}>${s.text ? paras(s.text) : edit ? `<p class="ph">Click to write a few lines about you</p>` : ""}</div></div>`;
     } else if (s.type === "news") {
       inner = `<div class="s-news">${(s.items || []).map((n, k) => `<article class="s-post" data-item="${p}.items.${k}">
-        ${img(n.image, `${p}.items.${k}.image`, "s-post-img", "Add a picture")}
+        ${img(n.image, `${p}.items.${k}.image`, "s-post-img", "Click to add a picture")}
         <p class="s-date"${e(`${p}.items.${k}.date`, "date")}>${ph(niceDate(n.date), "Date")}</p>
         <h3${e(`${p}.items.${k}.title`, "text")}>${ph(n.title, "Title")}</h3>
-        <div class="s-text"${e(`${p}.items.${k}.text`, "long")}>${n.text ? paras(n.text) : edit ? `<p class="ph">Write the post</p>` : ""}</div>
+        <div class="s-text"${e(`${p}.items.${k}.text`, "long")}>${n.text ? paras(n.text) : edit ? `<p class="ph">Click to write the post</p>` : ""}</div>
       </article>`).join("") || (edit ? `<p class="ph">No posts yet</p>` : "")}</div>`;
     } else if (s.type === "shows") {
       const rows = (s.items || []).filter((x) => edit || x.city || x.venue);
@@ -299,7 +299,7 @@ function renderSite(input, manifest, { edit = false, slots = {}, listenUrl = "" 
       </li>`).join("")}</ul>` : `<p class="muted">No shows announced right now.</p>`;
     } else if (s.type === "merch") {
       inner = `<div class="s-merch">${(s.items || []).map((x, k) => `<div class="s-card" data-item="${p}.items.${k}">
-        ${img(x.image, `${p}.items.${k}.image`, "s-card-img", "Add a picture")}
+        ${img(x.image, `${p}.items.${k}.image`, "s-card-img", "Click to add a picture")}
         <b${e(`${p}.items.${k}.name`, "text")}>${ph(x.name, "Name")}</b>
         <span class="muted"${e(`${p}.items.${k}.price`, "text")}>${ph(x.price, "Price")}</span>
         ${x.url ? `<a class="s-btn sm" href="${esc(x.url)}" rel="noopener"${e(`${p}.items.${k}.url`, "url")}>Buy</a>` : edit ? `<span class="s-btn sm ghost"${e(`${p}.items.${k}.url`, "url")}>Add shop link</span>` : ""}
