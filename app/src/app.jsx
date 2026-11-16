@@ -620,6 +620,19 @@ export function App() {
     location.href = await manageSubscription(pair, originOf(entry.url), back);
   }
 
+  // Back from Coinbase: /app/?added=coinbase. The money is on its way, not
+  // here yet; keep looking for a few minutes so it's announced when it lands.
+  useEffect(() => {
+    let from = null;
+    try { from = new URLSearchParams(location.search).get("added"); } catch { /* none */ }
+    if (from !== "coinbase") return;
+    history.replaceState({ amply: 1, ui: uiRef.current }, "", location.pathname);
+    flash({ text: "Coinbase is sending your money. It usually arrives within a few minutes." });
+    let n = 0;
+    const t = setInterval(() => { refresh(); if (++n >= 12) clearInterval(t); }, 15_000);
+    return () => clearInterval(t);
+  }, [refresh]);
+
   // Back from Stripe: /app/?subscribed=<manifest>&session=<checkout>.
   useEffect(() => {
     let back = null, sessionId = "";

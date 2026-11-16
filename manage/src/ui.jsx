@@ -1863,6 +1863,22 @@ function EarningsTab({ node, published, api, payees, rate, network, settleAt }) 
       <div class="stack">
       <Listeners api={api} payees={payees} rate={rate} network={network} settleAt={settleAt} />
 
+      <section class="card">
+        <h2>Cash out to your bank</h2>
+        <p class="muted">Listeners pay straight into your wallet. To move dollars to your bank, send them from
+          your wallet to an app that turns them back into dollars. Always choose the <b>Solana</b> network:
+          sending on another network can't be undone.</p>
+        <ol class="steps">
+          <li><span class="n">A</span><span class="t">Cash App <span class="note">US · free for now</span>
+            <span class="detail">In Cash App: Money → <b>Deposit USDC</b> → choose <b>Solana</b> → copy the address.
+              In your wallet (Phantom): Send → USDC → paste it → amount. It lands as dollars in Cash App, and
+              you move it to your bank as usual.</span></span></li>
+          <li><span class="n">B</span><span class="t">Coinbase <span class="note">most countries</span>
+            <span class="detail">In Coinbase: Receive → <b>USDC</b> → network <b>Solana</b> → copy the address. Send
+              from your wallet the same way, then sell the USDC for dollars (1 to 1) and withdraw to your bank.</span></span></li>
+        </ol>
+      </section>
+
       <section class="card nothing">
         <h2>Share your link</h2>
         <p>{published

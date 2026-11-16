@@ -79,6 +79,9 @@ async function sign(pair, text) {
   return wallet.bs58(sig);
 }
 
+/** Sign plain text with the wallet. Only for messages the app itself wrote. */
+export const signText = sign;
+
 /** A fresh challenge from this server, checked, then signed: the proof its routes ask for. */
 async function signChallenge(pair, origin) {
   const { challenge } = await (await fetch(`${origin}/listen/challenge`, { method: "POST" })).json();

@@ -8,7 +8,8 @@
  */
 import { useState, useEffect } from "preact/hooks";
 import { machinery, markBackupSaved, onHomeScreen } from "./paying.js";
-import { transferRequest, DOLLAR_AMOUNTS, FEE_SOL, oneTapReady, topupUrl, CARD_AMOUNTS } from "./topup.js";
+import { transferRequest, DOLLAR_AMOUNTS, FEE_SOL, oneTapReady, topupUrl, CARD_AMOUNTS, COINBASE_AMOUNTS, coinbaseOffered, coinbaseLink, CASH_APP } from "./topup.js";
+import { signText } from "./identify.js";
 import { Icon } from "./icons.jsx";
 import { ask } from "./sheets.jsx";
 
@@ -135,8 +136,34 @@ export function SetUp({ onMade }) {
  * hand the first time, because a request can't reach an account that doesn't
  * exist yet.
  */
-export function TopUp({ address, balance, network }) {
+export function TopUp({ address, balance, network, pair }) {
   const [qr, setQr] = useState(null);
+  const [coinbase, setCoinbase] = useState(false);       // set up on the relay?
+  const [opening, setOpening] = useState(null);           // the amount being opened
+  const [said, setSaid] = useState(null);
+  const [cashQr, setCashQr] = useState(null);
+  useEffect(() => { coinbaseOffered().then(setCoinbase); }, []);
+
+  /** Open Coinbase with everything filled in. The window opens on the tap, so
+   *  no pop-up blocker stops it, and is pointed at Coinbase once the relay
+   *  has the session. */
+  async function viaCoinbase(amount) {
+    setSaid(null); setOpening(amount);
+    const w = window.open("", "_blank");
+    try {
+      const url = await coinbaseLink(address, amount, (text) => signText(pair, text));
+      if (w) { w.opener = null; w.location.href = url; } else location.href = url;
+    } catch (e) {
+      w?.close();
+      setSaid(e.message);
+    } finally { setOpening(null); }
+  }
+
+  async function showCashQr(e) {
+    if (!e.currentTarget.open || cashQr) return;
+    const { renderSVG } = await import("uqr");
+    setCashQr(renderSVG(address));
+  }
   const hasDollars = balance?.usdc > 0;
   const hasFee = balance?.sol > 0.001;
   const tick = (done, n) => <span class={`tick${done ? " done" : ""}`}>{done ? <Icon.check size={13} /> : n}</span>;
@@ -161,7 +188,47 @@ export function TopUp({ address, balance, network }) {
           <span class={`tick${hasDollars ? " done" : ""}`}>{hasDollars ? <Icon.check size={13} /> : 1}</span> Dollars
           <span class={`tick${hasFee ? " done" : ""}`}>{hasFee ? <Icon.check size={13} /> : 2}</span> $1 for fees, once
         </div>
-        <b>Add money by card</b>
+        <b>Add money</b>
+        <span class="dim small">Use whichever you already have. Amply never sees your bank or card details.</span>
+
+        {coinbase && (
+          <section class="choice stack">
+            <b>Coinbase</b>
+            <span class="dim small">Opens Coinbase with everything filled in. About 0.5% from a bank, 2.5% by
+              card. You'll need a Coinbase account; it's free.</span>
+            <div class="row">
+              {COINBASE_AMOUNTS.map((n) => (
+                <button key={n} class={n === 30 ? "btn-primary sm" : "pill"} disabled={opening !== null}
+                  onClick={() => viaCoinbase(n)}>{opening === n ? "Opening…" : `$${n}`}</button>
+              ))}
+            </div>
+            {said && <p class="note-line warn-ink small" role="alert">{said}</p>}
+          </section>
+        )}
+
+        <details class="choice more" onToggle={showCashQr}>
+          <summary>Cash App <span class="dim small">· free for now · US</span></summary>
+          <ol class="dim small setup-steps">
+            <li>Copy your wallet's address.</li>
+            <li>In Cash App, go to <b>Pay</b>, paste the address in the search box, enter an amount and pay. Cash
+              App sends it as digital dollars (USDC) on the Solana network for you.</li>
+            <li>It arrives here in a minute or so.</li>
+          </ol>
+          <div class="row">
+            <Copy text={address} label="Copy address" />
+            <a class="pill" href={CASH_APP} target="_blank" rel="noopener noreferrer">Open Cash App <Icon.external size={13} /></a>
+          </div>
+          {cashQr && (
+            <figure class="cash-qr">
+              <div class="qr" dangerouslySetInnerHTML={{ __html: cashQr }} />
+              <figcaption class="dim small">On a computer? Scan this with your phone instead of pasting.</figcaption>
+            </figure>
+          )}
+          <span class="dim small">Free while Cash App's offer lasts. Not available in New York.</span>
+        </details>
+
+        <details class="choice more" open={!coinbase}>
+          <summary>Card <span class="dim small">· works almost anywhere</span></summary>
         <ol class="dim small setup-steps">
           <li>Pick an amount. Stripe's secure page opens, and we copy your wallet's address (a long code, like an account number) for you.</li>
           <li>When Stripe asks where to send it, paste the address. If it asks for a network, choose <b>Solana</b>.</li>
@@ -175,6 +242,7 @@ export function TopUp({ address, balance, network }) {
               target="_blank" rel="noopener noreferrer">${n}</a>
           ))}
         </div>
+        </details>
         {!hasFee && (
           <div class="stack">
             <b>{hasDollars ? "One last thing: $1 for fees" : "Then, once: $1 for fees"}</b>
