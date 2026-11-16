@@ -1,11 +1,11 @@
 var __toBinary = Uint8Array.fromBase64 || /* @__PURE__ */ (() => {
   var table = new Uint8Array(128);
   for (var i = 0; i < 64; i++) table[i < 26 ? i + 65 : i < 52 ? i + 71 : i < 62 ? i - 4 : i * 4 - 205] = i;
-  return (base64) => {
-    var n = base64.length, bytes = new Uint8Array((n - (base64[n - 1] == "=") - (base64[n - 2] == "=")) * 3 / 4 | 0);
+  return (base642) => {
+    var n = base642.length, bytes = new Uint8Array((n - (base642[n - 1] == "=") - (base642[n - 2] == "=")) * 3 / 4 | 0);
     for (var i2 = 0, j = 0; i2 < n; ) {
-      var c0 = table[base64.charCodeAt(i2++)], c1 = table[base64.charCodeAt(i2++)];
-      var c2 = table[base64.charCodeAt(i2++)], c3 = table[base64.charCodeAt(i2++)];
+      var c0 = table[base642.charCodeAt(i2++)], c1 = table[base642.charCodeAt(i2++)];
+      var c2 = table[base642.charCodeAt(i2++)], c3 = table[base642.charCodeAt(i2++)];
       bytes[j++] = c0 << 2 | c1 >> 4;
       bytes[j++] = c1 << 4 | c2 >> 2;
       bytes[j++] = c2 << 6 | c3;
@@ -136,6 +136,16 @@ function includes(manifest, trackId) {
     if ((r.tracks || []).some((t) => t.id === trackId)) return [trackId, r.id];
   }
   return [];
+}
+function shareOut(micros, recipients) {
+  const total = Math.max(0, Math.floor(micros));
+  if (!recipients.length || total === 0) return [];
+  const exact = recipients.map((r) => total * (Number(r.split) || 0) / 100);
+  const parts = exact.map((e) => Math.floor(e));
+  let left = total - parts.reduce((a, b) => a + b, 0);
+  const order = exact.map((e, i) => ({ i, frac: e - Math.floor(e) })).sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (let k = 0; left > 0; k++, left--) parts[order[k % order.length].i] += 1;
+  return recipients.map((r, i) => ({ ...r, micros: parts[i] })).filter((r) => r.micros > 0);
 }
 
 // src/page.ts
@@ -778,13 +788,13 @@ async function handleEvent(db, raw, signature, { fetchSubscription, now = Date.n
     return "refused";
   }
   const obj = event.data?.object ?? {};
-  const load = fetchSubscription ?? ((id) => call(connection.key, "GET", `/subscriptions/${id}`));
+  const load2 = fetchSubscription ?? ((id) => call(connection.key, "GET", `/subscriptions/${id}`));
   if (event.type === "checkout.session.completed") {
     if (obj.mode !== "subscription" || !obj.subscription) return "ignored";
     const wallet = String(obj.client_reference_id || "");
     const key = fromBase58(wallet);
     if (!key || key.length !== 32) return "ignored";
-    const sub = await load(String(obj.subscription));
+    const sub = await load2(String(obj.subscription));
     if (!ours(sub)) return "ignored";
     if (!STANDING.has(String(sub.status))) return "ignored";
     const until = periodEnd(sub);
@@ -1207,6 +1217,417 @@ async function claimWalletSale(db, manifest, { wallet, signature, item, gift, ho
   return { ok: true, sale: await recordSale(db, { ref: signature, item, buyer: wallet, gift, via: "usdc" }, now) };
 }
 
+// src/solana-tx.ts
+var B583 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function base58(bytes) {
+  let zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+  const digits = [];
+  for (let k = zeros; k < bytes.length; k++) {
+    let carry = bytes[k];
+    for (let i = 0; i < digits.length; i++) {
+      carry += digits[i] * 256;
+      digits[i] = carry % 58;
+      carry = Math.floor(carry / 58);
+    }
+    while (carry) {
+      digits.push(carry % 58);
+      carry = Math.floor(carry / 58);
+    }
+  }
+  return "1".repeat(zeros) + digits.reverse().map((d) => B583[d]).join("");
+}
+function unbase58(s) {
+  if (typeof s !== "string" || !s || s.length > 128) return null;
+  const bytes = [];
+  for (const ch of s) {
+    let carry = B583.indexOf(ch);
+    if (carry < 0) return null;
+    for (let i = 0; i < bytes.length; i++) {
+      carry += bytes[i] * 58;
+      bytes[i] = carry & 255;
+      carry >>= 8;
+    }
+    while (carry > 0) {
+      bytes.push(carry & 255);
+      carry >>= 8;
+    }
+  }
+  for (const ch of s) {
+    if (ch === "1") bytes.push(0);
+    else break;
+  }
+  return new Uint8Array(bytes.reverse());
+}
+function keyOf(s) {
+  const k = unbase58(s);
+  return k && k.length === 32 ? k : null;
+}
+var TxError = class extends Error {
+};
+var MAX_TX_BYTES = 1232;
+var MAX_SIGNATURES = 4;
+var Reader = class {
+  at = 0;
+  bytes;
+  constructor(bytes) {
+    this.bytes = bytes;
+  }
+  byte() {
+    if (this.at >= this.bytes.length) throw new TxError("the transaction ends early");
+    return this.bytes[this.at++];
+  }
+  take(n) {
+    if (n < 0 || this.at + n > this.bytes.length) throw new TxError("the transaction ends early");
+    const out = this.bytes.slice(this.at, this.at + n);
+    this.at += n;
+    return out;
+  }
+  /** Solana's "compact-u16": up to three bytes, seven bits each. */
+  short() {
+    let value = 0;
+    for (let i = 0; i < 3; i++) {
+      const b = this.byte();
+      value |= (b & 127) << 7 * i;
+      if ((b & 128) === 0) {
+        if (i > 0 && b === 0) throw new TxError("a length is written in a non-standard way");
+        return value;
+      }
+    }
+    throw new TxError("a length is too long");
+  }
+};
+function shortBytes(n) {
+  const out = [];
+  let v = n;
+  for (; ; ) {
+    const b = v & 127;
+    v >>= 7;
+    if (v === 0) {
+      out.push(b);
+      return out;
+    }
+    out.push(b | 128);
+  }
+}
+function readTransaction(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length === 0) throw new TxError("there is no transaction");
+  if (bytes.length > MAX_TX_BYTES) throw new TxError("the transaction is too large");
+  const r = new Reader(bytes);
+  const sigCount = r.short();
+  if (sigCount === 0 || sigCount > MAX_SIGNATURES) throw new TxError("the transaction has an unexpected number of signatures");
+  const signatures = [];
+  for (let i = 0; i < sigCount; i++) signatures.push(r.take(64));
+  const messageStart = r.at;
+  const required = r.byte();
+  if (required & 128) throw new TxError("only legacy transactions are accepted");
+  const readonlySigned = r.byte();
+  const readonlyUnsigned = r.byte();
+  const accountCount = r.short();
+  if (accountCount === 0 || accountCount > 64) throw new TxError("the transaction has an unexpected number of accounts");
+  const accounts = [];
+  for (let i = 0; i < accountCount; i++) accounts.push(base58(r.take(32)));
+  if (new Set(accounts).size !== accounts.length) throw new TxError("an account is listed twice");
+  if (required !== sigCount) throw new TxError("the signatures don't match the signers");
+  if (required > accountCount || readonlySigned >= required || readonlyUnsigned > accountCount - required) {
+    throw new TxError("the transaction's header doesn't fit its accounts");
+  }
+  const blockhash = base58(r.take(32));
+  const ixCount = r.short();
+  if (ixCount === 0 || ixCount > 16) throw new TxError("the transaction has an unexpected number of instructions");
+  const instructions = [];
+  for (let i = 0; i < ixCount; i++) {
+    const program = r.byte();
+    if (program >= accountCount) throw new TxError("an instruction names an account that isn't there");
+    const n = r.short();
+    const idx = [];
+    for (let j = 0; j < n; j++) {
+      const a = r.byte();
+      if (a >= accountCount) throw new TxError("an instruction names an account that isn't there");
+      idx.push(a);
+    }
+    const len = r.short();
+    instructions.push({ program, accounts: idx, data: r.take(len) });
+  }
+  if (r.at !== bytes.length) throw new TxError("there are extra bytes after the transaction");
+  return {
+    signatures,
+    header: { required, readonlySigned, readonlyUnsigned },
+    accounts,
+    blockhash,
+    instructions,
+    message: bytes.slice(messageStart)
+  };
+}
+function isSigner(tx, i) {
+  return i < tx.header.required;
+}
+function isWritable(tx, i) {
+  const { required, readonlySigned, readonlyUnsigned } = tx.header;
+  if (i < required) return i < required - readonlySigned;
+  return i < tx.accounts.length - readonlyUnsigned;
+}
+function writeTransaction(tx) {
+  const head = shortBytes(tx.signatures.length);
+  const out = new Uint8Array(head.length + tx.signatures.length * 64 + tx.message.length);
+  out.set(head, 0);
+  tx.signatures.forEach((s, i) => out.set(s, head.length + i * 64));
+  out.set(tx.message, head.length + tx.signatures.length * 64);
+  return out;
+}
+async function verifySignature3(key, sig, message) {
+  const raw = keyOf(key);
+  if (!raw || sig.length !== 64) return false;
+  try {
+    const pub = await crypto.subtle.importKey("raw", raw, { name: "Ed25519" }, false, ["verify"]);
+    return await crypto.subtle.verify({ name: "Ed25519" }, pub, sig, message);
+  } catch {
+    return false;
+  }
+}
+function u64(data, at) {
+  if (at + 8 > data.length) throw new TxError("an amount is cut short");
+  let v = 0n;
+  for (let i = 7; i >= 0; i--) v = v << 8n | BigInt(data[at + i]);
+  if (v > BigInt(Number.MAX_SAFE_INTEGER)) throw new TxError("an amount is impossibly large");
+  return Number(v);
+}
+var base64 = {
+  encode: (b) => btoa(String.fromCharCode(...b)),
+  decode: (s) => {
+    if (typeof s !== "string" || s.length > 2e3 || !/^[A-Za-z0-9+/]+={0,2}$/.test(s)) return null;
+    try {
+      return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+    } catch {
+      return null;
+    }
+  }
+};
+
+// src/feepay.ts
+var TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+var ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+var SYSTEM_PROGRAM = "11111111111111111111111111111111";
+var MEMO_PROGRAM2 = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+var TRANSFER_CHECKED = 12;
+var CREATE_IDEMPOTENT = 1;
+var USDC_DECIMALS = 6;
+var no = (problem) => ({ ok: false, problem });
+async function checkFeePayment(tx, expect) {
+  const { feePayer, mint } = expect;
+  const payees = expect.payees.filter((p) => typeof p?.address === "string");
+  if (!payees.length) return no("this artist has no wallet to pay");
+  const payeeSet = new Set(payees.map((p) => p.address));
+  if (payeeSet.size !== payees.length) return no("the artist's wallet list names someone twice");
+  if (payeeSet.has(feePayer)) return no("the fee wallet can't also be paid");
+  if (tx.header.required !== 2 || tx.signatures.length !== 2) return no("a payment has exactly two signers");
+  if (tx.accounts[0] !== feePayer) return no("the fee wallet isn't the fee payer");
+  if (!isWritable(tx, 0)) return no("the fee wallet must pay the fee");
+  const listener2 = tx.accounts[1];
+  if (payeeSet.has(listener2)) return no("the artist can't pay themselves through their own node");
+  if (!tx.signatures[0].every((b) => b === 0)) return no("the fee wallet's signature is already there");
+  const at = (i) => tx.accounts[i];
+  const created = /* @__PURE__ */ new Map();
+  const paid = /* @__PURE__ */ new Map();
+  const uses = /* @__PURE__ */ new Map();
+  let memos = 0;
+  for (const ix of tx.instructions) {
+    const program = at(ix.program);
+    if (isSigner(tx, ix.program)) return no("a signer is used as a program");
+    if (program === ATA_PROGRAM) {
+      if (ix.data.length !== 1 || ix.data[0] !== CREATE_IDEMPOTENT) return no("only creating a payee's USDC account is allowed");
+      if (ix.accounts.length !== 6) return no("creating a USDC account takes six accounts");
+      const [payer, account, owner, mintAt, system, token] = ix.accounts;
+      if (payer !== 0) return no("the fee wallet pays for a payee's USDC account, nobody else");
+      if (!payeeSet.has(at(owner))) return no("a USDC account is being created for someone who isn't paid");
+      if (at(mintAt) !== mint) return no("that isn't USDC");
+      if (at(system) !== SYSTEM_PROGRAM || at(token) !== TOKEN_PROGRAM) return no("creating a USDC account names the wrong programs");
+      if (account < 2 || owner < 2) return no("a signer can't be a payee's account");
+      if (created.has(at(account)) || [...created.values()].includes(at(owner))) return no("a payee's USDC account is created twice");
+      created.set(at(account), at(owner));
+      uses.set(0, (uses.get(0) ?? 0) + 1);
+      continue;
+    }
+    if (program === TOKEN_PROGRAM) {
+      if (ix.data.length !== 10 || ix.data[0] !== TRANSFER_CHECKED) return no("only checked USDC transfers are allowed");
+      if (ix.data[9] !== USDC_DECIMALS) return no("that isn't USDC");
+      if (ix.accounts.length !== 4) return no("a transfer takes four accounts");
+      const [source, mintAt, dest, authority] = ix.accounts;
+      if (authority !== 1) return no("the listener must sign their own payment");
+      if (at(mintAt) !== mint) return no("that isn't USDC");
+      if (source < 2) return no("a signer can't be a token account");
+      const payee = created.get(at(dest));
+      if (!payee) return no("a transfer goes somewhere that isn't a payee's USDC account");
+      if (created.has(at(source))) return no("a transfer can't come from a payee's account");
+      if (paid.has(payee)) return no("a payee is paid twice");
+      const micros2 = u64(ix.data, 1);
+      if (micros2 <= 0) return no("a transfer of nothing");
+      paid.set(payee, micros2);
+      uses.set(1, (uses.get(1) ?? 0) + 1);
+      continue;
+    }
+    if (program === MEMO_PROGRAM2 && expect.memo !== void 0) {
+      if (++memos > 1) return no("a payment carries one note");
+      if (ix.accounts.length !== 1 || ix.accounts[0] !== 1) return no("only the listener signs a payment's note");
+      if (new TextDecoder().decode(ix.data) !== expect.memo || ix.data.length > 200) return no("the note doesn't say what was bought");
+      uses.set(1, (uses.get(1) ?? 0) + 1);
+      continue;
+    }
+    return no("the payment uses a program it doesn't need");
+  }
+  for (const ix of tx.instructions) {
+    if (ix.program === 0 || ix.program === 1) return no("a signer is used as a program");
+  }
+  const mentions = (i) => tx.instructions.reduce((n, ix) => n + ix.accounts.filter((a) => a === i).length, 0);
+  if (mentions(0) !== (uses.get(0) ?? 0)) return no("the fee wallet is used for something other than fees");
+  if (mentions(1) !== (uses.get(1) ?? 0)) return no("the listener's key is used for something other than paying");
+  if (expect.memo !== void 0 && memos !== 1) return no("a purchase must say what it bought");
+  if (paid.size !== created.size) return no("a USDC account is created without being paid");
+  const micros = [...paid.values()].reduce((a, b) => a + b, 0);
+  if (!Number.isSafeInteger(micros)) return no("the amount is impossibly large");
+  if (micros < expect.minMicros) return no("too small to pay the network fee for");
+  if (micros > expect.maxMicros) return no("more than one payment can be");
+  const shares = shareOut(micros, payees).map((s) => ({ address: s.address, micros: s.micros }));
+  if (shares.length !== paid.size || !shares.every((s) => paid.get(s.address) === s.micros)) {
+    return no("the payment isn't split the way the artist set it");
+  }
+  if (!await verifySignature3(listener2, tx.signatures[1], tx.message)) return no("the listener's signature doesn't check out");
+  return { ok: true, listener: listener2, micros, shares };
+}
+
+// src/settle.ts
+var LISTEN_MIN_MICROS = 1e4;
+var LISTEN_MAX_MICROS = 2e6;
+var DAILY_PAYMENTS = 1e3;
+var OFFER_ABOVE_LAMPORTS = 3e6;
+var FEE_KEY = "fee-wallet";
+var RPC_TIMEOUT_MS = 1e4;
+var CONFIRM_WITHIN_MS = 25e3;
+var cached = null;
+async function load(stored) {
+  const { pkcs8, address } = JSON.parse(stored);
+  const raw = base64.decode(pkcs8);
+  if (!raw || typeof address !== "string") throw new Error("the fee wallet's key is damaged");
+  const key = await crypto.subtle.importKey("pkcs8", raw, { name: "Ed25519" }, false, ["sign"]);
+  return {
+    address,
+    sign: async (message) => new Uint8Array(await crypto.subtle.sign({ name: "Ed25519" }, key, message))
+  };
+}
+async function feeKey(db) {
+  if (cached) return cached;
+  let stored = await setting(db, FEE_KEY);
+  if (!stored) {
+    const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+    const pub = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+    const made = JSON.stringify({ pkcs8: base64.encode(pkcs8), address: base58(pub) });
+    await db.prepare("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING").bind(FEE_KEY, made).run();
+    stored = await setting(db, FEE_KEY) ?? made;
+  }
+  cached = await load(stored);
+  return cached;
+}
+async function feeAddress(db) {
+  return (await feeKey(db)).address;
+}
+var RpcError = class extends Error {
+};
+function rpcAt(url) {
+  return async (method, params) => {
+    let res;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        // Solana's public endpoint refuses a Worker without a User-Agent.
+        headers: { "Content-Type": "application/json", "User-Agent": "amply-node/1.0" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        signal: AbortSignal.timeout(RPC_TIMEOUT_MS)
+      });
+    } catch {
+      throw new RpcError("couldn't reach the network");
+    }
+    if (!res.ok) throw new RpcError(res.status === 429 ? "the network is busy" : "the network refused the request");
+    const body = await res.json().catch(() => null);
+    if (!body || body.error) throw new RpcError(`the network said: ${String(body?.error?.message || "nothing useful").slice(0, 200)}`);
+    return body.result;
+  };
+}
+var balances = /* @__PURE__ */ new Map();
+var BALANCE_FRESH_MS = 5 * 6e4;
+async function feeBalance(rpc, address, { fresh = false, now = Date.now() } = {}) {
+  const known = balances.get(address);
+  if (known && !fresh && now - known.at < BALANCE_FRESH_MS) return known.lamports;
+  const r = await rpc("getBalance", [address, { commitment: "confirmed" }]);
+  const lamports = Number(r?.value ?? 0);
+  balances.set(address, { lamports, at: now });
+  return lamports;
+}
+async function countFee(db, now = Date.now()) {
+  const day = new Date(now).toISOString().slice(0, 10);
+  try {
+    const row = await db.prepare(
+      `INSERT INTO fee_days (day, count) VALUES (?, 1)
+       ON CONFLICT(day) DO UPDATE SET count = count + 1
+       RETURNING count`
+    ).bind(day).first();
+    if (row && row.count === 1) {
+      await db.prepare("DELETE FROM fee_days WHERE day < ?").bind(new Date(now - 31 * 864e5).toISOString().slice(0, 10)).run();
+    }
+    return !!row && row.count <= DAILY_PAYMENTS;
+  } catch {
+    return false;
+  }
+}
+var refuse = (status, why) => ({ ok: false, status, why });
+async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) => true, now = Date.now(), wait = (ms) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS } = {}) {
+  const bytes = base64.decode(String(txBase64 ?? ""));
+  if (!bytes) return refuse(400, "that isn't a transaction");
+  let tx;
+  try {
+    tx = readTransaction(bytes);
+  } catch (e) {
+    return refuse(400, e instanceof TxError ? e.message : "that isn't a transaction");
+  }
+  const key = await feeKey(db);
+  const verdict = await checkFeePayment(tx, { ...expect, feePayer: key.address });
+  if (!verdict.ok) return refuse(403, verdict.problem);
+  if (!await allowed(verdict.listener)) return refuse(429, "too many payments from this wallet; try again in a minute");
+  if (!await countFee(db, now)) return refuse(503, "this artist's node has paid all the fees it will today; try again tomorrow");
+  tx.signatures[0] = await key.sign(tx.message);
+  const signed = base64.encode(writeTransaction(tx));
+  const signature = base58(tx.signatures[0]);
+  try {
+    const sim = await rpc("simulateTransaction", [signed, { encoding: "base64", sigVerify: true, commitment: "confirmed" }]);
+    if (sim?.value?.err) return refuse(422, failureOf(sim.value));
+    await rpc("sendTransaction", [signed, { encoding: "base64", skipPreflight: true, maxRetries: 5 }]);
+  } catch (e) {
+    return refuse(502, e instanceof RpcError ? e.message : "couldn't reach the network");
+  }
+  const until = Date.now() + confirmWithinMs;
+  while (Date.now() < until) {
+    await wait(1500);
+    try {
+      const st = (await rpc("getSignatureStatuses", [[signature]]))?.value?.[0];
+      if (st?.err) return refuse(422, "the payment failed on the network; nothing was taken");
+      if (st && (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized")) {
+        return { ok: true, signature, micros: verdict.micros, confirmed: true };
+      }
+    } catch {
+    }
+  }
+  return { ok: true, signature, micros: verdict.micros, confirmed: false };
+}
+function failureOf(value) {
+  const logs = (value.logs || []).join("\n");
+  if (/insufficient funds/i.test(logs) && /Transfer/i.test(logs)) return "there isn't enough in your wallet to pay this; nothing was sent";
+  if (/Blockhash not found|BlockhashNotFound/i.test(JSON.stringify(value.err))) return "that payment is out of date; try again";
+  if (/insufficient lamports|InsufficientFundsForFee|InsufficientFundsForRent/i.test(logs + JSON.stringify(value.err))) {
+    return "this artist's node can't pay the network fee right now; nothing was sent";
+  }
+  return "the network wouldn't accept that payment; nothing was sent";
+}
+
 // src/limits.ts
 var RULES = {
   /** Listener requests that cost: a pass, a play, a purchase, a download. */
@@ -1618,6 +2039,27 @@ async function handleManage(request, env, path) {
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
     });
   }
+  if (request.method === "GET" && path === "/fees") {
+    const address = await feeAddress(env.DB);
+    const text = await manifestText(env);
+    let network = "solana";
+    try {
+      network = walletOf(text ? JSON.parse(text) : null)?.network || network;
+    } catch {
+    }
+    const chain = CHAINS[network] || CHAINS.solana;
+    const lamports = await feeBalance(rpcAt(chain.rpc), address, { fresh: true }).catch(() => null);
+    const today = await env.DB.prepare("SELECT count FROM fee_days WHERE day = ?").bind((/* @__PURE__ */ new Date()).toISOString().slice(0, 10)).first().catch(() => null);
+    return new Response(JSON.stringify({
+      address,
+      network,
+      lamports,
+      offering: lamports !== null && lamports >= OFFER_ABOVE_LAMPORTS,
+      offerAbove: OFFER_ABOVE_LAMPORTS,
+      paidToday: today?.count ?? 0,
+      dailyCap: DAILY_PAYMENTS
+    }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
   if (request.method === "GET" && path === "/stripe") {
     return new Response(JSON.stringify(await publicView(env.DB)), {
       status: 200,
@@ -1779,6 +2221,23 @@ async function whoIsAsking(request, env) {
   if (!token) return null;
   return readToken(env.DB, token);
 }
+async function manifestNowOf(env) {
+  const text = await manifestText(env);
+  try {
+    return text ? JSON.parse(text) : null;
+  } catch {
+    return null;
+  }
+}
+async function feeOffer(env) {
+  const pay = walletOf(await manifestNowOf(env));
+  const chain = pay && CHAINS[pay.network];
+  if (!pay || !chain) return null;
+  const feePayer = await feeAddress(env.DB);
+  if (pay.recipients.some((r) => r.address === feePayer)) return null;
+  if (await feeBalance(rpcAt(chain.rpc), feePayer) < OFFER_ABOVE_LAMPORTS) return null;
+  return { feePayer, network: pay.network, minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS };
+}
 async function handleListen(request, env, path) {
   const host = new URL(request.url).host;
   if (path === "/challenge" && request.method === "POST") {
@@ -1805,6 +2264,44 @@ async function handleListen(request, env, path) {
       return fail(402, "subscribe to hear this artist's paid tracks");
     }
     return new Response(JSON.stringify({ token: result.token, subscribedUntil: subscribed ? until : null }), {
+      status: 200,
+      headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
+    });
+  }
+  if (path === "/fees" && request.method === "GET") {
+    const offer = await feeOffer(env).catch(() => null);
+    return new Response(JSON.stringify(offer ?? { feePayer: null }), {
+      status: 200,
+      headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
+    });
+  }
+  if (path === "/settle" && request.method === "POST") {
+    if (Number(request.headers.get("Content-Length") || 0) > 4096) return fail(413, "too large");
+    const body = await jsonBody(request);
+    if (!body) return fail(400, "bad request");
+    const offer = await feeOffer(env).catch(() => null);
+    if (!offer) return fail(409, "this artist's node isn't paying network fees right now");
+    const manifest = await manifestNowOf(env);
+    const pay = walletOf(manifest);
+    let limits = { minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS };
+    if (body.item !== void 0) {
+      const item = String(body.item);
+      const sale = itemFor(manifest, item);
+      if (!sale || !sale.wallet) return fail(404, "that isn't for sale for USDC here");
+      const price = Math.round(sale.price * 1e6);
+      limits = { minMicros: price, maxMicros: price, memo: purchaseMemo(host, item) };
+    }
+    const result = await settle(env.DB, rpcAt(CHAINS[pay.network].rpc), body.tx, {
+      mint: CHAINS[pay.network].mint,
+      payees: pay.recipients,
+      ...limits
+    }, {
+      // Per paying wallet, on top of the per-address count every listener
+      // request already has.
+      allowed: (who) => allow(env, RULES.wallet, `${host}|settle|${who}`)
+    });
+    if (!result.ok) return fail(result.status, result.why);
+    return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
     });

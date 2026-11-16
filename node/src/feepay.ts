@@ -24,6 +24,8 @@
  *         that payee's real USDC account, so a listener can't substitute one;
  *       · a checked USDC transfer, signed by the listener, into one of those
  *         payee accounts;
+ *   - for a purchase, one memo naming what was bought, exactly as the node
+ *     expects it, signed by the listener alone; for listening, no memo;
  *   - the fee wallet appears nowhere else: not as a transfer's source or
  *     authority, not as a payee, not in any other program;
  *   - the amounts divide between the payees exactly as the manifest's splits
@@ -41,6 +43,7 @@ import { isSigner, isWritable, u64, verifySignature, type Transaction } from "./
 export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 export const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 export const SYSTEM_PROGRAM = "11111111111111111111111111111111";
+export const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
 const TRANSFER_CHECKED = 12;
 const CREATE_IDEMPOTENT = 1;
@@ -52,6 +55,7 @@ export interface FeePayExpect {
   payees: { address: string; split?: number }[]; // from the artist's manifest
   minMicros: number;
   maxMicros: number;
+  memo?: string;                                 // a purchase's note; none for listening
 }
 
 export type FeePayVerdict =
@@ -85,6 +89,7 @@ export async function checkFeePayment(tx: Transaction, expect: FeePayExpect): Pr
   const created = new Map<string, string>();   // payee account → payee
   const paid = new Map<string, number>();      // payee → micros
   const uses = new Map<number, number>();      // fee wallet / listener appearances, checked below
+  let memos = 0;
 
   for (const ix of tx.instructions) {
     const program = at(ix.program);
@@ -129,6 +134,14 @@ export async function checkFeePayment(tx: Transaction, expect: FeePayExpect): Pr
       continue;
     }
 
+    if (program === MEMO_PROGRAM && expect.memo !== undefined) {
+      if (++memos > 1) return no("a payment carries one note");
+      if (ix.accounts.length !== 1 || ix.accounts[0] !== 1) return no("only the listener signs a payment's note");
+      if (new TextDecoder().decode(ix.data) !== expect.memo || ix.data.length > 200) return no("the note doesn't say what was bought");
+      uses.set(1, (uses.get(1) ?? 0) + 1);
+      continue;
+    }
+
     return no("the payment uses a program it doesn't need");
   }
 
@@ -140,6 +153,8 @@ export async function checkFeePayment(tx: Transaction, expect: FeePayExpect): Pr
   const mentions = (i: number) => tx.instructions.reduce((n, ix) => n + ix.accounts.filter((a) => a === i).length, 0);
   if (mentions(0) !== (uses.get(0) ?? 0)) return no("the fee wallet is used for something other than fees");
   if (mentions(1) !== (uses.get(1) ?? 0)) return no("the listener's key is used for something other than paying");
+
+  if (expect.memo !== undefined && memos !== 1) return no("a purchase must say what it bought");
 
   // Every account created is paid into: no paying rent for nothing.
   if (paid.size !== created.size) return no("a USDC account is created without being paid");

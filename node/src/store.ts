@@ -60,6 +60,12 @@ export const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS sales_by_owner ON sales (owner)`,
   `CREATE INDEX IF NOT EXISTS sales_by_buyer ON sales (buyer)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS sales_by_gift ON sales (gift)`,
+  // How many listeners' network fees the node paid each day (settle.ts): a
+  // number per day, to cap what the fee wallet can spend. Not who, not what.
+  `CREATE TABLE IF NOT EXISTS fee_days (
+     day TEXT PRIMARY KEY,
+     count INTEGER NOT NULL DEFAULT 0
+   )`,
   `CREATE TABLE IF NOT EXISTS downloads (
      ref TEXT NOT NULL,
      track TEXT NOT NULL,

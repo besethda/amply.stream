@@ -189,6 +189,21 @@ await refuses("a fee wallet that's also a payee is refused", honest(), {
 }, /fee wallet/);
 await refuses("an artist with no wallet is refused", honest(), { exp: { ...expect, payees: [] } }, /no wallet/);
 
+// ── purchases carry exactly the note the node expects ──────────────────────
+{
+  const MEMO = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+  const note = (text, signer = listener.publicKey) => new TransactionInstruction({
+    programId: MEMO, keys: signer ? [{ pubkey: signer, isSigner: true, isWritable: false }] : [], data: Buffer.from(text, "utf8"),
+  });
+  const buy = { ...expect, memo: "amply:buy:a.example:tides", minMicros: 8_000_000, maxMicros: 8_000_000 };
+  await accepts("a purchase with its note is accepted", [...honest(8_000_000), note(buy.memo)], { exp: buy });
+  await refuses("  without it, refused", honest(8_000_000), { exp: buy }, /say what it bought/);
+  await refuses("  with a different note, refused", [...honest(8_000_000), note("amply:buy:a.example:other")], { exp: buy }, /doesn't say/);
+  await refuses("  with two notes, refused", [...honest(8_000_000), note(buy.memo), note(buy.memo)], { exp: buy }, /one note/);
+  await refuses("  with the fee wallet signing the note, refused", [...honest(8_000_000), note(buy.memo, fee.publicKey)], { exp: buy }, /only the listener/);
+  await refuses("  for less than the price, refused", [...honest(7_999_999), note(buy.memo)], { exp: buy }, /too small/);
+}
+
 // ── a few facts the rules rest on ──────────────────────────────────────────
 ok("the programs are Solana's own", spl.TOKEN_PROGRAM_ID.toBase58() === TOKEN_PROGRAM && spl.ASSOCIATED_TOKEN_PROGRAM_ID.toBase58() === ATA_PROGRAM);
 ok("the app's create-if-missing is the idempotent kind", create(artist.publicKey).data.length === 1 && create(artist.publicKey).data[0] === 1);

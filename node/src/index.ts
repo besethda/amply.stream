@@ -24,8 +24,10 @@ import {
 import { introduce, readToken, guardedKeys, proveOwnership } from "./listen";
 import { challenge } from "./identity";
 import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, claim, refresh, StripeError, setSales, claimSale } from "./stripe";
-import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, type Sale } from "./sales";
-import { DOWNLOADS_PER_PURCHASE, subscriptionOnly } from "../../spec/pricing.mjs";
+import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, itemFor, CHAINS, type Sale } from "./sales";
+import { settle, feeAddress, feeBalance, rpcAt, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS } from "./settle";
+import { purchaseMemo } from "./payment-check";
+import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf } from "../../spec/pricing.mjs";
 import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
 import { ICONS, MANIFEST_PATH, studioManifest } from "./studio";
 
@@ -306,6 +308,23 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     });
   }
 
+  // The wallet that pays listeners' network fees (settle.ts): its address,
+  // what it holds and what it has paid today. Never its key.
+  if (request.method === "GET" && path === "/fees") {
+    const address = await feeAddress(env.DB);
+    const text = await manifestText(env);
+    let network = "solana";
+    try { network = walletOf(text ? JSON.parse(text) : null)?.network || network; } catch { /* default */ }
+    const chain = CHAINS[network] || CHAINS.solana;
+    const lamports = await feeBalance(rpcAt(chain.rpc), address, { fresh: true }).catch(() => null);
+    const today = await env.DB.prepare("SELECT count FROM fee_days WHERE day = ?")
+      .bind(new Date().toISOString().slice(0, 10)).first<{ count: number }>().catch(() => null);
+    return new Response(JSON.stringify({
+      address, network, lamports, offering: lamports !== null && lamports >= OFFER_ABOVE_LAMPORTS,
+      offerAbove: OFFER_ABOVE_LAMPORTS, paidToday: today?.count ?? 0, dailyCap: DAILY_PAYMENTS,
+    }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+
   // Subscriptions through the artist's own Stripe account. The key comes in
   // here once and never goes back out: GET returns what is sold, not how.
   if (request.method === "GET" && path === "/stripe") {
@@ -496,6 +515,24 @@ async function whoIsAsking(request: Request, env: Env): Promise<string | null> {
 }
 
 /** Everything a listener can do without being the artist. */
+async function manifestNowOf(env: Env): Promise<unknown> {
+  const text = await manifestText(env);
+  try { return text ? JSON.parse(text) : null; } catch { return null; }
+}
+
+/** What this node offers to pay network fees for, or null. Only for an
+ *  artist taking USDC on a network this node knows, and only while the fee
+ *  wallet holds enough to be worth offering. */
+async function feeOffer(env: Env): Promise<{ feePayer: string; network: string; minMicros: number; maxMicros: number } | null> {
+  const pay = walletOf(await manifestNowOf(env));
+  const chain = pay && CHAINS[pay.network];
+  if (!pay || !chain) return null;
+  const feePayer = await feeAddress(env.DB);
+  if (pay.recipients.some((r) => r.address === feePayer)) return null;
+  if ((await feeBalance(rpcAt(chain.rpc), feePayer)) < OFFER_ABOVE_LAMPORTS) return null;
+  return { feePayer, network: pay.network, minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS };
+}
+
 async function handleListen(request: Request, env: Env, path: string): Promise<Response | null> {
   const host = new URL(request.url).host;
 
@@ -529,6 +566,48 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     return new Response(JSON.stringify({ token: result.token, subscribedUntil: subscribed ? until : null }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
+    });
+  }
+
+  // ── paying listeners' network fees (settle.ts, feepay.ts) ────────────────
+  // Who would pay the fee, if this node will. Offered only while the fee
+  // wallet holds enough; otherwise the app pays its own fee, as before.
+  if (path === "/fees" && request.method === "GET") {
+    const offer = await feeOffer(env).catch(() => null);
+    return new Response(JSON.stringify(offer ?? { feePayer: null }), {
+      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
+    });
+  }
+
+  // A listener's payment, signed by them, for this node to add its fee
+  // signature to and send. What it may contain comes from the artist's
+  // manifest, never from the request; `item` only says which price applies.
+  if (path === "/settle" && request.method === "POST") {
+    if (Number(request.headers.get("Content-Length") || 0) > 4096) return fail(413, "too large");
+    const body = await jsonBody(request);
+    if (!body) return fail(400, "bad request");
+    const offer = await feeOffer(env).catch(() => null);
+    if (!offer) return fail(409, "this artist's node isn't paying network fees right now");
+    const manifest = await manifestNowOf(env);
+    const pay = walletOf(manifest)!;
+    let limits = { minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS } as { minMicros: number; maxMicros: number; memo?: string };
+    if (body.item !== undefined) {
+      const item = String(body.item);
+      const sale = itemFor(manifest, item);
+      if (!sale || !sale.wallet) return fail(404, "that isn't for sale for USDC here");
+      const price = Math.round(sale.price * 1e6);
+      limits = { minMicros: price, maxMicros: price, memo: purchaseMemo(host, item) };
+    }
+    const result = await settle(env.DB, rpcAt(CHAINS[pay.network].rpc), body.tx, {
+      mint: CHAINS[pay.network].mint, payees: pay.recipients, ...limits,
+    }, {
+      // Per paying wallet, on top of the per-address count every listener
+      // request already has.
+      allowed: (who) => allow(env as never, RULES.wallet, `${host}|settle|${who}`),
+    });
+    if (!result.ok) return fail(result.status, result.why);
+    return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {
+      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
     });
   }
 
