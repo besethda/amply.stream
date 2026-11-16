@@ -47,7 +47,7 @@
 <div class="note">
 <p><strong>In short:</strong> about 15 minutes, once. You make a free Stripe account, copy one key from it
 into your editor, and choose your plans. Stripe pays you directly and takes about 3% + 30¢ a payment;
-Amply takes nothing. You can try it all with pretend money first.</p>
+Amply takes nothing. </p>
 </div>
 
 <h2 id="before">Before you start</h2>
@@ -144,8 +144,8 @@ already made. Fix the key in Stripe and connect again.</p>
 
 <p>Test subscribers don't carry over — test mode and live mode are separate worlds in Stripe.</p>
 
-<h2 id="after">Once it's running</h2>
-
+<details id="after">
+<summary>Once it's running</summary>
 <ul>
   <li><strong>Getting paid.</strong> Stripe pays out to your bank on a schedule you set in the Stripe
   dashboard, usually every few days.</li>
@@ -164,9 +164,10 @@ already made. Fix the key in Stripe and connect again.</p>
   People already subscribed keep listening, and keep being renewed by Stripe, until they cancel;
   your streaming service lets go of your key once the last one ends.</li>
 </ul>
+</details>
 
-<h2 id="trouble">If something goes wrong</h2>
-
+<details id="trouble">
+<summary>If something goes wrong</summary>
 <dl class="trouble">
   <dt>"Your key is missing a permission…"</dt>
   <dd>It names the row. In Stripe, open the ⋯ menu next to your key → <em>Edit key</em>, set that
@@ -194,6 +195,7 @@ already made. Fix the key in Stripe and connect again.</p>
   <dd>Add <em>Customer portal — Write</em> to the key and save your plans again. Fans must be able to
   cancel as easily as they subscribed.</dd>
 </dl>
+</details>
 
 </div></div>
 </main>

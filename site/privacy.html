@@ -22,9 +22,9 @@
 <header class="page-head">
   <div class="col narrow">
     <p class="eyebrow">Privacy</p>
-    <h1>We collect nothing.</h1>
-    <p class="lead">Amply collects nothing about you. Not a reduced amount, nothing. There is
-no account to create, no analytics, and no server that could store anything if we wanted it to.</p>
+    <h1>Amply keeps nothing about you.</h1>
+    <p class="lead">No account, no analytics, no database of listeners. Two others see a little: the artists
+you pay, and the payment network. Here is exactly what.</p>
   </div>
 </header>
 <div class="prose"><div class="col narrow">
@@ -40,25 +40,17 @@ no account to create, no analytics, and no server that could store anything if w
   They show a wallet code, not your name.</li>
   <li><strong>If you top up with Coinbase,</strong> Coinbase sees what it needs for the purchase.</li>
 </ul>
-<p>The details are below.</p>
+<p>Tap any section below for the full detail.</p>
 </div>
 
-<p>That is a consequence of how Amply is built rather than a policy we chose to adopt. There
-is no backend holding a list of artists, no database of listeners, and nothing we could hand
-over, sell or lose.</p>
-
-<p><strong>One thing is not ours to promise.</strong> An artist who charges for their music
-serves it only to listeners who identify themselves with a wallet, and if you play it, that
-artist's own server records that your wallet did. It runs in their account, not ours. What
-that means for you is below.</p>
-
-<h2>This website</h2>
-
+<details>
+<summary>This website</summary>
 <p>Static files. No cookies, no analytics, no tracking pixels, no fingerprinting. We do not
 know that you visited.</p>
+</details>
 
-<h2>Setting up an artist's streaming service</h2>
-
+<details>
+<summary>Setting up an artist's streaming service</summary>
 <p>When an artist connects their Cloudflare account, the authorisation happens between them
 and Cloudflare. We receive a short-lived access token, use it to create their storage and
 Worker, and discard it.</p>
@@ -73,9 +65,10 @@ Worker, and discard it.</p>
 <p>We keep no record that the setup happened, no artist list, no email address, no web address.
 The relay that carries those requests is stateless, has no storage attached to it, and logs
 nothing.</p>
+</details>
 
-<h2>Adding money through Coinbase</h2>
-
+<details>
+<summary>Adding money through Coinbase</summary>
 <p>If you choose Coinbase in the app's <em>Top up</em> screen, your app sends your wallet's
 address, the amount, and a signature proving the wallet is yours to the same relay. The relay
 asks Coinbase for a checkout for that address and hands back the link. To do that it passes
@@ -90,9 +83,10 @@ Coinbase's page is between you and Coinbase, under Coinbase's privacy policy.</p
 <p>You don't have to take that on trust. Your Cloudflare account keeps its own audit log of
 every change made in it, and it will show exactly what setup created, and that nothing has
 touched your account on Amply's behalf since.</p>
+</details>
 
-<h2>The listener app</h2>
-
+<details>
+<summary>The listener app</summary>
 <p>Everything stays on the device:</p>
 
 <ul>
@@ -110,9 +104,10 @@ their terms; Amply never receives it, or anything from it except the wallet key 
 your device. That has a real cost: lose your device and your passkeys (or your backup code) and
 you lose the library and the balance. We would rather be honest about that than hold your data
 in order to avoid it.</p>
+</details>
 
-<h2>Music you pay for</h2>
-
+<details>
+<summary>Music you pay for</summary>
 <p>Music an artist has made free plays for anyone, with no identification and nothing
 recorded. Music an artist charges for is served only to a listener whose app proves which
 wallet it holds, because that is how the artist is paid and how they can stop serving
@@ -140,18 +135,20 @@ could implement.</p>
 
 <p>The app shows an artist's price before you play anything of theirs, and a paid track
 never plays without a wallet, so it cannot happen by accident.</p>
+</details>
 
-<h2>Amply for Artists, our app for Stripe</h2>
-
+<details>
+<summary>Amply for Artists, our app for Stripe</summary>
 <p>Artists who sell card subscriptions can install our app, Amply for Artists, in their own Stripe account. It
 exists only so Stripe can make a key limited to what an artist's streaming service needs:
 setting up subscription plans and checkout links, and checking who has subscribed. The artist
 copies that key into their own streaming service, where it stays. <strong>The app collects
 nothing, and we never receive the key, the payments, or anything about the artist's
 customers.</strong> The artist can uninstall the app, or delete the key, in Stripe at any time.</p>
+</details>
 
-<h2>What other people can see</h2>
-
+<details>
+<summary>What other people can see</summary>
 <p>We are not the only party involved, and it would be misleading to describe only our own
 part.</p>
 
@@ -173,22 +170,26 @@ part.</p>
   much. Addresses are not names, but they are not anonymous either, a wallet can be linked
   to a person, particularly through the on-ramp that funded it.</li>
 </ul>
+</details>
 
-<h2>Your rights</h2>
-
+<details>
+<summary>Your rights</summary>
 <p>Data protection law gives you rights to access, correct and erase personal data held about
 you. We hold none, so there is nothing for us to produce or delete. If you believe otherwise,
 write to us and we will look into it.</p>
+</details>
 
-<h2>Changes</h2>
-
+<details>
+<summary>Changes</summary>
 <p>If this page changes, the change is visible in
 <a href="https://github.com/besethda/amply.stream">the public repository's history</a>, with
 a date and a diff. We cannot quietly revise it.</p>
+</details>
 
-<h2>Contact</h2>
-
+<details>
+<summary>Contact</summary>
 <p>Open an issue on <a href="https://github.com/besethda/amply.stream">the repository</a>.</p>
+</details>
 
 </div></div></main>
 <footer><div class="footer-in"><span>amply</span><div class="footer-links">
