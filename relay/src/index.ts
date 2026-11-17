@@ -506,11 +506,12 @@ export default {
       if (!(await onrampAllowed(env, `connect:${request.headers.get("CF-Connecting-IP") || "unknown"}`))) {
         return page(429, "Too many tries; wait a minute and try again");
       }
-      return seeOther(await connectUrl(env, `${url.origin}/coinbase/connected`, host, nonce));
+      // Coinbase refuses a return address containing its own name.
+      return seeOther(await connectUrl(env, `${url.origin}/oauth/connected`, host, nonce));
     }
-    if (request.method === "GET" && url.pathname === "/coinbase/connected") {
+    if (request.method === "GET" && url.pathname === "/oauth/connected") {
       if (!connectReady(env)) return page(503, "Connecting Coinbase isn't set up yet");
-      const done = await finishConnect(env, `${url.origin}/coinbase/connected`, url.searchParams);
+      const done = await finishConnect(env, `${url.origin}/oauth/connected`, url.searchParams);
       if (!("host" in done)) return page(400, done.error);
       return seeOther(backToEditor(done.host, done.nonce, done.result));
     }

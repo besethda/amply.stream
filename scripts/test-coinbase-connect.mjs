@@ -63,7 +63,7 @@ let state;
   const to = new URL(res.headers.get("Location"));
   ok("  at login.coinbase.com", to.origin === "https://login.coinbase.com" && to.pathname === "/oauth2/auth");
   ok("  as Amply's app, coming back to the relay", to.searchParams.get("client_id") === "client-1"
-    && to.searchParams.get("redirect_uri") === `${RELAY}/coinbase/connected`);
+    && to.searchParams.get("redirect_uri") === `${RELAY}/oauth/connected`);
   ok("  asking only to read accounts and make an address", to.searchParams.get("scope") === CONNECT_SCOPES
     && !/send|offline_access|withdraw|sell|buy/.test(CONNECT_SCOPES));
   ok("  with PKCE", to.searchParams.get("code_challenge_method") === "S256" && to.searchParams.get("code_challenge")?.length === 43);
@@ -82,7 +82,7 @@ let state;
 // ── Coinbase's answer ───────────────────────────────────────────────────────
 {
   reset();
-  const res = await get(`/coinbase/connected?code=CODE&state=${encodeURIComponent(state)}`);
+  const res = await get(`/oauth/connected?code=CODE&state=${encodeURIComponent(state)}`);
   ok("an approved sign-in comes back to the editor", res.status === 303, String(res.status));
   const { to, f } = fragment(res);
   ok("  the same editor, at /manage", to.origin === `https://${HOST}` && to.pathname === "/manage");
@@ -92,7 +92,7 @@ let state;
   const tokenCall = calls.find((c) => c.url.endsWith("/oauth2/token"));
   const sent = new URLSearchParams(tokenCall?.body || "");
   ok("the code is exchanged with the PKCE verifier", sent.get("grant_type") === "authorization_code" && sent.get("code") === "CODE"
-    && sent.get("code_verifier")?.length === 43 && sent.get("redirect_uri") === `${RELAY}/coinbase/connected`);
+    && sent.get("code_verifier")?.length === 43 && sent.get("redirect_uri") === `${RELAY}/oauth/connected`);
   const made = calls.find((c) => c.url.endsWith("/addresses"));
   ok("an address is made in the USDC account, on Solana", made?.method === "POST" && JSON.parse(made.body).network === "solana");
   ok("  found on the second page of accounts", calls.filter((c) => c.url.includes("/v2/accounts?")).length === 2);
@@ -105,7 +105,7 @@ let state;
 // ── things going wrong ──────────────────────────────────────────────────────
 const back = async (query, over) => {
   reset(over);
-  const res = await get(`/coinbase/connected?${query}`);
+  const res = await get(`/oauth/connected?${query}`);
   return { res, ...(res.status === 303 ? fragment(res) : {}) };
 };
 {
@@ -139,7 +139,7 @@ const back = async (query, over) => {
   const start = await get(new URL(link).pathname + new URL(link).search);
   const st = new URL(start.headers.get("Location")).searchParams.get("state");
   reset();
-  const done = await get(`/coinbase/connected?code=CODE&state=${encodeURIComponent(st)}`);
+  const done = await get(`/oauth/connected?code=CODE&state=${encodeURIComponent(st)}`);
   const landed = new URL(done.headers.get("Location"));
   let cleared = false;
   ok("back in the editor, the answer is taken", editor.takeCoinbaseAnswer({ hash: landed.hash, store, clear: () => { cleared = true; } }) === true && cleared);
