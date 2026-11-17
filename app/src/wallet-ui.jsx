@@ -267,7 +267,8 @@ export function TopUp({ address, balance, network, pair, needsFee = true }) {
           <span class="dim small">Copy your address, then pay it in Cash App.{" "}
             <Hint label="How Cash App works">In Cash App, go to <b>Pay</b>, paste the address in the search box,
               enter an amount and pay. Cash App sends it as digital dollars (USDC) for you, and it arrives here in a
-              minute or so. Free while Cash App's offer lasts. Not available in New York.</Hint></span>
+              minute or so. Cash App needs your ID verified and USDC switched on, and has daily limits. Free while Cash
+              App's offer lasts. Not available in New York or for sponsored (teen) accounts.</Hint></span>
           <div class="row">
             <Copy text={address} label="Copy address" />
             <a class="pill" href={CASH_APP} target="_blank" rel="noopener noreferrer">Open Cash App <Icon.external size={13} /></a>
@@ -282,7 +283,8 @@ export function TopUp({ address, balance, network, pair, needsFee = true }) {
 
         <details class="choice more" open={!coinbase}>
           <summary>Card <span class="dim small">· US · Stripe's fee, shown before you pay</span></summary>
-        <span class="dim small">Pick an amount and pay on Stripe's page.{" "}
+        <span class="dim small">Pick an amount and pay on Stripe's page. Your wallet ends in{" "}
+          <b class="mono">{address.slice(-4)}</b>: Stripe's page shows the same.{" "}
           <Hint label="How paying by card works">Stripe's secure page opens. If it asks where to send it, paste your
             address; if it asks for a network, choose <b>Solana</b>. The first time, Stripe may ask for ID: that's
             Stripe's own check, not Amply's, and takes a couple of minutes. At ½¢ a minute, a common price, $10 is

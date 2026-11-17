@@ -1191,10 +1191,15 @@ async function publicView(db) {
     sales
   };
 }
+function newKeyProblem(key) {
+  if (/^pk_/.test(key)) return "That's Stripe's publishable key. Amply needs a restricted key, which starts rk_.";
+  if (/^sk_/.test(key)) return "That's Stripe's full secret key, which can move money. Make a restricted key instead (it starts rk_), with only the permissions in the guide.";
+  if (!/^rk_(live|test)_[A-Za-z0-9]+$/.test(key)) return "That doesn't look like a Stripe restricted key. Copy the one that starts rk_.";
+  return null;
+}
 async function connect(db, { key, plans: plans2, artist, returnTo }) {
-  if (!/^(sk|rk)_(live|test)_[A-Za-z0-9]+$/.test(key)) {
-    throw new StripeError(/^pk_/.test(key) ? "That's Stripe's publishable key. Amply needs the secret key shown with it, which starts rk_." : "That doesn't look like a Stripe secret key. Copy the one that starts rk_.");
-  }
+  const problem = newKeyProblem(key);
+  if (problem) throw new StripeError(problem);
   const live = key.includes("_live_");
   await call(key, "GET", "/products", { limit: 1 });
   const previous = await connectionOf(db);
@@ -1287,7 +1292,13 @@ async function setSales(db, { key, items, artist, returnTo }) {
   let c = await connectionOf(db);
   const useKey = (key || "").trim() || c?.key || "";
   if (!useKey) throw new StripeError("Connect Stripe first: paste your key, or install Amply for Artists.");
-  if (!/^(sk|rk)_(live|test)_[A-Za-z0-9]+$/.test(useKey)) throw new StripeError("That doesn't look like a Stripe secret key. Copy the one that starts rk_.");
+  const pasted = (key || "").trim();
+  if (pasted && pasted !== c?.key) {
+    const problem = newKeyProblem(pasted);
+    if (problem) throw new StripeError(problem);
+  } else if (!/^(sk|rk)_(live|test)_[A-Za-z0-9]+$/.test(useKey)) {
+    throw new StripeError("That doesn't look like a Stripe secret key. Copy the one that starts rk_.");
+  }
   if (!c || c.key !== useKey) {
     await call(useKey, "GET", "/products", { limit: 1 });
     c = { key: useKey, live: useKey.includes("_live_"), product: c?.product || "", portal: c?.portal ?? null, plans: c?.key === useKey ? c.plans : [], sales: c?.sales };
@@ -1330,16 +1341,20 @@ async function setSales(db, { key, items, artist, returnTo }) {
     });
     throw e;
   }
+  const retired = [...c.retired || []];
   for (const h of had) {
-    if (!next.some((n) => n.linkId === h.linkId)) await call(useKey, "POST", `/payment_links/${h.linkId}`, { active: false }).catch(() => {
-    });
+    if (!next.some((n) => n.linkId === h.linkId)) {
+      await call(useKey, "POST", `/payment_links/${h.linkId}`, { active: false }).catch(() => {
+      });
+      retired.push({ item: h.item, linkId: h.linkId });
+    }
   }
-  await putSetting(db, STRIPE_KEY, JSON.stringify({ ...c, sales: next }));
+  await putSetting(db, STRIPE_KEY, JSON.stringify({ ...c, sales: next, retired: retired.slice(-500) }));
   return next;
 }
 async function claimSale(db, wallet, sessionId, { loadSession } = {}) {
   const c = await connectionOf(db);
-  const links = c?.sales || [];
+  const links = [...c?.sales || [], ...c?.retired || []];
   if (!c || !links.length) return { outcome: "refused" };
   if (!SESSION.test(sessionId)) return { outcome: "refused" };
   const session = await (loadSession ?? ((id) => call(c.key, "GET", `/checkout/sessions/${id}`)))(sessionId);
@@ -1902,6 +1917,12 @@ async function checkFeePayment(tx, expect) {
 var LISTEN_MIN_MICROS = 1e4;
 var LISTEN_MAX_MICROS = 2e6;
 var DAILY_PAYMENTS = 1e3;
+var DAILY_SENDS = 50;
+var dayKey = (kind, now) => {
+  const day = new Date(now).toISOString().slice(0, 10);
+  return kind === "send" ? `send:${day}` : day;
+};
+var capOf = (kind) => kind === "send" ? DAILY_SENDS : DAILY_PAYMENTS;
 var OFFER_ABOVE_LAMPORTS = 3e6;
 var FEE_KEY = "fee-wallet";
 var RPC_TIMEOUT_MS = 1e4;
@@ -1966,24 +1987,32 @@ async function feeBalance(rpc, address, { fresh = false, now = Date.now() } = {}
   balances.set(address, { lamports, at: now });
   return lamports;
 }
-async function countFee(db, now = Date.now()) {
-  const day = new Date(now).toISOString().slice(0, 10);
+async function feeRoom(db, kind = "pay", now = Date.now()) {
+  try {
+    const row = await db.prepare("SELECT count FROM fee_days WHERE day = ?").bind(dayKey(kind, now)).first();
+    return (row?.count ?? 0) < capOf(kind);
+  } catch {
+    return false;
+  }
+}
+async function countFee(db, now = Date.now(), kind = "pay") {
   try {
     const row = await db.prepare(
       `INSERT INTO fee_days (day, count) VALUES (?, 1)
        ON CONFLICT(day) DO UPDATE SET count = count + 1
        RETURNING count`
-    ).bind(day).first();
+    ).bind(dayKey(kind, now)).first();
     if (row && row.count === 1) {
-      await db.prepare("DELETE FROM fee_days WHERE day < ?").bind(new Date(now - 31 * 864e5).toISOString().slice(0, 10)).run();
+      const cutoff = new Date(now - 31 * 864e5).toISOString().slice(0, 10);
+      await db.prepare("DELETE FROM fee_days WHERE (day NOT LIKE 'send:%' AND day < ?) OR (day LIKE 'send:%' AND substr(day, 6) < ?)").bind(cutoff, cutoff).run();
     }
-    return !!row && row.count <= DAILY_PAYMENTS;
+    return !!row && row.count <= capOf(kind);
   } catch {
     return false;
   }
 }
 var refuse = (status, why) => ({ ok: false, status, why });
-async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) => true, now = Date.now(), wait = (ms) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS, from } = {}) {
+async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) => true, now = Date.now(), wait = (ms) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS, from, kind = "pay" } = {}) {
   const bytes = base64.decode(String(txBase64 ?? ""));
   if (!bytes) return refuse(400, "that isn't a transaction");
   let tx;
@@ -1997,7 +2026,8 @@ async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) =
   if (!verdict.ok) return refuse(403, verdict.problem);
   if (from && !from.includes(verdict.listener)) return refuse(403, "that isn't one of your payout wallets");
   if (!await allowed(verdict.listener)) return refuse(429, "too many payments from this wallet; try again in a minute");
-  if (!await countFee(db, now)) return refuse(503, "this artist's node has paid all the fees it will today; try again tomorrow");
+  const full = refuse(503, kind === "send" ? "that's the most sends to the bank in one day; try again tomorrow" : "this artist's node has paid all the fees it will today; try again tomorrow");
+  if (!await feeRoom(db, kind, now)) return full;
   tx.signatures[0] = await key.sign(tx.message);
   const signed = base64.encode(writeTransaction(tx));
   const signature = base58(tx.signatures[0]);
@@ -2007,6 +2037,7 @@ async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) =
   } catch (e) {
     return refuse(502, e instanceof RpcError ? e.message : "couldn't reach the network");
   }
+  if (!await countFee(db, now, kind)) return full;
   try {
     await rpc("sendTransaction", [signed, { encoding: "base64", skipPreflight: true, maxRetries: 5 }]);
   } catch {
@@ -2166,7 +2197,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.5";
+var VERSION = "3.19.6";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
@@ -2575,7 +2606,7 @@ async function handleManage(request, env, path) {
       payees: [{ address: to, split: 100 }],
       minMicros: micros,
       maxMicros: micros
-    }, { from: payees });
+    }, { from: payees, kind: "send" });
     if (!result.ok) return fail(result.status, result.why);
     return json({ signature: result.signature, confirmed: result.confirmed });
   }

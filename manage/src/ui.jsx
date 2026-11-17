@@ -2062,14 +2062,14 @@ function FeesCard({ api, network, payees }) {
   if (!fees) return <section class="card">{head}<p class="muted">Checking…</p></section>;
 
   // 10,000 lamports a payment; what's held back keeps the account itself open.
-  const payments = fees.lamports == null ? null : Math.max(0, Math.floor((fees.lamports - 1_000_000) / 10_000));
+  const payments = fees.lamports == null ? null : Math.max(0, Math.floor((fees.lamports - (fees.offerAbove || 3_000_000)) / 10_000));
   if (fees.offering) {
     return (
       <details class="card fees-on" id="fees">
         <summary><b>Fees account</b> <span class="pill-status on">On</span>
           <span class="muted small">{payments != null ? `about ${payments.toLocaleString()} payments left` : ""}</span></summary>
         <p class="muted small">Pays the tiny network fees on your fans' payments and your sends to the bank, so nobody
-          needs a coin called SOL. Never more than about $2 a day. Top it up with SOL at this address when it runs low:</p>
+          needs a coin called SOL. At most 0.01 SOL of fees a day (a dollar or two). Top it up with SOL at this address when it runs low:</p>
         <div class="copy-row">
           <CopyButton text={fees.address} label="Copy the fees address" className="btn sm" />
           <code>{fees.address}</code>
@@ -2105,14 +2105,15 @@ function FeesCard({ api, network, payees }) {
             (Coinbase adds a small fee, under a dollar). Then open SOL, tap <b>Send</b>, paste the address, and send
             all of the SOL you just bought.
             If it asks for a network, choose <b>Solana</b>.</li>
-          <li>Come back here. It switches on by itself within a few minutes.</li>
+          <li>Come back here. It switches on by itself within a few minutes of the SOL arriving. Buy with a debit card:
+            SOL bought by bank transfer can be held for a few days before Coinbase lets you send it.</li>
         </ol>
         <p class="muted small">Cash App can't send SOL, so use Coinbase for this one step. Send SOL, not dollars
           (USDC): this account only pays fees.</p>
       </details>
       <p class="muted small">
         {fees.paidToday ? `Covered ${fees.paidToday} payment${fees.paidToday === 1 ? "" : "s"} today. ` : ""}
-        It only pays for payments to you, and never more than about $2 of fees in a day.
+        It only pays for payments to you, and at most 0.01 SOL of fees a day (a dollar or two).
         {fees.network !== "solana" ? ` Test network (${fees.network}).` : ""}</p>
       <button class="btn ghost sm" onClick={load}>{fees.offering ? "Refresh" : "I've sent it: check now"}</button>
     </section>

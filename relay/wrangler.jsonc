@@ -8,10 +8,25 @@
   // about that should be written down anywhere.
   "observability": { "enabled": false },
 
-  // Deliberately no bindings. No KV, no R2, no D1, no Durable Objects.
+  // Deliberately no storage. No KV, no R2, no D1, no Durable Objects.
   // Nothing to exfiltrate even if the code above is wrong. Do not add any.
+  // The one binding is Cloudflare's rate limiter, which counts requests and
+  // holds nothing else (the Coinbase route, src/index.ts).
+  "ratelimits": [
+    { "name": "ONRAMP_LIMIT", "namespace_id": "8101", "simple": { "limit": 6, "period": 60 } }
+  ],
 
   "vars": {
-    "ALLOWED_ORIGINS": "https://amply.stream,http://localhost:8788"
+    "ALLOWED_ORIGINS": "https://amply.stream"
+  },
+
+  // Local development (`npm run dev`) also accepts the local site.
+  "env": {
+    "dev": {
+      "vars": { "ALLOWED_ORIGINS": "https://amply.stream,http://localhost:8788" },
+      "ratelimits": [
+        { "name": "ONRAMP_LIMIT", "namespace_id": "8101", "simple": { "limit": 6, "period": 60 } }
+      ]
+    }
   }
 }

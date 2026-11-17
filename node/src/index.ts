@@ -403,7 +403,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const result = await settle(env.DB, rpc, body.tx, {
       mint: chain.mint, payees: [{ address: to, split: 100 }], minMicros: micros, maxMicros: micros,
-    }, { from: payees });
+    }, { from: payees, kind: "send" });
     if (!result.ok) return fail(result.status, result.why);
     return json({ signature: result.signature, confirmed: result.confirmed });
   }

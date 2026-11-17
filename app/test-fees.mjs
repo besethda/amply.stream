@@ -156,5 +156,20 @@ const reset = (n) => { node = n; selfSent.length = 0; sentByNode.length = 0; };
   ok("not enough money is said plainly, without trying again", threw?.kind === "funds" && selfSent.length === 0);
 }
 
+{
+  // A crash after sending: Cloudflare's own error page, not the node's refusal.
+  reset({ ...offering(), answer: () => new Response("<html>Error 1102: Worker exceeded resource limits</html>", { status: 503, headers: { "Content-Type": "text/html" } }) });
+  let threw = null;
+  try { await payArtist(listener, payees, 100_000, { node: { origin: ORIGIN } }); } catch (e) { threw = e; }
+  ok("a crash page from the node: stop, it may have been sent", threw?.kind === "unconfirmed", threw?.message);
+  ok("  and the listener's wallet doesn't pay it a second time", selfSent.length === 0);
+}
+{
+  reset({ ...offering(), answer: () => new Response("Internal Server Error", { status: 500 }) });
+  let threw = null;
+  try { await payArtist(listener, payees, 100_000, { node: { origin: ORIGIN } }); } catch (e) { threw = e; }
+  ok("a bare server error: also stop, without paying twice", threw?.kind === "unconfirmed" && selfSent.length === 0);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
