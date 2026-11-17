@@ -693,10 +693,12 @@ table.perms td:nth-child(2) { font-weight: 600; }
 /* ── settings tab ─────────────────────────────────────────────────── */
 
 .profile { padding: 0; overflow: hidden; }
-/* A button is not centred vertically by default, and this one is a 155px box
-   with one line of text in the middle of it. */
+/* A button is not centred vertically by default, and this one is a box with one
+   line of text in the middle of it. The banner is 8:3 everywhere it is shown
+   (here, the Amply app's artist screen, the artist's website), so this is the
+   crop listeners get. Change the ratio in all of them together. */
 .banner-art {
-  height: 155px; width: 100%; border: 0; padding: 0 var(--gut); cursor: pointer;
+  aspect-ratio: 8 / 3; width: 100%; border: 0; padding: 0 var(--gut); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   background-color: var(--bg2);
   background-image: repeating-linear-gradient(
@@ -1461,8 +1463,16 @@ bitsperframe:             %d
 .s-hero{position:relative;min-height:clamp(320px,52vh,560px);display:flex;align-items:flex-end;overflow:hidden;background:var(--bg2)}
 .s-hero-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .s-hero.has-img::after{content:"";position:absolute;inset:0;background:linear-gradient(transparent 30%,rgba(0,0,0,.6))}
+/* The banner is 8:3 here as in the editor and the app. Wide enough, the name sits on it; on a
+   narrower screen it would not fit on a picture that short, so the name goes under it instead. */
+.s-hero.has-img{min-height:auto;aspect-ratio:8/3}
+@media(max-width:799px){
+ .s-hero.has-img{display:block;aspect-ratio:auto;padding:0}
+ .s-hero.has-img .s-hero-img{position:relative;display:block;height:auto;aspect-ratio:8/3}
+ .s-hero.has-img::after{content:none}
+}
 .s-hero-in{position:relative;z-index:1;width:100%;max-width:960px;margin:0 auto;padding:clamp(28px,5vw,56px) clamp(20px,4vw,48px)}
-.s-hero.has-img .s-hero-in{color:#fff}
+@media(min-width:800px){.s-hero.has-img .s-hero-in{color:#fff}}
 .s-hero h1{font-size:clamp(44px,9vw,104px);line-height:.92;letter-spacing:-.045em;margin:0;font-weight:800}
 .s-tag{font-size:clamp(17px,2vw,21px);margin:16px 0 0;max-width:34em;opacity:.9}
 .s-btn{display:inline-block;margin-top:24px;background:var(--ac);color:#131110 !important;text-decoration:none;font-weight:700;

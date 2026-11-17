@@ -287,7 +287,8 @@ input, textarea, select { font-size: 16px; }
 /* ── artist ───────────────────────────────────────────────────────── */
 
 .artist.screen { padding-top: 0; }
-.banner { height: calc(220px + env(safe-area-inset-top, 0px)); position: relative; background-size: cover; background-position: center; }
+/* 8:3, like the artist's editor and website. The status bar sits over its top edge. */
+.banner { aspect-ratio: 8 / 3; position: relative; background-size: cover; background-position: center; }
 .artist-top { display: flex; align-items: flex-end; justify-content: space-between; margin-top: -34px; position: relative; }
 .artist-top .artist-price { margin: 0 0 -4px; justify-content: flex-end; }
 .artist-title { display: flex; align-items: center; gap: 8px; }
@@ -618,7 +619,7 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 .edit-warn { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-top: -4px; text-align: left; }
 .card-art .badge { margin-left: 6px; font-size: 9.5px; padding: 1px 6px; vertical-align: 1px; }
 .preview { background: var(--bg2); border: 1px solid var(--line); border-radius: 15px; overflow: hidden; animation: up .25s ease; }
-.preview-banner { display: block; height: 84px; background-size: cover; background-position: center; }
+.preview-banner { display: block; aspect-ratio: 8 / 3; background-size: cover; background-position: center; }
 .preview-body { padding: 0 15px 15px; display: grid; gap: 8px; }
 .preview-body b { font-size: 19px; font-weight: 800; letter-spacing: -.025em; }
 .preview-body .mono { display: inline-flex; gap: 5px; align-items: center; }

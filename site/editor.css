@@ -408,10 +408,12 @@ table.perms td:nth-child(2) { font-weight: 600; }
 /* ── settings tab ─────────────────────────────────────────────────── */
 
 .profile { padding: 0; overflow: hidden; }
-/* A button is not centred vertically by default, and this one is a 155px box
-   with one line of text in the middle of it. */
+/* A button is not centred vertically by default, and this one is a box with one
+   line of text in the middle of it. The banner is 8:3 everywhere it is shown
+   (here, the Amply app's artist screen, the artist's website), so this is the
+   crop listeners get. Change the ratio in all of them together. */
 .banner-art {
-  height: 155px; width: 100%; border: 0; padding: 0 var(--gut); cursor: pointer;
+  aspect-ratio: 8 / 3; width: 100%; border: 0; padding: 0 var(--gut); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   background-color: var(--bg2);
   background-image: repeating-linear-gradient(
