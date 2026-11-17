@@ -67,7 +67,7 @@ See [`example.json`](./example.json) for a complete, valid manifest.
 | `name` | string | **yes** | 1–200 chars. Displayed everywhere. |
 | `bio` | string | no | Max 2000 chars. Plain text — no markup. |
 | `image` | URL | no | Avatar. HTTPS. |
-| `banner` | URL | no | Wide image across the top of the artist's page. HTTPS. |
+| `banner` | URL | no | Wide image across the top of the artist's page. HTTPS. Shown 8:3 (for example 3200x1200) everywhere, centred and cropped to fit, so keep what matters in the middle. |
 | `domain` | string | no | A bare domain the artist owns, like `yourname.com`, in lower case. Shown to listeners only once the domain confirms it: see **Linking a domain** below. |
 | `contact` | string | no | An email address or an HTTPS link, for listeners to reach the artist about their data. Shown on the artist's privacy page. An artist who charges holds a record of each paying wallet and so has to be reachable. |
 | `links` | array | no | `{ label, url }`. Max 20. |

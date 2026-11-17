@@ -8,7 +8,7 @@
  * that here, in the artist's browser: a few hundred KB instead of megabytes.
  */
 export const COVER_PX = 1200;      // covers and artist photos: the longest side
-export const BANNER_PX = 1800;     // a banner, wider than it's tall
+export const BANNER_PX = 1800;     // a banner: shown 8:3 (e.g. 3200x1200), so wider than it is tall
 const QUALITY = 0.85;
 const SMALL_ENOUGH = 400 * 1024;   // already this small and this size: left alone
 
