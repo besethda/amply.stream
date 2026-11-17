@@ -2554,12 +2554,12 @@ function ConnectCoinbase({ onAddress }) {
   );
 }
 
-/** The Coinbase app in this phone's store (it offers "Open" when installed), or the website. */
-function coinbaseAppLink(ua = typeof navigator === "undefined" ? "" : navigator.userAgent) {
-  if (/iPhone|iPad|iPod/.test(ua)) return "https://apps.apple.com/app/id886427730";
-  if (/Android/.test(ua)) return "https://play.google.com/store/apps/details?id=com.coinbase.android";
-  return "https://www.coinbase.com/";
-}
+/**
+ * Coinbase's USDC page: with the app installed it opens straight to USDC in
+ * the app (tested on iPhone), one tap from Receive; otherwise the website,
+ * which offers sign-up and the app.
+ */
+const COINBASE_USDC = "https://www.coinbase.com/price/usdc";
 
 /**
  * Coinbase's deposit address, copied from the Coinbase app: payments go
@@ -2587,8 +2587,8 @@ function PasteCoinbase({ onAddress }) {
   return (
     <div class="connect-coinbase">
       <ol class="cash-steps">
-        <li>In <a href={coinbaseAppLink()} target="_blank" rel="noopener noreferrer">Coinbase</a> (free to join),
-          tap <b>Receive</b> → <b>USDC</b> → network <b>Solana</b> → <b>Copy</b>.</li>
+        <li>Open <a href={COINBASE_USDC} target="_blank" rel="noopener noreferrer">USDC in Coinbase</a> (free to join),
+          tap <b>Transfer</b> → <b>Receive</b> → network <b>Solana</b> → <b>Copy</b>.</li>
         <li>Come back and paste it:</li>
       </ol>
       {canPaste && <button class="btn" onClick={paste}>Paste my Coinbase address</button>}
