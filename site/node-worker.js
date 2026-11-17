@@ -170,11 +170,19 @@ async function openPreview(request, stored, now = Date.now()) {
   return new Response(null, {
     status: 204,
     headers: {
-      "Set-Cookie": `${COOKIE}=${key}; Path=/manage; Max-Age=${seconds}; HttpOnly; Secure; SameSite=Strict`,
+      "Set-Cookie": `${COOKIE}=${key}; Path=/; Max-Age=${seconds}; HttpOnly; Secure; SameSite=Lax`,
       "Cache-Control": "no-store"
     }
   });
 }
+function arriving(request) {
+  const site = request.headers.get("Sec-Fetch-Site");
+  return request.method === "GET" && (site === "cross-site" || site === "none") && cookieOf(request) !== null;
+}
+var SECURING_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<meta http-equiv="refresh" content="5"><title>Turning on your sign-in</title>
+<p style="font:16px system-ui;margin:40px 16px;max-width:30em">Turning on your sign-in. This takes a minute,
+and the page reloads by itself.</p>`;
 
 // ../spec/pricing.mjs
 function perMinute(manifest) {
@@ -2291,7 +2299,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.9";
+var VERSION = "3.19.10";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
@@ -2613,6 +2621,9 @@ async function handleManage(request, env, path) {
     if (!email) {
       if (!new URL(request.url).host.endsWith(".workers.dev")) {
         return fail(401, "Your editor isn't on this address. Open it at your .workers.dev address, the one from setup.");
+      }
+      if (request.method === "GET" && (path === "" || path === "/")) {
+        return new Response(SECURING_PAGE, { status: 503, headers: noStore({ "Content-Type": "text/html; charset=utf-8", "Retry-After": "5" }) });
       }
       return fail(401, "not signed in");
     }
@@ -3209,6 +3220,9 @@ var index_default = {
       return new Response(null, { status: 405, headers: h });
     }
     if (pathname === "/") {
+      if (arriving(request) && !await accessConfig(env) && await previewSession(request, readPreviewKey(await setting(env.DB, PREVIEW_KEY)))) {
+        return new Response(null, { status: 302, headers: noStore({ Location: "/manage" }) });
+      }
       const body = await manifestText(env);
       if (body === null) return fail(404, "no manifest published yet");
       let manifest;

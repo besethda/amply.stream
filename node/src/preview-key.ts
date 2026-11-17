@@ -126,8 +126,14 @@ fetch("/manage/open", { method: "POST", headers: { "Content-Type": "application/
 </script>`;
 
 /**
- * POST /manage/open, from that page: the key, for a cookie. Same-origin, so
- * the cookie can be Strict, and only the editor's own pages ever carry it.
+ * POST /manage/open, from that page: the key, for a cookie.
+ *
+ * Lax and site-wide, not Strict and /manage only, because the artist mostly
+ * arrives from somewhere else: Cloudflare's dashboard links to the page's
+ * home after a claim, and a Strict cookie isn't sent on that visit. The home
+ * page uses it to send the artist on to their editor (wantsEditor). Changing
+ * anything still needs a request from the editor itself: handleManage checks
+ * where every write comes from, whatever cookie it carries.
  */
 export async function openPreview(request: Request, stored: PreviewKey | null, now = Date.now()): Promise<Response> {
   let key: unknown = null;
@@ -146,8 +152,30 @@ export async function openPreview(request: Request, stored: PreviewKey | null, n
   return new Response(null, {
     status: 204,
     headers: {
-      "Set-Cookie": `${COOKIE}=${key}; Path=/manage; Max-Age=${seconds}; HttpOnly; Secure; SameSite=Strict`,
+      "Set-Cookie": `${COOKIE}=${key}; Path=/; Max-Age=${seconds}; HttpOnly; Secure; SameSite=Lax`,
       "Cache-Control": "no-store",
     },
   });
 }
+
+/**
+ * Whether a visit to the home page is the artist arriving, before their editor
+ * is protected, who should land in the editor rather than on their own page:
+ * holding the key's cookie, and coming from another site or a typed address.
+ * Clicking around their own page (same-origin) is left alone, as is everyone
+ * without the cookie, so a link the artist has shared still shows the page.
+ */
+export function arriving(request: Request): boolean {
+  const site = request.headers.get("Sec-Fetch-Site");
+  return request.method === "GET" && (site === "cross-site" || site === "none") && cookieOf(request) !== null;
+}
+
+/**
+ * /manage while Cloudflare is still switching on the sign-in that setup has
+ * just added: requests reach the node unsigned for a minute or so. Wait and
+ * try again, and Cloudflare's sign-in will be in front of it.
+ */
+export const SECURING_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<meta http-equiv="refresh" content="5"><title>Turning on your sign-in</title>
+<p style="font:16px system-ui;margin:40px 16px;max-width:30em">Turning on your sign-in. This takes a minute,
+and the page reloads by itself.</p>`;

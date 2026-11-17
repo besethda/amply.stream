@@ -4,7 +4,7 @@
  *
  *   node --experimental-strip-types node/test-preview.mjs
  */
-import { hashKey, readPreviewKey, previewSession, openPreview, previewNotice, claimedYet, afterClaim } from "./src/preview-key.ts";
+import { hashKey, readPreviewKey, previewSession, openPreview, previewNotice, claimedYet, afterClaim, arriving } from "./src/preview-key.ts";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -31,9 +31,9 @@ ok("  and nonsense isn't", readPreviewKey("{") === null && readPreviewKey(JSON.s
   const res = await open(KEY);
   const cookie = res.headers.get("Set-Cookie") || "";
   ok("the right key opens the editor", res.status === 204);
-  ok("  with a cookie scripts can't read", /HttpOnly/.test(cookie) && /Secure/.test(cookie) && /Path=\/manage/.test(cookie));
+  ok("  with a cookie scripts can't read", /HttpOnly/.test(cookie) && /Secure/.test(cookie) && /Path=\/;/.test(cookie));
   ok("  that lasts until the account would expire", /Max-Age=1800\b/.test(cookie), cookie);
-  ok("  and only this site's own pages send it", /SameSite=Strict/.test(cookie));
+  ok("  and is sent when the artist arrives from Cloudflare's dashboard", /SameSite=Lax/.test(cookie));
 }
 ok("a wrong key doesn't", (await open("B".repeat(43))).status === 403);
 ok("no key doesn't", (await open(undefined)).status === 403);
@@ -57,6 +57,19 @@ ok("  and not with none", !(await previewSession(new Request("https://a.b.worker
   ok("a claim link that isn't Cloudflare's is dropped", elsewhere?.hash === stored.hash && previewNotice(elsewhere, false, NOW).claim === null);
   const script = readPreviewKey(JSON.stringify({ ...stored, claim: "javascript:alert(1)", claimUntil: NOW + 1e6 }));
   ok("  and so is anything that isn't a link at all", previewNotice(script, false, NOW).claim === null);
+}
+
+// ── the artist arriving at the home page ────────────────────────────────────
+{
+  const visit = (site, cookie = `amply_preview=${KEY}`, method = "GET") => new Request("https://a.b.workers.dev/", {
+    method, headers: { ...(site ? { "Sec-Fetch-Site": site } : {}), ...(cookie ? { Cookie: cookie } : {}) },
+  });
+  ok("the artist from Cloudflare's dashboard is arriving", arriving(visit("cross-site")));
+  ok("  and from a typed address", arriving(visit("none")));
+  ok("  but not clicking around their own page", !arriving(visit("same-origin")));
+  ok("  nor anyone without the cookie, who sees the page", !arriving(visit("cross-site", null)));
+  ok("  nor a browser that doesn't say where it came from", !arriving(visit(null)));
+  ok("  nor anything but a plain visit", !arriving(visit("cross-site", undefined, "HEAD")));
 }
 
 // ── telling when the page has been kept ─────────────────────────────────────

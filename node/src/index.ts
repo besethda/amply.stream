@@ -16,7 +16,9 @@
  */
 
 import { verifyAccess, type AccessConfig } from "./access";
-import { PREVIEW_KEY, OPEN_PAGE, readPreviewKey, previewSession, openPreview, previewNotice, claimedYet, afterClaim } from "./preview-key";
+import {
+  PREVIEW_KEY, OPEN_PAGE, SECURING_PAGE, readPreviewKey, previewSession, openPreview, previewNotice, claimedYet, afterClaim, arriving,
+} from "./preview-key";
 import { renderPage, renderPrivacy, pageCsp, pageWebManifest } from "./page";
 import {
   setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale,
@@ -301,6 +303,11 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       // domain the editor is simply not here, which is worth saying plainly.
       if (!new URL(request.url).host.endsWith(".workers.dev")) {
         return fail(401, "Your editor isn't on this address. Open it at your .workers.dev address, the one from setup.");
+      }
+      // Opening the editor and not stopped by Cloudflare's sign-in: setup has
+      // only just added it, and Cloudflare is still switching it on.
+      if (request.method === "GET" && (path === "" || path === "/")) {
+        return new Response(SECURING_PAGE, { status: 503, headers: noStore({ "Content-Type": "text/html; charset=utf-8", "Retry-After": "5" }) });
       }
       return fail(401, "not signed in");
     }
@@ -1010,6 +1017,12 @@ export default {
     // The artist's public page. Their address is the only way anyone finds
     // them, so it has to be a page — not a 404, and not raw JSON.
     if (pathname === "/") {
+      // The artist, before their editor is protected, arriving from elsewhere
+      // (Cloudflare's dashboard links here after a claim): to the editor.
+      if (arriving(request) && !(await accessConfig(env))
+          && await previewSession(request, readPreviewKey(await setting(env.DB, PREVIEW_KEY)))) {
+        return new Response(null, { status: 302, headers: noStore({ Location: "/manage" }) });
+      }
       const body = await manifestText(env);
       if (body === null) return fail(404, "no manifest published yet");
       let manifest: unknown;
