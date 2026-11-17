@@ -2503,9 +2503,9 @@ const readVia = () => { try { return localStorage.getItem(VIA_KEY); } catch { re
 
 // The fee line under each is what that company keeps, checked November 2026.
 const WAYS = [
-  ["coinbase", "Coinbase", "Recommended · payments go straight in", "Fees: 0%"],
-  ["cashapp", "Cash App", "US · fans pay by the minute", "Fees: 0% (for now)"],
-  ["stripe", "Card subscriptions", "Stripe · fans subscribe by card", "Fees: ~3.6% + 30¢ a payment (US cards)"],
+  ["coinbase", "Coinbase", "Recommended · payments go straight in", "Fees: 0% · Solana network fee ~0.1¢ a payment"],
+  ["cashapp", "Cash App", "US · fans pay by the minute", "Fees: 0% (for now) · Solana network fee ~0.1¢ a payment"],
+  ["stripe", "Card subscriptions", "Stripe · fans subscribe by card", "Fees: ~3.6% + 30¢ a payment (US cards) · no network fee"],
 ];
 
 /**
@@ -2605,7 +2605,7 @@ function GetPaid({ via, onVia, payees, setPayees, manifest, update, api, only })
           </button>
         ))}
       </div>
-      <p class="muted small">Amply: 0% · Solana network fee: ~0.1¢ a payment, from your fees account</p>
+      <p class="muted small">Amply: 0% · network fees come from your fees account, not your earnings</p>
       {via === "coinbase" && (
         <div class="pay-next">
           {CONNECT_OFFERED ? <ConnectCoinbase onAddress={setAddress} api={api} /> : <PasteCoinbase onAddress={setAddress} api={api} />}
