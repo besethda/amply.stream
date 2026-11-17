@@ -1,0 +1,4 @@
+# accounts/ is two API routes and nothing to read. Everything else in this
+# folder is served as-is, so only this goes in it.
+User-agent: *
+Disallow: /

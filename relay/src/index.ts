@@ -69,16 +69,6 @@ const TOKEN = "https://dash.cloudflare.com/oauth2/token";
 const REVOKE = "https://dash.cloudflare.com/oauth2/revoke";
 
 /**
- * Cloudflare's terms for a temporary account. The artist accepts these on
- * Amply's setup page before the account is made, and the request must name
- * exactly these: an acceptance of anything else is not an acceptance.
- */
-const TEMPORARY_TERMS = {
-  termsOfService: "https://www.cloudflare.com/terms/",
-  privacyPolicy: "https://www.cloudflare.com/privacypolicy/",
-};
-
-/**
  * Exactly the API paths provisioning needs, and nothing else. An open proxy to
  * the Cloudflare API would be a genuinely dangerous thing to leave running.
  */
@@ -140,40 +130,6 @@ const ALLOWED: Array<{ method: string; pattern: RegExp }> = [
   // website would get replaced by accident.
   { method: "PUT", pattern: /^\/accounts\/[0-9a-f]{32}\/workers\/domains$/ },
 ];
-
-/**
- * Why a request to create a temporary account is refused, or null.
- *
- * Exactly the fields Cloudflare takes and nothing else, the terms named
- * exactly, and acceptance stated. The relay cannot see whether the artist
- * really ticked the box (setup won't send this until they have); what it can
- * do is make sure this route only ever does the one thing it exists for.
- */
-export function temporaryAccountProblem(body: unknown): string | null {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return "body must be an object";
-  const b = body as Record<string, unknown>;
-  const expected = ["termsOfService", "privacyPolicy", "acceptTermsOfService", "challengeToken", "solution"];
-  const extra = Object.keys(b).filter((k) => !expected.includes(k));
-  if (extra.length) return `unexpected field: ${extra[0]}`;
-  if (b.termsOfService !== TEMPORARY_TERMS.termsOfService || b.privacyPolicy !== TEMPORARY_TERMS.privacyPolicy) {
-    return "the terms must be Cloudflare's own";
-  }
-  if (b.acceptTermsOfService !== "yes") return "the terms must be accepted";
-  if (typeof b.challengeToken !== "string" || !b.challengeToken || b.challengeToken.length > 4096) {
-    return "not a challenge token";
-  }
-  const solution = b.solution as Record<string, unknown> | null;
-  if (!solution || typeof solution !== "object" || Object.keys(solution).join() !== "checkpoints") {
-    return "the solution must be checkpoints and nothing else";
-  }
-  // k + 1 SHA-256 checkpoints, Base64. Wrangler caps k * g at 64 million, so
-  // even k alone stays far below this.
-  const cp = solution.checkpoints;
-  if (typeof cp !== "string" || cp.length > 1_000_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(cp)) {
-    return "the checkpoints must be Base64";
-  }
-  return null;
-}
 
 // ── adding money by card ──────────────────────────────────────────────────
 //
@@ -435,6 +391,31 @@ async function startOnramp(env: Env, body: unknown, clientIp: string | null): Pr
   return { url: await onrampUrl(json.token, address, amount, asset) };
 }
 
+/** An artist's node on workers.dev: `<worker>.<subdomain>.workers.dev`, nothing else. */
+export const NODE_HOST = /^[a-z0-9-]{1,63}\.[a-z0-9-]{1,63}\.workers\.dev$/;
+
+/**
+ * Whether an editor's Cloudflare sign-in is ready for the artist: its
+ * /manage sends to an Access login page, and that page is there.
+ */
+export async function signInReady(host: string | null): Promise<{ ready: boolean }> {
+  if (!host || !NODE_HOST.test(host)) return { ready: false };
+  try {
+    const gate = await fetch(`https://${host}/manage`, { redirect: "manual" });
+    const to = gate.status >= 300 && gate.status < 400 ? gate.headers.get("Location") : null;
+    if (!to) return { ready: false };
+    const login = new URL(to);
+    if (login.protocol !== "https:" || !/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(login.hostname)
+        || login.pathname !== `/cdn-cgi/access/login/${host}`) {
+      return { ready: false };
+    }
+    const page = await fetch(login.toString(), { redirect: "manual" });
+    return { ready: page.status === 200 };
+  } catch {
+    return { ready: false };
+  }
+}
+
 function allowedOrigin(req: Request, env: Env): string | null {
   const origin = req.headers.get("Origin");
   if (!origin) return null;
@@ -585,44 +566,15 @@ export default {
     }
 
     // ── a temporary account ───────────────────────────────────────────────
-    // Cloudflare can make an account before the artist has one: a proof-of-
-    // work, the artist's acceptance of Cloudflare's terms, and back comes a
-    // temporary account, its token, and a link that makes it theirs. Claiming
-    // it ends that token, so this keeps no more access than OAuth does.
-    //
-    // Neither call takes a credential, and neither is forwarded with one. The
-    // response holds the temporary token and the claim link, and passes
-    // through in memory like everything else here.
-    if (url.pathname === "/preview/challenge" && request.method === "POST") {
-      const upstream = await fetch(`${API}/provisioning/previews/challenge`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      return new Response(upstream.body, {
-        status: upstream.status,
-        headers: cors(origin, { "Content-Type": "application/json" }),
-      });
-    }
-
-    if (url.pathname === "/preview/account" && request.method === "POST") {
-      const raw = await request.text();
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        return refuse(400, "body must be JSON", origin);
-      }
-      const problem = temporaryAccountProblem(parsed);
-      if (problem) return refuse(403, problem, origin);
-      const upstream = await fetch(`${API}/provisioning/previews`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: raw,
-      });
-      return new Response(upstream.body, {
-        status: upstream.status,
-        headers: cors(origin, { "Content-Type": "application/json" }),
+    // ── is a new editor's sign-in working yet? ────────────────────────────
+    // Setup adds Cloudflare Access to the editor, and for a few minutes after,
+    // Cloudflare's login page for it answers "Unable to find your Access
+    // application". Setup waits for it before sending the artist there, and
+    // can't look itself: both pages are other sites. Read-only and narrow:
+    // only an editor on workers.dev, and only the Access login it sends to.
+    if (url.pathname === "/ready" && request.method === "GET") {
+      return new Response(JSON.stringify(await signInReady(url.searchParams.get("host"))), {
+        headers: cors(origin, { "Content-Type": "application/json", "Cache-Control": "no-store" }),
       });
     }
 

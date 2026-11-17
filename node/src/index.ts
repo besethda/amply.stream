@@ -16,6 +16,9 @@
  */
 
 import { verifyAccess, type AccessConfig } from "./access";
+import {
+  PREVIEW_KEY, OPEN_PAGE, SECURING_PAGE, readPreviewKey, previewSession, openPreview, previewNotice, claimedYet, afterClaim, arriving,
+} from "./preview-key";
 import { renderPage, renderPrivacy, pageCsp, pageWebManifest } from "./page";
 import {
   setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale,
@@ -38,6 +41,7 @@ import { ICONS, MANIFEST_PATH, studioManifest } from "./studio";
 
 import { VERSION, SPEC_VERSION, MANAGE_CSP } from "./constants";
 import { media, maxObject, MediaTooLarge, type MediaObject, type MediaObjectBody } from "./media";
+import { quotaFailure } from "./quota";
 
 export interface Env {
   /** Where files live: R2, or KV for a node that started without it (media.ts). */
@@ -240,17 +244,18 @@ async function serveManifest(env: Env): Promise<Response> {
 /**
  * Read the Access configuration written at setup.
  *
- * No config means this node was set up without Access, so there is nothing to
- * verify against — and an unverifiable write endpoint must be closed, not open.
+ * `set` is whether there is one at all; `config` is it, if it can be used. Set
+ * but unusable is closed: the editor opens for neither Access nor the key from
+ * before signup, because a damaged lock is not the same as no lock.
  */
-async function accessConfig(env: Env): Promise<AccessConfig | null> {
+async function accessConfig(env: Env): Promise<{ set: boolean; config: AccessConfig | null }> {
   const raw = await setting(env.DB, ACCESS_KEY);
-  if (!raw) return null;
+  if (raw === null) return { set: false, config: null };
   try {
     const c = JSON.parse(raw) as AccessConfig;
-    return c && c.team && c.aud ? c : null;
+    return { set: true, config: c && typeof c.team === "string" && c.team && typeof c.aud === "string" && c.aud ? c : null };
   } catch {
-    return null;
+    return { set: true, config: null };
   }
 }
 
@@ -266,8 +271,31 @@ function noStore(extra?: HeadersInit): Headers {
  * alone is not sufficient.
  */
 async function handleManage(request: Request, env: Env, path: string): Promise<Response> {
-  const config = await accessConfig(env);
-  if (!config) {
+  const { set: locked, config } = await accessConfig(env);
+  // Before signup, a key from setup opens the editor instead (preview-key.ts).
+  // Never once Access has been set up, even if its setting is damaged: then
+  // Access is the only way in.
+  const preview = locked ? null : readPreviewKey(await setting(env.DB, PREVIEW_KEY));
+  if (path === "/open" && request.method === "GET") {
+    const h = noStore({ "Content-Type": "text/html; charset=utf-8", "Referrer-Policy": "no-referrer" });
+    h.set("Content-Security-Policy", MANAGE_CSP);
+    return new Response(OPEN_PAGE, { status: 200, headers: h });
+  }
+  if (path === "/open" && request.method === "POST") {
+    // Same-origin only: the page above is the one place this is asked from.
+    if (request.headers.get("Origin") !== new URL(request.url).origin) return fail(403, "that request did not come from your page");
+    return openPreview(request, preview);
+  }
+
+  if (locked && !config) {
+    return fail(
+      503,
+      "This streaming service's sign-in setting is damaged, so the editor stays closed. "
+      + "Go to https://amply.stream/repair and rebuild it — your music and settings are untouched.",
+    );
+  }
+
+  if (!config && !preview) {
     // Reachable by an artist who ran setup without an email address, which
     // skips the step that locks the editor. Tell them how to finish rather
     // than stating a fact about a database they cannot see.
@@ -279,14 +307,24 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     );
   }
 
-  const email = await verifyAccess(request, config);
-  if (!email) {
-    // The sign-in lock is on the workers.dev address. On an artist's own
-    // domain the editor is simply not here, which is worth saying plainly.
-    if (!new URL(request.url).host.endsWith(".workers.dev")) {
-      return fail(401, "Your editor isn't on this address. Open it at your .workers.dev address, the one from setup.");
+  let email: string | null = "";
+  if (config) {
+    email = await verifyAccess(request, config);
+    if (!email) {
+      // The sign-in lock is on the workers.dev address. On an artist's own
+      // domain the editor is simply not here, which is worth saying plainly.
+      if (!new URL(request.url).host.endsWith(".workers.dev")) {
+        return fail(401, "Your editor isn't on this address. Open it at your .workers.dev address, the one from setup.");
+      }
+      // Opening the editor and not stopped by Cloudflare's sign-in: setup has
+      // only just added it, and Cloudflare is still switching it on.
+      if (request.method === "GET" && (path === "" || path === "/")) {
+        return new Response(SECURING_PAGE, { status: 503, headers: noStore({ "Content-Type": "text/html; charset=utf-8", "Retry-After": "5" }) });
+      }
+      return fail(401, "not signed in");
     }
-    return fail(401, "not signed in");
+  } else if (!(await previewSession(request, preview))) {
+    return fail(401, "Your editor opens from the setup page until your page is yours. Claim it, then finish at https://amply.stream/start.");
   }
 
   // Signed in is not the same as meant it.
@@ -301,7 +339,9 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const origin = request.headers.get("Origin");
     const site = request.headers.get("Sec-Fetch-Site");
     const here = new URL(request.url).origin;
-    const sameOrigin = origin ? origin === here : site === "same-origin" || site === null;
+    // A browser says where a write comes from with one or the other; a request
+    // that says neither isn't trusted to have come from here.
+    const sameOrigin = origin ? origin === here : site === "same-origin";
     if (!sameOrigin) return fail(403, "that request did not come from your editor");
   }
 
@@ -318,7 +358,15 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // `home` is a domain of the artist's own, if one was attached at
     // amply.stream/domain, so the editor shares that address instead.
     const home = await setting(env.DB, "home");
-    return new Response(JSON.stringify({ email, version: VERSION, home }), {
+    // Opened with the key from before signup: how long is left, whether the
+    // page has been kept yet, and if not, the link that keeps it.
+    let temporary = null;
+    if (!config) {
+      const claimed = await claimedYet(preview!);
+      if (claimed && !preview!.claimed) await putSetting(env.DB, PREVIEW_KEY, JSON.stringify(afterClaim(preview!)));
+      temporary = previewNotice(preview!, claimed);
+    }
+    return new Response(JSON.stringify({ email, version: VERSION, home, temporary }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
     });
@@ -997,168 +1045,186 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: withCors() });
+    try {
+      return await serve(request, env);
+    } catch (e) {
+      // Cloudflare's free plan saying no (quota.ts): say what, and when it
+      // comes back, rather than an internal error.
+      const said = quotaFailure(e);
+      if (said) return fail(said.status, said.message);
+      throw e;
     }
-    const { pathname, host } = new URL(request.url);
-
-    // Counted per address it comes from (limits.ts), before anything is done.
-    const rule = ruleFor(request.method, pathname);
-    if (rule) {
-      const from = request.headers.get("CF-Connecting-IP") || "unknown";
-      if (!(await allow(env as never, rule, `${host}|${from}`))) return tooMany(withCors(new Headers()));
-    }
-
-    // The editor, guarded by Access.
-    if (pathname === "/manage" || pathname.startsWith("/manage/")) {
-      return handleManage(request, env, pathname.slice("/manage".length));
-    }
-
-    // Stripe telling this server who has subscribed. Public by necessity —
-    // Stripe posts it — and believed only with Stripe's signature on it.
-    if (pathname === "/stripe/webhook" && request.method === "POST") {
-      if (Number(request.headers.get("Content-Length") || 0) > 256 * 1024) return fail(413, "too large");
-      const raw = await request.text();
-      const outcome = await handleEvent(env.DB, raw, request.headers.get("Stripe-Signature"));
-      if (outcome === "refused") return fail(400, "not a valid notice from Stripe");
-      return new Response(JSON.stringify({ received: true, outcome }), {
-        status: 200, headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    if (pathname === "/listen" || pathname.startsWith("/listen/")) {
-      const answered = await handleListen(request, env, pathname.slice("/listen".length));
-      if (answered) return answered;
-      return fail(404, "not found");
-    }
-
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      const h = withCors(new Headers({ Allow: "GET, HEAD, OPTIONS" }));
-      return new Response(null, { status: 405, headers: h });
-    }
-
-    // The artist's public page. Their address is the only way anyone finds
-    // them, so it has to be a page — not a 404, and not raw JSON.
-    if (pathname === "/") {
-      const body = await manifestText(env);
-      if (body === null) return fail(404, "no manifest published yet");
-      let manifest: unknown;
-      try {
-        manifest = JSON.parse(body);
-      } catch {
-        return fail(500, "manifest is not valid JSON");
-      }
-      const nonce = crypto.randomUUID().replace(/-/g, "");
-      const headers = withCors(new Headers({
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-        "Content-Security-Policy": pageCsp(nonce),
-      }));
-      if (request.method === "HEAD") return new Response(null, { status: 200, headers });
-      // Linked to one song or album (/?song=<id>, /?album=<id>): the page's
-      // card and button are for that one.
-      const q = new URL(request.url).searchParams;
-      const kind = q.has("song") ? "song" : q.has("album") ? "album" : null;
-      const id = kind ? String(q.get(kind) || "") : "";
-      const focus = kind && /^[a-z0-9-]{1,64}$/.test(id) ? { kind, id } as const : null;
-      let site: unknown = null;
-      try { const t = await siteText(env); site = t ? JSON.parse(t) : null; } catch { /* the plain page, then */ }
-      return new Response(renderPage(manifest as never, new URL(request.url).origin, nonce, focus, site), {
-        status: 200, headers,
-      });
-    }
-
-    if (pathname === "/manifest.json") return serveManifest(env);
-
-    // The artist's privacy notice, written by the software from what it
-    // actually keeps. See renderPrivacy in page.ts.
-    if (pathname === "/privacy") {
-      const body = await manifestText(env);
-      let manifest: unknown = {};
-      try { if (body) manifest = JSON.parse(body); } catch { /* an empty notice beats an error */ }
-      const nonce = crypto.randomUUID().replace(/-/g, "");
-      const headers = withCors(new Headers({
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-        "Content-Security-Policy": pageCsp(nonce),
-      }));
-      if (request.method === "HEAD") return new Response(null, { status: 200, headers });
-      return new Response(renderPrivacy(manifest as never, new URL(request.url).origin, nonce), {
-        status: 200, headers,
-      });
-    }
-
-    // The artist's public page, installable on a fan's Home Screen.
-    if (pathname === "/page.webmanifest") {
-      let manifest: unknown = null;
-      try { const t = await manifestText(env); manifest = t ? JSON.parse(t) : null; } catch { /* a plain name */ }
-      return new Response(pageWebManifest((manifest || {}) as never), {
-        status: 200, headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=3600" })),
-      });
-    }
-
-    // The editor, installable on the artist's Home Screen (studio.ts).
-    if (pathname === MANIFEST_PATH) {
-      return new Response(studioManifest(), {
-        status: 200, headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=86400" })),
-      });
-    }
-    if (ICONS[pathname]) {
-      return new Response(ICONS[pathname], {
-        status: 200, headers: withCors(new Headers({ "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" })),
-      });
-    }
-
-    if (pathname === "/version") {
-      const headers = withCors(
-        new Headers({
-          "Content-Type": "application/json; charset=utf-8",
-          "Cache-Control": "no-store",
-        }),
-      );
-      return new Response(
-        JSON.stringify({ version: VERSION, spec: SPEC_VERSION }),
-        { status: 200, headers },
-      );
-    }
-
-    if (pathname.startsWith("/audio/")) {
-      const key = safeKey("audio", pathname.slice("/audio/".length));
-      if (key === null) return fail(400, "bad key");
-
-      // Paid tracks are served only to a listener who has said who they are.
-      // Everything else is served to anyone, and that default is what keeps a
-      // shared link working.
-      const manifest = await manifestText(env);
-      let guarded = new Set<string>();
-      let masters = new Set<string>();
-      try {
-        if (manifest) { const m = JSON.parse(manifest); guarded = guardedKeys(m); masters = masterKeys(m); }
-      } catch {
-        // An unreadable manifest must not be a way past the guard. Nothing is
-        // known to be open, so nothing is served without a wallet.
-        return fail(503, "this music is temporarily unavailable");
-      }
-      // An original behind an evened-out copy: only ever a purchase download.
-      if (masters.has(key.slice("audio/".length))) {
-        return fail(403, "this file is only available as a download, to someone who bought it");
-      }
-      if (guarded.has(key.slice("audio/".length))) {
-        const who = await whoIsAsking(request, env);
-        if (!who) {
-          return fail(401, "this track is for listeners who have said who they are");
-        }
-      }
-
-      return serveObject(env, request, key, CACHE_AUDIO, "audio/mpeg");
-    }
-
-    if (pathname.startsWith("/art/")) {
-      const key = safeKey("art", pathname.slice("/art/".length));
-      if (key === null) return fail(400, "bad key");
-      return serveObject(env, request, key, CACHE_ART, "image/jpeg");
-    }
-
-    return fail(404, "not found");
   },
 } satisfies ExportedHandler<Env>;
+
+async function serve(request: Request, env: Env): Promise<Response> {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: withCors() });
+  }
+  const { pathname, host } = new URL(request.url);
+
+  // Counted per address it comes from (limits.ts), before anything is done.
+  const rule = ruleFor(request.method, pathname);
+  if (rule) {
+    const from = request.headers.get("CF-Connecting-IP") || "unknown";
+    if (!(await allow(env as never, rule, `${host}|${from}`))) return tooMany(withCors(new Headers()));
+  }
+
+  // The editor, guarded by Access.
+  if (pathname === "/manage" || pathname.startsWith("/manage/")) {
+    return handleManage(request, env, pathname.slice("/manage".length));
+  }
+
+  // Stripe telling this server who has subscribed. Public by necessity —
+  // Stripe posts it — and believed only with Stripe's signature on it.
+  if (pathname === "/stripe/webhook" && request.method === "POST") {
+    if (Number(request.headers.get("Content-Length") || 0) > 256 * 1024) return fail(413, "too large");
+    const raw = await request.text();
+    const outcome = await handleEvent(env.DB, raw, request.headers.get("Stripe-Signature"));
+    if (outcome === "refused") return fail(400, "not a valid notice from Stripe");
+    return new Response(JSON.stringify({ received: true, outcome }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (pathname === "/listen" || pathname.startsWith("/listen/")) {
+    const answered = await handleListen(request, env, pathname.slice("/listen".length));
+    if (answered) return answered;
+    return fail(404, "not found");
+  }
+
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    const h = withCors(new Headers({ Allow: "GET, HEAD, OPTIONS" }));
+    return new Response(null, { status: 405, headers: h });
+  }
+
+  // The artist's public page. Their address is the only way anyone finds
+  // them, so it has to be a page — not a 404, and not raw JSON.
+  if (pathname === "/") {
+    // The artist, before their editor is protected, arriving from elsewhere
+    // (Cloudflare's dashboard links here after a claim): to the editor.
+    if (arriving(request) && !(await accessConfig(env)).set
+        && await previewSession(request, readPreviewKey(await setting(env.DB, PREVIEW_KEY)))) {
+      return new Response(null, { status: 302, headers: noStore({ Location: "/manage" }) });
+    }
+    const body = await manifestText(env);
+    if (body === null) return fail(404, "no manifest published yet");
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(body);
+    } catch {
+      return fail(500, "manifest is not valid JSON");
+    }
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const headers = withCors(new Headers({
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": pageCsp(nonce),
+    }));
+    if (request.method === "HEAD") return new Response(null, { status: 200, headers });
+    // Linked to one song or album (/?song=<id>, /?album=<id>): the page's
+    // card and button are for that one.
+    const q = new URL(request.url).searchParams;
+    const kind = q.has("song") ? "song" : q.has("album") ? "album" : null;
+    const id = kind ? String(q.get(kind) || "") : "";
+    const focus = kind && /^[a-z0-9-]{1,64}$/.test(id) ? { kind, id } as const : null;
+    let site: unknown = null;
+    try { const t = await siteText(env); site = t ? JSON.parse(t) : null; } catch { /* the plain page, then */ }
+    return new Response(renderPage(manifest as never, new URL(request.url).origin, nonce, focus, site), {
+      status: 200, headers,
+    });
+  }
+
+  if (pathname === "/manifest.json") return serveManifest(env);
+
+  // The artist's privacy notice, written by the software from what it
+  // actually keeps. See renderPrivacy in page.ts.
+  if (pathname === "/privacy") {
+    const body = await manifestText(env);
+    let manifest: unknown = {};
+    try { if (body) manifest = JSON.parse(body); } catch { /* an empty notice beats an error */ }
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const headers = withCors(new Headers({
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": pageCsp(nonce),
+    }));
+    if (request.method === "HEAD") return new Response(null, { status: 200, headers });
+    return new Response(renderPrivacy(manifest as never, new URL(request.url).origin, nonce), {
+      status: 200, headers,
+    });
+  }
+
+  // The artist's public page, installable on a fan's Home Screen.
+  if (pathname === "/page.webmanifest") {
+    let manifest: unknown = null;
+    try { const t = await manifestText(env); manifest = t ? JSON.parse(t) : null; } catch { /* a plain name */ }
+    return new Response(pageWebManifest((manifest || {}) as never), {
+      status: 200, headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=3600" })),
+    });
+  }
+
+  // The editor, installable on the artist's Home Screen (studio.ts).
+  if (pathname === MANIFEST_PATH) {
+    return new Response(studioManifest(), {
+      status: 200, headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=86400" })),
+    });
+  }
+  if (ICONS[pathname]) {
+    return new Response(ICONS[pathname], {
+      status: 200, headers: withCors(new Headers({ "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" })),
+    });
+  }
+
+  if (pathname === "/version") {
+    const headers = withCors(
+      new Headers({
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+      }),
+    );
+    return new Response(
+      JSON.stringify({ version: VERSION, spec: SPEC_VERSION }),
+      { status: 200, headers },
+    );
+  }
+
+  if (pathname.startsWith("/audio/")) {
+    const key = safeKey("audio", pathname.slice("/audio/".length));
+    if (key === null) return fail(400, "bad key");
+
+    // Paid tracks are served only to a listener who has said who they are.
+    // Everything else is served to anyone, and that default is what keeps a
+    // shared link working.
+    const manifest = await manifestText(env);
+    let guarded = new Set<string>();
+    let masters = new Set<string>();
+    try {
+      if (manifest) { const m = JSON.parse(manifest); guarded = guardedKeys(m); masters = masterKeys(m); }
+    } catch {
+      // An unreadable manifest must not be a way past the guard. Nothing is
+      // known to be open, so nothing is served without a wallet.
+      return fail(503, "this music is temporarily unavailable");
+    }
+    // An original behind an evened-out copy: only ever a purchase download.
+    if (masters.has(key.slice("audio/".length))) {
+      return fail(403, "this file is only available as a download, to someone who bought it");
+    }
+    if (guarded.has(key.slice("audio/".length))) {
+      const who = await whoIsAsking(request, env);
+      if (!who) {
+        return fail(401, "this track is for listeners who have said who they are");
+      }
+    }
+
+    return serveObject(env, request, key, CACHE_AUDIO, "audio/mpeg");
+  }
+
+  if (pathname.startsWith("/art/")) {
+    const key = safeKey("art", pathname.slice("/art/".length));
+    if (key === null) return fail(400, "bad key");
+    return serveObject(env, request, key, CACHE_ART, "image/jpeg");
+  }
+
+  return fail(404, "not found");
+}

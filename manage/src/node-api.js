@@ -8,6 +8,21 @@
  * This is the whole point of the self-hosted editor: nothing of Amply's is
  * involved in an artist editing their own music.
  */
+/**
+ * What went wrong, in words. The node says why in {"error": "..."}. One answer
+ * isn't the node's at all: past Cloudflare's free daily limit on requests the
+ * node isn't run, and Cloudflare sends its own error 1027 page instead.
+ */
+export function explain(status, text) {
+  if (/Error 1027|temporarily rate limited/i.test(text)) {
+    return "Your page has reached Cloudflare's free daily limit of 100,000 requests. It resets at midnight UTC.";
+  }
+  let said = text;
+  try { said = JSON.parse(text)?.error || text; } catch { /* plain text */ }
+  if (/^\s*</.test(String(said))) said = "";   // a page of HTML, not words
+  return String(said).slice(0, 300) || `Your streaming service returned ${status}.`;
+}
+
 export function nodeApi() {
   const base = location.origin;
 
@@ -21,13 +36,7 @@ export function nodeApi() {
     if (res.status === 401) {
       throw new Error("Your sign-in expired. Reload the page to sign in again.");
     }
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
-      // The server says why in {"error": "..."}; show the words, not the JSON.
-      let said = detail;
-      try { said = JSON.parse(detail)?.error || detail; } catch { /* plain text */ }
-      throw new Error(String(said).slice(0, 300) || `Your streaming service returned ${res.status}.`);
-    }
+    if (!res.ok) throw new Error(explain(res.status, await res.text().catch(() => "")));
     return res;
   }
 
@@ -65,9 +74,7 @@ export function nodeApi() {
         x.onload = () => {
           if (x.status === 401) return reject(new Error("Your sign-in expired. Reload the page to sign in again."));
           if (x.status >= 200 && x.status < 300) { onProgress(1); return resolve(); }
-          let said = x.responseText;
-          try { said = JSON.parse(x.responseText)?.error || said; } catch { /* plain text */ }
-          reject(new Error(String(said).slice(0, 300) || `Your streaming service returned ${x.status}.`));
+          reject(new Error(explain(x.status, x.responseText)));
         };
         x.onerror = () => reject(new Error("The upload didn't go through. Check your connection and try again."));
         x.send(file);

@@ -6,7 +6,7 @@
  * checks MANAGE_CSP.
  */
 
-export const VERSION = "3.19.7";
+export const VERSION = "3.19.12";
 export const SPEC_VERSION = 1;
 
 /**
@@ -18,9 +18,12 @@ export const SPEC_VERSION = 1;
  * lacked blob: and every upload failed at the first step.
  *
  * The editor is self-contained by construction. This makes that a rule rather
- * than a property: it cannot load code from anywhere, and cannot send anything
- * anywhere but back to this node, so a tampered copy cannot exfiltrate an
- * artist's work or their session.
+ * than a property: it cannot load code from anywhere, and its requests can go
+ * only to this node and the few read-only hosts below. It is not a seal. The
+ * editor is one inline script, so inline script is allowed (and with it inline
+ * handlers), and nothing here stops a page navigating away with data in the
+ * address. What keeps a hostile script out is that nothing in the editor puts
+ * outside text into the page as markup.
  */
 export const MANAGE_CSP = [
   "default-src 'none'",

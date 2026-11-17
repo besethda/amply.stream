@@ -88,7 +88,7 @@ export async function verifyAccess(
   if (parts.length !== 3) return null;
 
   let header: { kid?: string; alg?: string };
-  let payload: { aud?: string | string[]; email?: string; exp?: number; iss?: string };
+  let payload: { aud?: string | string[]; email?: string; exp?: number; nbf?: number; iat?: number; iss?: string };
   try {
     header = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[0])));
     payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[1])));
@@ -123,8 +123,14 @@ export async function verifyAccess(
   const auds = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
   if (!auds.includes(config.aud)) return null;
 
-  if (payload.iss && payload.iss !== `https://${config.team}`) return null;
-  if (!payload.exp || payload.exp * 1000 <= Date.now()) return null;
+  // Issued by this team, and in force now. Access always sets all of these;
+  // a token without them isn't one of Access's.
+  if (payload.iss !== `https://${config.team}`) return null;
+  const now = Date.now();
+  if (!payload.exp || payload.exp * 1000 <= now) return null;
+  const SKEW = 60_000;   // clocks a little apart
+  if (payload.nbf && payload.nbf * 1000 > now + SKEW) return null;
+  if (payload.iat && payload.iat * 1000 > now + SKEW) return null;
 
   return payload.email || "authenticated";
 }
