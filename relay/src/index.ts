@@ -29,7 +29,9 @@
  * carrying a refresh token rather than passing it on.
  */
 
-export interface Env {
+import { type ConnectEnv, connectReady, connectUrl, finishConnect, backToEditor, EDITOR_HOST, NONCE } from "./coinbase-connect.ts";
+
+export interface Env extends ConnectEnv {
   ALLOWED_ORIGINS: string;
   /**
    * Amply's own Coinbase Developer Platform key, for one thing only: asking
@@ -416,6 +418,17 @@ export async function signInReady(host: string | null): Promise<{ ready: boolean
   }
 }
 
+/** A plain page for a person who followed a link: what went wrong, nothing else. */
+function page(status: number, text: string): Response {
+  return new Response(
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><p>${escapeHtml(text)}.</p>`,
+    { status, headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } },
+  );
+}
+
+const seeOther = (location: string) =>
+  new Response(null, { status: 303, headers: { Location: location, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+
 function allowedOrigin(req: Request, env: Env): string | null {
   const origin = req.headers.get("Origin");
   if (!origin) return null;
@@ -473,10 +486,6 @@ export default {
     // own policy lets it reach nothing but its node), with the node's
     // signature for the fees account; the answer is a redirect to Coinbase.
     if (request.method === "GET" && url.pathname === "/coinbase/sol") {
-      const page = (status: number, text: string) => new Response(
-        `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><p>${escapeHtml(text)}.</p>`,
-        { status, headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } },
-      );
       const q = url.searchParams;
       const body = {
         address: q.get("address") ?? "", amount: Number(q.get("amount")), signedAt: Number(q.get("signedAt")),
@@ -484,7 +493,26 @@ export default {
       };
       const started = await startOnramp(env, body, request.headers.get("CF-Connecting-IP"));
       if ("error" in started) return page(started.status, started.error);
-      return new Response(null, { status: 303, headers: { Location: started.url, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+      return seeOther(started.url);
+    }
+
+    // "Connect Coinbase" (coinbase-connect.ts): pages too, opened by the
+    // artist's editor, so its own network policy stays as it is.
+    if (request.method === "GET" && url.pathname === "/coinbase/connect") {
+      if (!connectReady(env)) return page(503, "Connecting Coinbase isn't set up yet");
+      const host = url.searchParams.get("host") || "";
+      const nonce = url.searchParams.get("nonce") || "";
+      if (!EDITOR_HOST.test(host) || !NONCE.test(nonce)) return page(400, "Open this from your Amply editor");
+      if (!(await onrampAllowed(env, `connect:${request.headers.get("CF-Connecting-IP") || "unknown"}`))) {
+        return page(429, "Too many tries; wait a minute and try again");
+      }
+      return seeOther(await connectUrl(env, `${url.origin}/coinbase/connected`, host, nonce));
+    }
+    if (request.method === "GET" && url.pathname === "/coinbase/connected") {
+      if (!connectReady(env)) return page(503, "Connecting Coinbase isn't set up yet");
+      const done = await finishConnect(env, `${url.origin}/coinbase/connected`, url.searchParams);
+      if (!("host" in done)) return page(400, done.error);
+      return seeOther(backToEditor(done.host, done.nonce, done.result));
     }
 
     if (request.method === "OPTIONS") {

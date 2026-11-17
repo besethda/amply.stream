@@ -2369,7 +2369,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.12";
+var VERSION = "3.19.13";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
