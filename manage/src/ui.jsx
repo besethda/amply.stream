@@ -16,6 +16,7 @@ import { validate } from "../../spec/manifest-rules.mjs";
 import { charges, SETTLE_WITHIN_DAYS } from "../../spec/pricing.mjs";
 import { bareDomain, recordFor, lookup, confirms } from "../../spec/domain.mjs";
 import { makeWaves, wavesKey } from "./waves.js";
+import { prepareStream } from "./stream-copy.js";
 import { coverColors } from "./colors.js";
 import { shrink, COVER_PX, BANNER_PX } from "./images.js";
 import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, publicKeyOf, base58, NoPasskeySecret, signWithSeed } from "../../spec/passkey-wallet.mjs";
@@ -363,6 +364,7 @@ function Release({
   const [problems, setProblems] = useState([]);
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(0);
+  const [levelling, setLevelling] = useState(null);   // a song's streaming copy being made: 0..1
   const [sizes, setSizes] = useState({});   // track url -> bytes
   const [warnOpen, setWarnOpen] = useState(null);   // track id whose reason is showing
   const asked = useRef(new Set());          // urls already sent a HEAD
@@ -390,16 +392,34 @@ function Release({
    */
   async function uploadSong(file, duration) {
     const key = `audio/${safeKey(file.name)}`;
-    const [, waves] = await Promise.all([
+    const streamKey = key.replace(/\.[^./]+$/, "") + ".stream.mp3";
+    const [, waves, stream] = await Promise.all([
       upload(key, file),
       makeWaves(file, duration).then(async (bytes) => {
         const at = wavesKey(key);
         await upload(at, new Blob([bytes], { type: "application/octet-stream" }));
         return `${node.url}/${at}`;
       }).catch(() => null),
+      // Its loudness, and a streaming copy at the common level where it needs
+      // one (stream-copy.js). If that can't be done, the song goes up as it is.
+      prepareStream(file, duration, { onProgress: setLevelling }).then(async (r) => {
+        if (!r) return null;
+        const loudness = Math.round(r.lufs * 10) / 10;
+        if (!r.blob) return { loudness };
+        await upload(streamKey, r.blob);
+        return { loudness, size: r.blob.size, url: `${node.url}/${streamKey}` };
+      }).catch(() => null).finally(() => setLevelling(null)),
     ]);
-    noteSize(`${node.url}/${key}`, file.size);
-    return { url: `${node.url}/${key}`, ...(waves ? { waves } : {}) };
+    const original = `${node.url}/${key}`;
+    noteSize(original, file.size);
+    if (stream?.url) noteSize(stream.url, stream.size);
+    return {
+      // Listeners stream the even copy; the original stays for downloads.
+      url: stream?.url || original,
+      ...(stream?.url ? { master: original } : {}),
+      ...(stream?.loudness != null ? { loudness: stream.loudness } : {}),
+      ...(waves ? { waves } : {}),
+    };
   }
 
   /** Put one audio file on the node and hand back a manifest track. */
@@ -448,7 +468,7 @@ function Release({
       // belong to the old audio, so they go even if new ones couldn't be made.
       setTracks(tracks.map((t, j) => {
         if (j !== i) return t;
-        const { waves, ...rest } = t;
+        const { waves, master, loudness, ...rest } = t;
         return { ...rest, duration, ...song };
       }));
       notify("ok", `Replaced the audio on “${tracks[i].title}”.`);
@@ -495,7 +515,9 @@ function Release({
           />
           <span class="count">
             {busy > 0
-              ? `uploading ${busy} file${busy === 1 ? "" : "s"}…`
+              ? (levelling != null
+                ? `evening out the volume… ${Math.round(levelling * 100)}%`
+                : `uploading ${busy} file${busy === 1 ? "" : "s"}…`)
               : `${tracks.length} track${tracks.length === 1 ? "" : "s"} ready`}
           </span>
         </div>
@@ -655,7 +677,71 @@ function YoureLive({ url }) {
   );
 }
 
-function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf, charging, paid, live, onSettings }) {
+/**
+ * Songs uploaded before volumes were evened out: measured and, where needed,
+ * given a streaming copy now (stream-copy.js), one at a time. The original
+ * stays where it is and becomes the song's `master`.
+ */
+function EvenOut({ manifest, node, update, upload, readAudio, notify }) {
+  const [working, setWorking] = useState(null);   // { done, of, pct }
+  const older = [];
+  (manifest.releases || []).forEach((r, ri) => (r.tracks || []).forEach((t, ti) => {
+    if (t.loudness === undefined && !t.master && String(t.url || "").startsWith(`${node.url}/audio/`)) older.push([ri, ti, t]);
+  }));
+  if (!older.length && !working) return null;
+
+  async function go() {
+    const changes = new Map();
+    let n = 0;
+    for (const [ri, ti, t] of older) {
+      setWorking({ done: n, of: older.length, pct: 0 });
+      try {
+        const key = decodeURIComponent(new URL(t.url).pathname.slice(1));
+        const blob = await readAudio(key);
+        const file = new File([blob], key.split("/").pop(), { type: blob.type });
+        const r = await prepareStream(file, t.duration, { onProgress: (f) => setWorking({ done: n, of: older.length, pct: f }) });
+        if (r) {
+          const loudness = Math.round(r.lufs * 10) / 10;
+          if (r.blob) {
+            const streamKey = key.replace(/\.[^./]+$/, "") + ".stream.mp3";
+            await upload(streamKey, r.blob);
+            changes.set(`${ri}.${ti}`, { url: `${node.url}/${streamKey}`, master: t.url, loudness });
+          } else {
+            changes.set(`${ri}.${ti}`, { loudness });
+          }
+        }
+      } catch { /* that one stays as it is */ }
+      n++;
+    }
+    setWorking(null);
+    if (!changes.size) { notify("error", "Couldn't even out those songs in this browser. Try again in Chrome on a computer."); return; }
+    update({
+      ...manifest,
+      releases: manifest.releases.map((r, ri) => ({
+        ...r, tracks: (r.tracks || []).map((t, ti) => (changes.has(`${ri}.${ti}`) ? { ...t, ...changes.get(`${ri}.${ti}`) } : t)),
+      })),
+    });
+    notify("ok", `Evened out ${changes.size} song${changes.size === 1 ? "" : "s"}. Publish to put it live.`);
+  }
+
+  return (
+    <section class="card even-out">
+      <h2>Even out volume <Help about="evening out volume">Each song is measured and, if it's much quieter or louder than
+        most music, listeners get a copy at the usual level, so your songs sit well next to anyone else's. Your original
+        file isn't changed; buyers still download it.</Help></h2>
+      {working ? (
+        <p class="muted">Working on song {working.done + 1} of {working.of}… {Math.round(working.pct * 100)}%</p>
+      ) : (
+        <>
+          <p class="muted">{older.length} song{older.length === 1 ? "" : "s"} uploaded before this was automatic.</p>
+          <button class="btn sm" onClick={go}>Even out {older.length === 1 ? "it" : "them"}</button>
+        </>
+      )}
+    </section>
+  );
+}
+
+function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf, charging, paid, live, onSettings, readAudio }) {
   const trackCount = (manifest.releases || []).reduce((n, r) => n + (r.tracks?.length || 0), 0);
 
   const addRelease = () => {
@@ -684,6 +770,7 @@ function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf,
             folded={(manifest.releases || []).length > 0} />
         )}
         {live && trackCount > 0 && <YoureLive url={node.url} />}
+        {readAudio && <EvenOut manifest={manifest} node={node} update={update} upload={upload} readAudio={readAudio} notify={notify} />}
         {(manifest.releases || []).map((r, i) => (
           <Release
             key={r.id} release={r} node={node} manifest={manifest} charging={charging}
@@ -2934,7 +3021,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
           <MusicTab
             manifest={manifest} node={node} update={update}
             upload={upload} art={art} notify={notify} player={player}
-            sizeOf={api.sizeOf} charging={charging}
+            sizeOf={api.sizeOf} charging={charging} readAudio={api.readAudio}
             live={musicIsLive} onSettings={() => setTab("earnings")}
             paid={payees.some((p) => p.address) || (next.payment || []).some((p) => p.type === "stripe-subscription")}
           />

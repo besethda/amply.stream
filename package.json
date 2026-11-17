@@ -24,13 +24,14 @@
     "test:sales": "node/node_modules/.bin/esbuild node/test-sales.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/sales.mjs --log-level=warning --external:node:sqlite && node .build/test/sales.mjs",
     "test:limits": "node --experimental-strip-types node/test-limits.mjs",
     "test:media": "node --experimental-strip-types node/test-media.mjs",
-    "test:pricing": "node spec/test-passkey-wallet.mjs && node spec/test-pricing.mjs && node spec/test-domain.mjs && node spec/test-waves.mjs && node spec/test-colors.mjs && node spec/test-site.mjs",
+    "test:pricing": "node spec/test-passkey-wallet.mjs && node spec/test-pricing.mjs && node spec/test-domain.mjs && node spec/test-waves.mjs && node spec/test-colors.mjs && node spec/test-site.mjs && node spec/test-loudness.mjs",
     "build:licence": "node scripts/build-licence.mjs",
     "test:provision": "node scripts/test-provision.mjs && node scripts/test-migrate.mjs && node scripts/test-access.mjs && node scripts/test-attach.mjs && node scripts/test-instant.mjs && node scripts/test-pow.mjs",
     "test:relay": "node --experimental-strip-types scripts/test-relay.mjs && node --experimental-strip-types scripts/test-coinbase.mjs",
     "build:app": "npm --prefix app run build",
     "test:app": "npm --prefix app run test",
     "build:version": "node scripts/node-version.mjs && cp spec/manifest-rules.mjs site/js/manifest-rules.mjs && node scripts/security-headers.mjs",
-    "test:feepay": "node --experimental-strip-types node/test-solana-tx.mjs && node/node_modules/.bin/esbuild node/test-feepay.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/feepay.mjs --log-level=warning && node .build/test/feepay.mjs && node/node_modules/.bin/esbuild node/test-settle.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/settle.mjs --log-level=warning --external:node:sqlite && node --no-warnings .build/test/settle.mjs && node/node_modules/.bin/esbuild node/test-cashout.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/cashout.mjs --log-level=warning --external:node:sqlite && node --no-warnings .build/test/cashout.mjs"
+    "test:feepay": "node --experimental-strip-types node/test-solana-tx.mjs && node/node_modules/.bin/esbuild node/test-feepay.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/feepay.mjs --log-level=warning && node .build/test/feepay.mjs && node/node_modules/.bin/esbuild node/test-settle.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/settle.mjs --log-level=warning --external:node:sqlite && node --no-warnings .build/test/settle.mjs && node/node_modules/.bin/esbuild node/test-cashout.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/cashout.mjs --log-level=warning --external:node:sqlite && node --no-warnings .build/test/cashout.mjs",
+    "test:loudness-browser": "npm run preview && node manage/test-loudness-browser.cjs"
   }
 }

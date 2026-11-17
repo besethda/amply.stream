@@ -927,6 +927,26 @@ async function introduce(db, host, body, now = Date.now()) {
   await seen(db, address, now);
   return { ok: true, token: await issueToken(db, address, now) };
 }
+function masterKeys(manifest) {
+  const masters = /* @__PURE__ */ new Set(), streamed = /* @__PURE__ */ new Set();
+  const keyOf2 = (u) => {
+    try {
+      const p = new URL(String(u)).pathname;
+      return p.startsWith("/audio/") ? decodeURIComponent(p.slice("/audio/".length)) : null;
+    } catch {
+      return null;
+    }
+  };
+  for (const release of manifest?.releases ?? []) {
+    for (const track of release.tracks ?? []) {
+      const m = keyOf2(track?.master), u = keyOf2(track?.url);
+      if (m) masters.add(m);
+      if (u) streamed.add(u);
+    }
+  }
+  for (const k of streamed) masters.delete(k);
+  return masters;
+}
 function guardedKeys(manifest) {
   const keys = /* @__PURE__ */ new Set();
   const releases = manifest?.releases ?? [];
@@ -2146,7 +2166,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.2";
+var VERSION = "3.19.3";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
@@ -2694,6 +2714,11 @@ async function handleManage(request, env, path) {
       await media(env).delete(key);
       return new Response(null, { status: 204, headers: noStore() });
     }
+    if (request.method === "GET" && kind[1] === "audio") {
+      const object = await media(env).get(key);
+      if (!object || !("body" in object)) return fail(404, "that file is missing");
+      return new Response(object.body, { status: 200, headers: noStore({ "Content-Type": storedType("audio", key) }) });
+    }
   }
   return fail(404, "not found");
 }
@@ -2906,7 +2931,7 @@ async function handleListen(request, env, path) {
     if (!track) return fail(404, "no such song");
     let key = null;
     try {
-      const u = new URL(track.url);
+      const u = new URL(track.master || track.url);
       if (u.origin === new URL(request.url).origin && u.pathname.startsWith("/audio/")) key = safeKey("audio", u.pathname.slice("/audio/".length));
     } catch {
     }
@@ -3129,10 +3154,18 @@ var index_default = {
       if (key === null) return fail(400, "bad key");
       const manifest = await manifestText(env);
       let guarded = /* @__PURE__ */ new Set();
+      let masters = /* @__PURE__ */ new Set();
       try {
-        if (manifest) guarded = guardedKeys(JSON.parse(manifest));
+        if (manifest) {
+          const m = JSON.parse(manifest);
+          guarded = guardedKeys(m);
+          masters = masterKeys(m);
+        }
       } catch {
         return fail(503, "this music is temporarily unavailable");
+      }
+      if (masters.has(key.slice("audio/".length))) {
+        return fail(403, "this file is only available as a download, to someone who bought it");
       }
       if (guarded.has(key.slice("audio/".length))) {
         const who = await whoIsAsking(request, env);
