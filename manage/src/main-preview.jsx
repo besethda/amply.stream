@@ -89,7 +89,12 @@ const api = {
   async stats() { return { songs: [] }; },
   async readSite() { return null; },
   async writeSite(site) { await wait(400); return { site: cleanSite(site) }; },
-  async fees() { return { address: "8hQv3TnKcR2xWm7LpYd9FsJa4UeGbZ6NkMt5HwCqXoVr", network: "solana", lamports: 4_200_000, offering: true, offerAbove: 3_000_000, paidToday: 0, dailyCap: 1000 }; },
+  // ?fees-off shows an empty fees account.
+  async fees() {
+    const off = new URLSearchParams(location.search).has("fees-off");
+    return { address: "8hQv3TnKcR2xWm7LpYd9FsJa4UeGbZ6NkMt5HwCqXoVr", network: "solana", lamports: off ? 0 : 4_200_000, offering: !off, offerAbove: 3_000_000, paidToday: 0, dailyCap: 1000 };
+  },
+  async feesOnramp() { await wait(400); throw new Error("Coinbase doesn't open from the preview"); },
   async connectStripe(key, plans) {
     await wait(900);
     return {
