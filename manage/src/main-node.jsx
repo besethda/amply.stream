@@ -10,7 +10,7 @@ import { render } from "preact";
 import { useState, useEffect } from "preact/hooks";
 import { Editor, Banner } from "./ui.jsx";
 import { nodeApi } from "./node-api.js";
-import { takeCoinbaseAnswer } from "./coinbase.js";
+import { takeCoinbaseAnswer, rememberCoinbaseAddress } from "./coinbase.js";
 
 const api = nodeApi();
 
@@ -25,13 +25,15 @@ function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [who, manifest] = await Promise.all([api.whoami(), api.readManifest()]);
+        const [who, manifest, payout] = await Promise.all([api.whoami(), api.readManifest(), api.payout().catch(() => null)]);
+        if (payout?.via === "coinbase") rememberCoinbaseAddress(payout.address);
         setState({
           phase: "ready",
           who,
           // A node with no manifest has never published. The editor says so
           // rather than claiming everything is live.
           published: manifest !== null,
+          payout,
           manifest: manifest || {
             amply: 1,
             updated: new Date().toISOString(),
@@ -70,6 +72,8 @@ function App() {
       // Only ever an https address: it becomes a link, and a link can run script.
       node={{ slug: location.host.split(".")[0], url: /^https:\/\/[^\s"<>]+$/.test(state.who?.home || "") ? state.who.home : location.origin }}
       initial={state.manifest}
+      // Chosen but never published: brought back, still waiting for Publish.
+      pendingPayout={state.payout?.address || null}
       published={state.published}
       version={state.who?.version || null}
       // Opened with the key from before signup: no Cloudflare sign-in to leave.

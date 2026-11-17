@@ -2503,9 +2503,9 @@ const readVia = () => { try { return localStorage.getItem(VIA_KEY); } catch { re
 
 // The fee line under each is what that company keeps, checked November 2026.
 const WAYS = [
-  ["coinbase", "Coinbase", "Recommended · payments go straight in", "No fees to receive, turn into dollars or move to your bank"],
-  ["cashapp", "Cash App", "US · fans pay by the minute", "No fees for now · turns into dollars by itself"],
-  ["stripe", "Card subscriptions", "Stripe · fans subscribe by card", "Stripe keeps about 3.6% + 30¢ a payment (US cards)"],
+  ["coinbase", "Coinbase", "Recommended · payments go straight in", "Fees: 0%"],
+  ["cashapp", "Cash App", "US · fans pay by the minute", "Fees: 0% (for now)"],
+  ["stripe", "Card subscriptions", "Stripe · fans subscribe by card", "Fees: ~3.6% + 30¢ a payment (US cards)"],
 ];
 
 /**
@@ -2513,12 +2513,13 @@ const WAYS = [
  * the artist's Coinbase account. The answer arrives through the window it
  * opened (coinbase.js), so this page keeps any unpublished changes.
  */
-function ConnectCoinbase({ onAddress }) {
+function ConnectCoinbase({ onAddress, api }) {
   const [said, setSaid] = useState(null);
   const apply = useRef(null);
   apply.current = (a) => {
     if (a.address) {
       onAddress(a.address);
+      api?.savePayout?.(a.address, "coinbase").catch(() => {});
       setSaid({ good: true, text: "Coinbase is connected. Publish, and fans' payments go straight into your Coinbase account." });
     } else setSaid({ good: false, text: `${a.error}.` });
   };
@@ -2551,12 +2552,13 @@ const COINBASE_USDC = "https://www.coinbase.com/price/usdc";
  * straight in. No link can fill it in (only Connect Coinbase, once Coinbase
  * approves it), so it's one trip to the app and one tap on Paste.
  */
-function PasteCoinbase({ onAddress }) {
+function PasteCoinbase({ onAddress, api }) {
   const [text, setText] = useState("");
   const [said, setSaid] = useState(null);
   const value = text.trim();
   const good = !!keyOf(value);
-  const save = (a) => { rememberCoinbaseAddress(a); onAddress(a); };
+  // Kept on the node at once: an unpublished change is otherwise lost on reload.
+  const save = (a) => { rememberCoinbaseAddress(a); onAddress(a); api?.savePayout?.(a, "coinbase").catch(() => {}); };
   const canPaste = typeof navigator !== "undefined" && !!navigator.clipboard?.readText;
   async function paste() {
     setSaid(null);
@@ -2584,7 +2586,6 @@ function PasteCoinbase({ onAddress }) {
         <button class="btn ghost sm" disabled={!good} onClick={() => save(value)}>Save</button>
       </div>
       {value && !good && !said && <p class="warn small">That isn't a Solana address. Check you chose the <b>Solana</b> network in Coinbase.</p>}
-      <p class="muted small">Fans' payments go straight into your Coinbase account as USDC (digital dollars, one for one).</p>
     </div>
   );
 }
@@ -2604,11 +2605,10 @@ function GetPaid({ via, onVia, payees, setPayees, manifest, update, api, only })
           </button>
         ))}
       </div>
-      <p class="muted small">Amply takes nothing. Each by-the-minute payment also has a network fee of about a tenth of
-        a cent, paid from your fees account so fans don't need anything extra.</p>
+      <p class="muted small">Amply: 0% · Solana network fee: ~0.1¢ a payment, from your fees account</p>
       {via === "coinbase" && (
         <div class="pay-next">
-          {CONNECT_OFFERED ? <ConnectCoinbase onAddress={setAddress} /> : <PasteCoinbase onAddress={setAddress} />}
+          {CONNECT_OFFERED ? <ConnectCoinbase onAddress={setAddress} api={api} /> : <PasteCoinbase onAddress={setAddress} api={api} />}
           <details class="more">
             <summary>Rather keep it in your own wallet first?</summary>
             <p>One tap makes a payout wallet with Face ID; you send it on to Coinbase whenever you like.</p>
@@ -2673,8 +2673,7 @@ function Pricing({ wallet, onChange }) {
         const pct = share * 100 < 1 ? Number((share * 100).toFixed(1)) : Math.round(share * 100);
         return (
           <p class={`small ${share > 0.02 ? "warn" : "muted"}`}>
-            About {cents(payment)} a payment · network fee about 0.1¢, {pct}% of it
-            {share > 0.02 ? ". Pay every few more songs to waste less." : "."}</p>
+            {cents(payment)} a payment · Solana network fee 0.1¢ ({pct}%){share > 0.02 ? " · pick more songs" : ""}</p>
         );
       })()}
     </section>
@@ -3009,9 +3008,12 @@ function Temporary({ api, initial }) {
   );
 }
 
-export function Editor({ api, node, initial, published = true, initialTab = "home", version = null, onSignOut, temporary = null }) {
+export function Editor({ api, node, initial, published = true, initialTab = "home", version = null, onSignOut, temporary = null, pendingPayout = null }) {
   const [manifest, setManifest] = useState(initial);
-  const [payees, setPayees] = useState(() => readPayees(initial));
+  const [payees, setPayees] = useState(() => {
+    const p = readPayees(initial);
+    return !p.some((x) => x.address) && pendingPayout ? [{ ...p[0], address: pendingPayout }, ...p.slice(1)] : p;
+  });
   // What the page is actually serving. null on a node that has never published.
   const [live, setLive] = useState(() => (published ? initial : null));
   const [saving, setSaving] = useState(false);
