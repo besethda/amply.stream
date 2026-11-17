@@ -140,6 +140,10 @@ button.why { border: 0; padding: 0; cursor: pointer; vertical-align: middle; mar
 }
 .help a { color: var(--orange); }
 .field-label .help { margin-bottom: 8px; }
+/* A form straight after a heading, or a folded section once opened, gets the
+   same breathing room as the gaps between fields. */
+.card h2 + .field { margin-top: 14px; }
+.card details[open] > summary { margin-bottom: 10px; }
 /* The Stripe App, as three steps. */
 .stripe-steps { margin: 4px 0 16px; padding-left: 22px; display: grid; gap: 8px; font-size: 15.5px; }
 .stripe-steps .btn { margin-left: 2px; }
@@ -430,14 +434,21 @@ table.perms td:nth-child(2) { font-weight: 600; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .avatar:hover { color: var(--ink); }
 
-.profile-fields { padding: 22px 26px 26px; }
-
-.link-row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+/* One rhythm for everything in the card: a grid, so each block (a field, the
+   links, the checkbox) is the same 18px from the next whatever it is made of.
+   A margin on .field alone left buttons and bare labels sitting on their
+   neighbours. */
+.profile-fields { padding: 22px 26px 26px; display: grid; gap: 18px; }
+.profile-fields > .field { margin: 0; }
+.links { display: grid; gap: 12px; justify-items: start; }
+/* 12px between rows, but only 7px under the label, as in a .field. */
+.links .field-label { margin-bottom: -5px; }
+.link-row { display: flex; gap: 12px; align-items: center; width: 100%; }
 .link-row .what { flex: 0 1 240px; }
 .link-row .where { flex: 1 1 300px; min-width: 0; }
 
 .checkbox {
-  display: flex; align-items: center; gap: 10px; margin-top: 22px;
+  display: flex; align-items: center; gap: 10px;
   font-size: 15.5px; color: var(--ink2); cursor: pointer;
 }
 .checkbox input { width: auto; }
@@ -715,10 +726,10 @@ details.advanced > summary::-webkit-details-marker { display: none; }
 details.advanced > summary::before { content: "+ "; color: var(--orange); }
 details.advanced[open] > summary::before { content: "\2212 "; }
 details.advanced > summary .note { display: block; font-weight: 400; font-size: 15px; color: var(--ink3); margin-top: 4px; }
-details.advanced > .stack { margin-top: 26px; }
+details.advanced > .stack { margin-top: 20px; }
 .steps .step-btn { display: block; margin-top: 10px; font-size: 15px; padding: 9px 18px; }
 
-.passkey-wallet { margin: 4px 0 12px; display: grid; gap: 8px; justify-items: start; }
+.passkey-wallet { margin: 4px 0 12px; display: grid; gap: 12px; justify-items: start; }
 .passkey-wallet .muted { margin: 0; font-size: 15px; }
 .card-note details > summary { cursor: pointer; font-weight: 700; min-height: 44px; display: flex; align-items: center; }
 .passkey-wallet .good { color: var(--good); margin: 0; font-weight: 600; }
@@ -734,8 +745,8 @@ details.advanced > .stack { margin-top: 26px; }
 /* Covering listeners' fees: on or off at a glance. */
 .fee-status { padding: 10px 14px; border-radius: 12px; background: var(--bg2); margin: 4px 0 12px; }
 .fee-status.on b { color: var(--good); }
-.buy-sol { margin: 12px 0 6px; }
-.fee-how { margin: 10px 0; }
+.buy-sol { margin: 14px 0 0; }
+.fee-how { margin: 14px 0; }
 .fee-how > summary, .cash-out-passkey > summary { cursor: pointer; font-weight: 600; color: var(--ink); }
 .fee-how ol, .cash-out-passkey ol { padding-left: 22px; display: grid; gap: 8px; margin: 10px 0; }
 .fee-how .copy-row { margin-top: 8px; }
