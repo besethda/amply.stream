@@ -796,8 +796,6 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .stat { display: grid; gap: 4px; }
 .stat .label { font-size: 12px; letter-spacing: .08em; color: var(--ink3); font-weight: 600; }
 .stat b { font-size: 34px; line-height: 1.1; color: var(--ink); }
-.pay-bar { height: 12px; border-radius: 99px; background: var(--bg2); overflow: hidden; margin: 6px 0 10px; }
-.pay-bar i { display: block; height: 100%; background: var(--orange); border-radius: 99px; }
 /* How much of Cloudflare's free plan is used (Meter): a label and a bar. */
 .meters { display: grid; gap: 16px; }
 .meter { display: grid; gap: 8px; }

@@ -1876,6 +1876,31 @@ export function behind(owedMicros, paidMicros, settleAt) {
 const DAY = 86_400_000;
 
 /**
+ * Where one listener stands: what their listening cost, what they've paid, and
+ * whether they've really fallen short. The listener table and Home's summary
+ * both ask this, so they can never disagree.
+ *
+ * Behind means owing more than their app is allowed to hold back: up to one
+ * payment's worth unpaid is exactly what the artist's own setting asks for,
+ * and flagging less would put an honest listener in red a few songs in.
+ * Overdue is the other way to fall short: a small amount, kept past the week.
+ * A subscriber pays by card, not by the minute: never either while their
+ * subscription runs. Nothing is flagged until payments have been read.
+ */
+export function standing(r, paid, rate, settleAt, now = Date.now()) {
+  const got = (paid.byWallet || {})[r.pubkey];
+  // What the time they listened would have cost at today's rate. Approximate
+  // on purpose: the price may have changed since, and free tracks are never
+  // counted here at all.
+  const owed = rate > 0 ? ((r.seconds || 0) / 60) * rate * 1_000_000 : 0;
+  const subscribed = r.subscribed_until && r.subscribed_until > now;
+  const counted = !subscribed && !!paid.at;
+  const short = counted && behind(owed, got?.micros || 0, settleAt);
+  const late = counted && overdue(owed, got?.micros || 0, r.last_seen, now);
+  return { r, got, owed, subscribed, short, overdue: late };
+}
+
+/**
  * Overdue: owing for listening that finished more than a week ago.
  *
  * The other way to fall short. Someone who plays one song owes less than the
@@ -2045,25 +2070,7 @@ function Listeners({ api, paid, rate, settleAt }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => {
-            const got = (paid.byWallet || {})[r.pubkey];
-            // What the time they listened would have cost at today's rate.
-            // Approximate on purpose: the price may have changed since, and
-            // free tracks are never counted here at all.
-            const owed = rate > 0 ? ((r.seconds || 0) / 60) * rate * 1_000_000 : 0;
-            // Behind means owing more than their app is allowed to hold back:
-            // up to one payment's worth unpaid is exactly what the artist's
-            // own setting asks for, and flagging less would put an honest
-            // listener in red a few songs in. Overdue is the other way to fall
-            // short: a small amount, kept past the week.
-            // A subscriber pays by card, not by the minute: never either while
-            // their subscription runs.
-            const subscribed = r.subscribed_until && r.subscribed_until > Date.now();
-            const counted = !subscribed && paid.at;
-            const short = counted && behind(owed, got?.micros || 0, settleAt);
-            const late = counted && overdue(owed, got?.micros || 0, r.last_seen);
-            return { r, got, owed, subscribed, short, overdue: late };
-          }).sort(rank).map(({ r, got, owed, subscribed, short, overdue: late }) => {
+          {rows.map((r) => standing(r, paid, rate, settleAt)).sort(rank).map(({ r, got, owed, subscribed, short, overdue: late }) => {
             return (
             <tr key={r.pubkey} class={`${r.blocked ? "blocked" : ""}${late ? " late" : ""}`}>
               <td data-k="Listener" title={`Their wallet code: ${r.pubkey}`}>Listener {numberOf.get(r.pubkey)} <span class="mono muted small">{r.pubkey.slice(0, 4)}…{r.pubkey.slice(-4)}</span></td>
@@ -2432,7 +2439,7 @@ function Meter({ label, used, of }) {
   );
 }
 
-function HomeTab({ api, manifest, payees, rate, network, live, onGo }) {
+function HomeTab({ api, manifest, payees, rate, settleAt, network, live, onGo }) {
   const [rows, setRows] = useState(null);
   const [songs, setSongs] = useState(null);
   const [usage, setUsage] = useState(null);
@@ -2447,13 +2454,13 @@ function HomeTab({ api, manifest, payees, rate, network, live, onGo }) {
   const titles = new Map((manifest.releases || []).flatMap((r) => (r.tracks || []).map((t) => [t.id, t.title || "Untitled"])));
   const listeners = rows?.length ?? null;
   const minutes = rows ? Math.round(rows.reduce((n, r) => n + (r.seconds || 0), 0) / 60) : null;
-  const now = Date.now();
-  // What the listening of people paying by the minute would have cost at
-  // today's price. Subscribers pay by card, so they're left out.
-  const owed = rows && rate > 0
-    ? rows.filter((r) => !(r.subscribed_until > now)).reduce((n, r) => n + ((r.seconds || 0) / 60) * rate * 1_000_000, 0)
+  // Listeners who have really fallen short, by the same rule as the listener
+  // table (standing): past what their app may hold back, or owing past the
+  // week. Paying every few songs leaves recent listening unpaid on purpose,
+  // so a plain paid-versus-listened figure would warn about nothing.
+  const short = rows && rate > 0 && paid.at
+    ? rows.map((r) => standing(r, paid, rate, settleAt)).filter((s) => s.short || s.overdue).length
     : 0;
-  const ratio = paid.at && owed > 0 ? Math.min(999, Math.round(((paid.total || 0) / owed) * 100)) : null;
   const top = (songs || []).filter((s) => titles.has(s.track)).slice(0, 5);
   const most = top[0]?.plays || 1;
 
@@ -2486,21 +2493,13 @@ function HomeTab({ api, manifest, payees, rate, network, live, onGo }) {
           </section>
         )}
 
-        <section class="card">
-          <h2>Are listeners paying? <Help about="the paying rate">What listeners have paid you, compared with what their
-            listening cost at your current price. It's rough: payments include tips and purchases, people pay every few
-            songs (so recent listening isn't paid yet), and a price change shifts the comparison.</Help></h2>
-          {rate === 0 ? <p class="muted">Your music is free, so nobody is charged.</p>
-            : ratio == null ? <p class="muted">{paid.busy || !rows ? "Working it out…" : "Nothing to compare yet: no paid listening so far."}</p>
-            : (
-              <>
-                <div class="pay-bar" aria-hidden="true"><i style={`width:${Math.min(100, ratio)}%`} /></div>
-                <p><b>{ratio}%</b> of what their listening cost has been paid
-                  {ratio >= 90 ? ". Looking healthy." : ratio >= 60 ? ". Some is probably just not due yet." : ". Worth a look at your listeners."}</p>
-                {ratio < 90 && <button class="link" onClick={() => onGo("earnings")}>See who hasn't paid</button>}
-              </>
-            )}
-        </section>
+        {/* Only when it's real: someone past their batch, or owing past the week. */}
+        {short > 0 && (
+          <section class="card">
+            <h2>{short === 1 ? "A listener isn't paying" : `${short} listeners aren't paying`}</h2>
+            <button class="link" onClick={() => onGo("earnings")}>See who</button>
+          </section>
+        )}
 
         <section class="card">
           <h2>Most played</h2>
@@ -3322,7 +3321,8 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
 
         {tab === "home" && (
           <HomeTab api={api} manifest={live || manifest} payees={payees} live={musicIsLive}
-            rate={livePayment?.ratePerMinute ?? 0} network={livePayment?.network || "solana"} onGo={go} />
+            rate={livePayment?.ratePerMinute ?? 0} settleAt={livePayment?.settleAt ?? 1}
+            network={livePayment?.network || "solana"} onGo={go} />
         )}
 
         {tab === "website" && (

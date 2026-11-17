@@ -168,6 +168,27 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
   cmp("nothing owed at all: not overdue", overdue(0, 0, NOW - 30 * DAY, NOW), false);
   const order = [{ id: "fine" }, { id: "behind", short: true }, { id: "late", overdue: true }].sort(rank).map((x) => x.id);
   cmp("overdue first, then behind, then everyone else", order.join(","), "late,behind,fine");
+
+  // Home's "isn't paying" and the listener table ask the same question
+  // (standing), so paying every few songs is never mistaken for not paying.
+  const { standing } = await import("./src/ui.jsx");
+  const RATE = 0.0025, POINT = 0.10;   // 0.25c a minute, paid every 10c
+  const paid = { at: NOW, byWallet: { A: { micros: c(10) } } };
+  const of = (r) => standing({ pubkey: "A", last_seen: NOW, ...r }, paid, RATE, POINT, NOW);
+  cmp("paid 10c, listened 60 minutes (15c): a batch not yet sent, not short", (({ short, overdue: o }) => short || o)(of({ seconds: 3600 })), false);
+  cmp("paid 10c, listened 4 hours (60c): short", of({ seconds: 4 * 3600 }).short, true);
+  cmp("a subscriber is never short", (({ short, overdue: o }) => short || o)(of({ seconds: 4 * 3600, subscribed_until: NOW + DAY })), false);
+  cmp("nothing is flagged before payments are read",
+    (({ short, overdue: o }) => short || o)(standing({ pubkey: "B", seconds: 99999, last_seen: 0 }, {}, RATE, POINT, NOW)), false);
+}
+
+// ── Home only warns when someone's really short ─────────────────────────────
+{
+  const html = renderToString(h(Editor, { api, node: { slug: "coolartist", url: NODE },
+    initial: full, published: true, initialTab: "home", onSignOut() {} }));
+  const check = (name, cond) => { cond ? pass++ : fail++; console.log(`${cond ? "ok  " : "FAIL"}  ${name}`); };
+  check("no payments read yet: no paying warning on Home", !/isn't paying|aren't paying/.test(html));
+  check("  and no paid-versus-listened percentage", !/of what their listening cost has been paid/.test(html));
 }
 
 // ── where money lives ───────────────────────────────────────────────────────
