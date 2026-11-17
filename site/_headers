@@ -69,7 +69,7 @@
   Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-rw2sW8ZOOHYWXWnYHTbn8Omuajl/J2X8WmwUZD8tzl0='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://*.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 
 /start
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-pZ2jEmp+4la5XXcgEmN/e4WpaTpwTQOUoS+jbB67QVs='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://amply-accounts.vercel.app https://*.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-gwF3oKrRwe+gZKSKyF7Znwa2zsvUqbp6QGQG/y82I/8=' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://amply-accounts.vercel.app https://*.workers.dev; frame-src https://challenges.cloudflare.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 
 /stripe
   Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
