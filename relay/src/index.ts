@@ -39,6 +39,29 @@ export interface Env {
    */
   CDP_KEY_ID?: string;
   CDP_KEY_SECRET?: string;
+  /** Cloudflare's rate limiter: it counts requests and stores nothing else. */
+  ONRAMP_LIMIT?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+}
+
+/**
+ * How often one connection, or one wallet, may ask for a Coinbase session.
+ * A listener taps a top-up button a few times at most; a script minting
+ * sessions to run up Amply's Coinbase usage hits this at once. Counted by
+ * Cloudflare's limiter where bound, else in this copy of the Worker.
+ */
+const ONRAMP_PER_MINUTE = 6;
+const counts = new Map<string, { n: number; until: number }>();
+export async function onrampAllowed(env: Env, key: string, now = Date.now()): Promise<boolean> {
+  if (env.ONRAMP_LIMIT) {
+    try { return (await env.ONRAMP_LIMIT.limit({ key })).success; } catch { /* fall back below */ }
+  }
+  let c = counts.get(key);
+  if (!c || c.until <= now) {
+    if (counts.size > 5_000) counts.clear();
+    c = { n: 0, until: now + 60_000 };
+    counts.set(key, c);
+  }
+  return ++c.n <= ONRAMP_PER_MINUTE;
 }
 
 const API = "https://api.cloudflare.com/client/v4";
@@ -213,8 +236,12 @@ function topupPage(p: { address: string; currency: "usdc" | "sol"; amount: strin
 <li>When Stripe asks where to send it, paste the address. If it asks for a network, choose <b>Solana</b>.</li>
 <li>Pay by card. The first time, Stripe may ask for ID. Then go back to the Amply app.</li>
 </ol>
-<p style="color:#6b6257;font-size:15px;margin:0 0 6px">Your wallet's address:</p>
-<p id="address" style="font:15px ui-monospace,monospace;overflow-wrap:anywhere;background:#fff;border:1px solid #e4dccf;border-radius:12px;padding:14px 16px;margin:0 0 20px">${escapeHtml(p.address)}</p>
+<p style="background:#fff3e8;border:1px solid #f4c9a8;border-radius:12px;padding:12px 16px;margin:0 0 16px;font-size:16px">
+<b>Check this is your wallet.</b> Your Amply app shows the last four characters of yours under Top up. They must match
+<b style="font:20px ui-monospace,monospace;letter-spacing:.06em">${escapeHtml(p.address.slice(-4))}</b>.
+If they don't, or someone sent you this link, close this page: the money would go to someone else.</p>
+<p style="color:#6b6257;font-size:15px;margin:0 0 6px">The wallet the money goes to:</p>
+<p id="address" style="font:15px ui-monospace,monospace;overflow-wrap:anywhere;background:#fff;border:1px solid #e4dccf;border-radius:12px;padding:14px 16px;margin:0 0 20px">${escapeHtml(p.address.slice(0, -4))}<b style="font-size:18px">${escapeHtml(p.address.slice(-4))}</b></p>
 <button id="go" disabled style="font:inherit;font-weight:700;padding:14px 26px;border:0;border-radius:999px;background:#f26b1d;color:#1b1813;cursor:pointer">Copy address and continue</button>
 <p id="said" style="color:#6b6257;font-size:15px;margin:16px 0 0">Loading Stripe…</p>
 <p style="color:#6b6257;font-size:15px;margin:28px 0 0">Stripe handles the payment and any identity check. Amply never sees your card and takes nothing.</p>
@@ -271,7 +298,8 @@ const COINBASE_TOKEN_PATH = "/onramp/v1/token";
 const COINBASE_PAY = "https://pay.coinbase.com/buy/select-asset";
 const COINBASE_RETURN = "https://amply.stream/app/?added=coinbase";
 export const COINBASE_AMOUNTS = [20, 30, 60];
-const SIGNED_WITHIN_MS = 5 * 60_000;
+// Long enough for a slow phone, short enough that a copied request is soon useless.
+const SIGNED_WITHIN_MS = 90_000;
 
 /** What the wallet signs to ask for a Coinbase session. */
 export const onrampMessage = (address: string, signedAt: number) =>
@@ -445,6 +473,12 @@ export default {
       const problem = await onrampProblem(body);
       if (problem) return refuse(403, problem, origin);
       const { address, amount } = body as { address: string; amount: number };
+      // Per connection and per wallet, so neither many wallets from one place
+      // nor one wallet from many places can mint sessions without end.
+      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+      if (!(await onrampAllowed(env, `ip:${ip}`)) || !(await onrampAllowed(env, `addr:${address}`))) {
+        return refuse(429, "too many requests; try again in a minute", origin);
+      }
 
       const jwt = await coinbaseJwt(env.CDP_KEY_ID!, env.CDP_KEY_SECRET!, "POST", COINBASE_TOKEN_PATH);
       // Coinbase ties the session to the listener's connection. Cloudflare

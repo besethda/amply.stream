@@ -313,5 +313,33 @@ ok("the period end is found wherever Stripe's API version puts it",
   ok("  but does include what is sold", view.plans?.[0]?.url === "https://buy.stripe.com/test_1");
 }
 
+// ── a payment on a link from before a price change ──
+{
+  const { claimSale } = await import("./src/stripe.ts");
+  const { DatabaseSync } = await import("node:sqlite");
+  const { SCHEMA } = await import("./src/store.ts");
+  const sq = new DatabaseSync(":memory:"); for (const q of SCHEMA) sq.exec(q);
+  const db = { prepare(sql) { const st = sq.prepare(sql); let a = []; const api = { bind(...x) { a = x; return api; }, async run() { st.run(...a); }, async first() { return st.get(...a) ?? null; }, async all() { return { results: st.all(...a) }; } }; return api; } };
+  sq.prepare("INSERT INTO settings (key, value) VALUES ('stripe', ?)").run(JSON.stringify({
+    key: "rk_test_x", live: false, product: "", portal: null, plans: [],
+    sales: [{ item: "tides", title: "Tides", price: 9, productId: "p2", priceId: "pr2", linkId: "plink_new", url: "https://buy.stripe.com/new" }],
+    retired: [{ item: "tides", linkId: "plink_old" }],
+  }));
+  const session = (link) => async () => ({ id: "cs_test_1", mode: "payment", client_reference_id: "W", payment_link: link, status: "complete", payment_status: "paid" });
+  const old = await claimSale(db, "W", "cs_test_aaaaaaaaaa", { loadSession: session("plink_old") });
+  ok("a fan who paid on the old link before a price change still gets the song", old.outcome === "recorded" && old.item === "tides", JSON.stringify(old));
+  const other = await claimSale(db, "W", "cs_test_aaaaaaaaaa", { loadSession: session("plink_someone_elses") });
+  ok("  but a link that was never this artist's still buys nothing", other.outcome === "refused");
+}
+
+// ── only restricted keys ──
+{
+  const { newKeyProblem } = await import("./src/stripe.ts");
+  ok("a restricted key is taken", newKeyProblem("rk_test_abc123") === null && newKeyProblem("rk_live_abc123") === null);
+  ok("Stripe's full secret key is refused, saying why", /can move money/.test(newKeyProblem("sk_live_abc123") || ""));
+  ok("a publishable key is refused", /publishable/.test(newKeyProblem("pk_test_abc") || ""));
+  ok("anything else is refused", !!newKeyProblem("hello"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

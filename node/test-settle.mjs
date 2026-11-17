@@ -12,7 +12,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SCHEMA } from "./src/store.ts";
-import { feeKey, feeAddress, forgetFeeKey, settle, countFee, feeBalance, DAILY_PAYMENTS } from "./src/settle.ts";
+import { feeKey, feeAddress, forgetFeeKey, settle, countFee, feeBalance, DAILY_PAYMENTS, DAILY_SENDS } from "./src/settle.ts";
 import { readTransaction, verifySignature, base58 } from "./src/solana-tx.ts";
 
 const require = createRequire(resolve("app/package.json"));
@@ -190,6 +190,31 @@ for (const [name, junk] of [["nothing", undefined], ["not base64", "%%%"], ["too
   ok("the balance isn't asked for on every payment", asked === 1);
   await feeBalance(rpc, a, { fresh: true });
   ok("  but is when the artist looks", asked === 2);
+}
+
+// ── the daily cap can't be used up by payments that would fail ─────────────
+{
+  const { sqlite: s4, DB: db4 } = fresh();
+  forgetFeeKey();
+  s4.prepare("INSERT INTO settings (key, value) VALUES ('fee-wallet', ?)").run(sqlite.prepare("SELECT value FROM settings WHERE key = 'fee-wallet'").get().value);
+  // Payments from empty wallets: they pass the shape check, then fail simulation.
+  const doomed = network({ simulate: { value: { err: { InstructionError: [1, { Custom: 1 }] }, logs: ["Program log: Error: insufficient funds", "Transfer"] } } });
+  for (let i = 0; i < DAILY_PAYMENTS + 5; i++) await settle(db4, doomed.rpc, payment(), expect, quick);
+  const count = s4.prepare("SELECT count FROM fee_days").get()?.count ?? 0;
+  ok(`${DAILY_PAYMENTS + 5} payments that would fail use none of the day's cap`, count === 0, `count ${count}`);
+  const real = await settle(db4, network().rpc, payment(), expect, quick);
+  ok("  so a real listener can still pay afterwards", real.ok, real.why);
+
+  // Cash-outs are counted apart, and listeners can't use them up.
+  s4.prepare("INSERT OR REPLACE INTO fee_days (day, count) VALUES (?, ?)").run(new Date().toISOString().slice(0, 10), DAILY_PAYMENTS);
+  const blocked = await settle(db4, network().rpc, payment(), expect, quick);
+  ok("with listeners' fees used up for the day, listener payments wait", !blocked.ok && blocked.status === 503);
+  const send = await settle(db4, network().rpc, payment(), expect, { ...quick, kind: "send" });
+  ok("  but the artist can still send to their bank", send.ok, send.why);
+  s4.prepare("INSERT OR REPLACE INTO fee_days (day, count) VALUES (?, ?)").run(`send:${new Date().toISOString().slice(0, 10)}`, DAILY_SENDS);
+  const sendFull = await settle(db4, network().rpc, payment(), expect, { ...quick, kind: "send" });
+  ok("  up to their own daily limit", !sendFull.ok && /sends to the bank/.test(sendFull.why));
+  forgetFeeKey();
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

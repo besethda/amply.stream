@@ -40,6 +40,10 @@ export interface Connection {
   plans: (Plan & { currency: string; priceId: string; linkId: string; url: string })[];
   /** Songs and albums sold to keep, one link each. Absent on older connections. */
   sales?: SaleLink[];
+  /** Links switched off after a price change. Nobody can start a new payment
+   *  on one, but someone who already paid on it (an open tab, an older link)
+   *  still gets what they paid for. */
+  retired?: { item: string; linkId: string }[];
 }
 
 export interface SaleLink { item: string; title: string; price: number; productId: string; priceId: string; linkId: string; url: string }
@@ -377,17 +381,26 @@ export async function publicView(db: D1Database) {
  * Reconnecting (to change prices) replaces the links; subscribers already
  * paying keep their subscriptions on the prices they chose.
  */
+/**
+ * Only a restricted key (rk_) is taken: it can do just what the guide's six
+ * permissions allow. Stripe's full secret key (sk_) can refund and pay out,
+ * and would sit in the artist's database able to.
+ */
+export function newKeyProblem(key: string): string | null {
+  if (/^pk_/.test(key)) return "That's Stripe's publishable key. Amply needs a restricted key, which starts rk_.";
+  if (/^sk_/.test(key)) return "That's Stripe's full secret key, which can move money. Make a restricted key instead (it starts rk_), with only the permissions in the guide.";
+  if (!/^rk_(live|test)_[A-Za-z0-9]+$/.test(key)) return "That doesn't look like a Stripe restricted key. Copy the one that starts rk_.";
+  return null;
+}
+
 export async function connect(
   db: D1Database,
   { key, plans, artist, returnTo }: {
     key: string; plans: Plan[]; artist: string; returnTo: string;
   },
 ): Promise<Connection> {
-  if (!/^(sk|rk)_(live|test)_[A-Za-z0-9]+$/.test(key)) {
-    throw new StripeError(/^pk_/.test(key)
-      ? "That's Stripe's publishable key. Amply needs the secret key shown with it, which starts rk_."
-      : "That doesn't look like a Stripe secret key. Copy the one that starts rk_.");
-  }
+  const problem = newKeyProblem(key);
+  if (problem) throw new StripeError(problem);
   const live = key.includes("_live_");
 
   // Checks the key works, and can see products, before anything is created.
@@ -525,7 +538,14 @@ export async function setSales(
   let c = await connectionOf(db);
   const useKey = (key || "").trim() || c?.key || "";
   if (!useKey) throw new StripeError("Connect Stripe first: paste your key, or install Amply for Artists.");
-  if (!/^(sk|rk)_(live|test)_[A-Za-z0-9]+$/.test(useKey)) throw new StripeError("That doesn't look like a Stripe secret key. Copy the one that starts rk_.");
+  // A key pasted now must be a restricted one; one already connected keeps working.
+  const pasted = (key || "").trim();
+  if (pasted && pasted !== c?.key) {
+    const problem = newKeyProblem(pasted);
+    if (problem) throw new StripeError(problem);
+  } else if (!/^(sk|rk)_(live|test)_[A-Za-z0-9]+$/.test(useKey)) {
+    throw new StripeError("That doesn't look like a Stripe secret key. Copy the one that starts rk_.");
+  }
   if (!c || c.key !== useKey) {
     await call(useKey, "GET", "/products", { limit: 1 });
     c = { key: useKey, live: useKey.includes("_live_"), product: c?.product || "", portal: c?.portal ?? null, plans: c?.key === useKey ? c.plans : [], sales: c?.sales };
@@ -563,10 +583,14 @@ export async function setSales(
     for (const m of made) await call(useKey, "POST", `/payment_links/${m.linkId}`, { active: false }).catch(() => {});
     throw e;
   }
+  const retired = [...(c.retired || [])];
   for (const h of had) {
-    if (!next.some((n) => n.linkId === h.linkId)) await call(useKey, "POST", `/payment_links/${h.linkId}`, { active: false }).catch(() => {});
+    if (!next.some((n) => n.linkId === h.linkId)) {
+      await call(useKey, "POST", `/payment_links/${h.linkId}`, { active: false }).catch(() => {});
+      retired.push({ item: h.item, linkId: h.linkId });
+    }
   }
-  await putSetting(db, STRIPE_KEY, JSON.stringify({ ...c, sales: next }));
+  await putSetting(db, STRIPE_KEY, JSON.stringify({ ...c, sales: next, retired: retired.slice(-500) }));
   return next;
 }
 
@@ -587,7 +611,7 @@ export async function claimSale(
   { loadSession }: { loadSession?: Loader } = {},
 ): Promise<SaleClaim> {
   const c = await connectionOf(db);
-  const links = c?.sales || [];
+  const links: { item: string; linkId: string }[] = [...(c?.sales || []), ...(c?.retired || [])];
   if (!c || !links.length) return { outcome: "refused" };
   if (!SESSION.test(sessionId)) return { outcome: "refused" };
   const session = await (loadSession ?? ((id) => call(c.key, "GET", `/checkout/sessions/${id}`)))(sessionId);

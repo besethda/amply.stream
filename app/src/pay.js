@@ -313,11 +313,18 @@ async function sendThroughNode(conn, node, tx, pair) {
     if (!tx.verifySignatures()) throw new PaymentError("unknown", "The artist's server gave an answer that doesn't match this payment. Nothing more will be sent.");
     return signature;
   }
-  // Refused before anything was signed or sent (see node/src/settle.ts): the
-  // payment itself can't succeed, whoever pays the fee.
-  if (res.status === 422 && /enough in your wallet/.test(body?.error || "")) {
+  // Only the node's own refusals are safe to work around. Each is a JSON
+  // error, and each comes before anything is sent, or after a payment failed
+  // on the network having taken nothing (see node/src/settle.ts). Anything
+  // else (a crash page, a bare 5xx) may have come after sending, so it's
+  // treated as "may have gone": paying again could pay twice.
+  const refused = typeof body?.error === "string" && res.status >= 400 && res.status < 600 && res.status !== 500;
+  if (!refused) {
+    throw new PaymentError("unconfirmed",
+      "The artist's server had a problem part-way through. The payment may still go through, so it won't be sent again for now.");
+  }
+  if (res.status === 422 && /enough in your wallet/.test(body.error)) {
     throw new PaymentError("funds", "There isn't enough in your wallet to pay this. Nothing was sent.");
   }
-  if (res.status === 422 && /out of date/.test(body?.error || "")) return null;
   return null;
 }

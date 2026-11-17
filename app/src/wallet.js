@@ -6,9 +6,9 @@
  * server to send it to, and not to any artist. Amply cannot spend it, freeze
  * it, see it or recover it, and that is the point. It also keeps this software
  * outside MiCA, which regulates holding or moving crypto *on behalf of* someone
- * else. See docs/legal.md §12.9, where the three rules this file must keep are
- * written down: the key never leaves the device, there is no way to buy crypto
- * inside the app, and nothing is ever pooled.
+ * else. Three rules this file keeps: the key never leaves the device, Amply
+ * never sells crypto itself (top-ups open Coinbase, Cash App or Stripe, who
+ * sell it under their own licences), and nothing is ever pooled.
  *
  * The consequence for the listener is the pocket, not the bank: lose the device
  * without the backup and the money is gone. So the app asks them to keep small

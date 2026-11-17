@@ -46,7 +46,7 @@
 
 <div class="note">
 <p><strong>In short:</strong> about 15 minutes, once. You make a free Stripe account, copy one key from it
-into your editor, and choose your plans. Stripe pays you directly and takes about 3% + 30¢ a payment;
+into your editor, and choose your plans. Stripe pays you directly and takes about 3% + 30¢ a payment (subscriptions also carry Stripe Billing's small fee);
 Amply takes nothing. </p>
 </div>
 
@@ -54,7 +54,7 @@ Amply takes nothing. </p>
 
 <ul>
   <li><strong>It's your Stripe account, not ours.</strong> Stripe pays you directly and takes its
-  usual fee (about 3% + 30¢ a payment in the US). Amply takes nothing and never sees the money.</li>
+  usual fee (about 3% + 30¢ a payment in the US, and on subscriptions Stripe Billing's small extra fee). Amply takes nothing and never sees the money.</li>
   <li><strong>To test, you need only an email address.</strong> Real payments need your ID and a bank
   account, as an individual or a company.</li>
   <li><strong>Your key stays on your streaming service.</strong> It can do only the few things Amply
@@ -99,7 +99,8 @@ support email: <a href="https://dashboard.stripe.com/settings/public" rel="noope
       </tbody>
     </table>
     </div>
-    The key can't move money, see card numbers, issue refunds or pay anything out.</li>
+    The key can't move money, see card numbers, issue refunds or pay anything out. That's why only a restricted
+    key (starting rk_) is accepted: your streaming service refuses Stripe's full secret key.</li>
   <li>Create it and copy it. It starts <code>rk_test_</code>; Stripe shows it only once, so if you
   lose it, make another.</li>
 </ol>

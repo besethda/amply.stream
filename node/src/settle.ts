@@ -29,6 +29,16 @@ export const LISTEN_MAX_MICROS = 2_000_000;
 /** Fees paid per day, across every listener: a bound on spending, whatever
  *  goes wrong. At 10,000 lamports a payment, a full day is 0.01 SOL. */
 export const DAILY_PAYMENTS = 1_000;
+/** Sends to the bank, counted apart, so listeners' traffic can never stop
+ *  the artist cashing out. */
+export const DAILY_SENDS = 50;
+
+export type FeeKind = "pay" | "send";
+const dayKey = (kind: FeeKind, now: number) => {
+  const day = new Date(now).toISOString().slice(0, 10);
+  return kind === "send" ? `send:${day}` : day;
+};
+const capOf = (kind: FeeKind) => (kind === "send" ? DAILY_SENDS : DAILY_PAYMENTS);
 
 /** Below this, the node stops offering: enough for a payee's USDC account
  *  and a few hundred fees, and keeps the wallet itself above rent. */
@@ -125,22 +135,34 @@ export async function feeBalance(rpc: Rpc, address: string, { fresh = false, now
 
 // ── the daily cap ───────────────────────────────────────────────────────────
 
-/** Count one more fee today; false once today's are used up. Fails closed:
- *  if the count can't be kept (a database built before this table), no fee
- *  is paid. */
-export async function countFee(db: D1Database, now = Date.now()): Promise<boolean> {
-  const day = new Date(now).toISOString().slice(0, 10);
+/** Whether today's fees of this kind still have room, without counting one.
+ *  Fails closed: no table (a database built before it), no fees. */
+export async function feeRoom(db: D1Database, kind: FeeKind = "pay", now = Date.now()): Promise<boolean> {
+  try {
+    const row = await db.prepare("SELECT count FROM fee_days WHERE day = ?").bind(dayKey(kind, now)).first<{ count: number }>();
+    return (row?.count ?? 0) < capOf(kind);
+  } catch {
+    return false;
+  }
+}
+
+/** Count one more fee today; false once today's are used up. Called only for
+ *  a payment the network has accepted in simulation, so payments that could
+ *  never succeed (an empty wallet, say) don't use up the day. Fails closed. */
+export async function countFee(db: D1Database, now = Date.now(), kind: FeeKind = "pay"): Promise<boolean> {
   try {
     const row = await db.prepare(
       `INSERT INTO fee_days (day, count) VALUES (?, 1)
        ON CONFLICT(day) DO UPDATE SET count = count + 1
        RETURNING count`,
-    ).bind(day).first<{ count: number }>();
+    ).bind(dayKey(kind, now)).first<{ count: number }>();
     // Old days aren't needed; a month is kept for the artist to look at.
     if (row && row.count === 1) {
-      await db.prepare("DELETE FROM fee_days WHERE day < ?").bind(new Date(now - 31 * 86400_000).toISOString().slice(0, 10)).run();
+      const cutoff = new Date(now - 31 * 86400_000).toISOString().slice(0, 10);
+      await db.prepare("DELETE FROM fee_days WHERE (day NOT LIKE 'send:%' AND day < ?) OR (day LIKE 'send:%' AND substr(day, 6) < ?)")
+        .bind(cutoff, cutoff).run();
     }
-    return !!row && row.count <= DAILY_PAYMENTS;
+    return !!row && row.count <= capOf(kind);
   } catch {
     return false;
   }
@@ -163,8 +185,8 @@ const refuse = (status: number, why: string): Settled => ({ ok: false, status, w
  */
 export async function settle(
   db: D1Database, rpc: Rpc, txBase64: unknown, expect: Omit<FeePayExpect, "feePayer">,
-  { allowed = async (_listener: string) => true, now = Date.now(), wait = (ms: number) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS, from }:
-    { allowed?: (listener: string) => Promise<boolean>; now?: number; wait?: (ms: number) => Promise<unknown>; confirmWithinMs?: number; from?: string[] } = {},
+  { allowed = async (_listener: string) => true, now = Date.now(), wait = (ms: number) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS, from, kind = "pay" }:
+    { allowed?: (listener: string) => Promise<boolean>; now?: number; wait?: (ms: number) => Promise<unknown>; confirmWithinMs?: number; from?: string[]; kind?: FeeKind } = {},
 ): Promise<Settled> {
   const bytes = base64.decode(String(txBase64 ?? ""));
   if (!bytes) return refuse(400, "that isn't a transaction");
@@ -180,7 +202,10 @@ export async function settle(
   if (from && !from.includes(verdict.listener)) return refuse(403, "that isn't one of your payout wallets");
 
   if (!(await allowed(verdict.listener))) return refuse(429, "too many payments from this wallet; try again in a minute");
-  if (!(await countFee(db, now))) return refuse(503, "this artist's node has paid all the fees it will today; try again tomorrow");
+  const full = refuse(503, kind === "send"
+    ? "that's the most sends to the bank in one day; try again tomorrow"
+    : "this artist's node has paid all the fees it will today; try again tomorrow");
+  if (!(await feeRoom(db, kind, now))) return full;
 
   tx.signatures[0] = await key.sign(tx.message);
   const signed = base64.encode(writeTransaction(tx));
@@ -195,6 +220,8 @@ export async function settle(
     // Nothing was sent: the listener can safely try again, or pay otherwise.
     return refuse(502, e instanceof RpcError ? e.message : "couldn't reach the network");
   }
+  // Only now does it count: it would succeed, and it's about to be paid for.
+  if (!(await countFee(db, now, kind))) return full;
 
   try {
     await rpc("sendTransaction", [signed, { encoding: "base64", skipPreflight: true, maxRetries: 5 }]);
