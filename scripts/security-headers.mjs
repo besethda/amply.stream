@@ -46,6 +46,13 @@ const domain = read("domain.html");
 const relay = relayOrigin(start) || relayOrigin(repair);
 if (!relay) throw new Error("could not find the relay origin in start.html");
 
+/** Where a page makes temporary accounts (accounts/), if it does: read out of
+ *  the page like the relay, and allowed only on the page that calls it. */
+function accountsOrigin(html) {
+  const found = /accounts:\s*"(https:\/\/[^"]+)"/.exec(html);
+  return found ? new URL(found[1]).origin : null;
+}
+
 const FONTS = "https://fonts.googleapis.com";
 const FONT_FILES = "https://fonts.gstatic.com";
 
@@ -93,7 +100,7 @@ const setup = (html) => policy([
   "style-src 'self' 'unsafe-inline' " + FONTS,
   "font-src " + FONT_FILES,
   "img-src 'self' data:",
-  `connect-src 'self' ${relay} https://*.workers.dev`,
+  `connect-src 'self' ${relay} ${accountsOrigin(html) || ""} https://*.workers.dev`.replace(/\s+/g, " "),
   "base-uri 'none'",
   "form-action 'none'",
   "frame-ancestors 'none'",

@@ -63,7 +63,7 @@ function cloudflare(world) {
     const method = init.method || "GET";
     const token = new Headers(init.headers).get("Authorization");
     const body = init.body;
-    log.push({ method, path: u.pathname, token, body });
+    log.push({ method, host: u.host, path: u.pathname, token, body });
     const reply = (x) => new Response(JSON.stringify(x), { status: 200 });
 
     if (u.pathname === "/preview/challenge") return reply(ok_({ challengeToken: "ct", seed: SEED.toString("base64url"), k: 3, g: 4 }));
@@ -120,13 +120,19 @@ const world = fresh();
 let log = cloudflare(world);
 const steps = [];
 const made = await provisionInstant({
-  relay: "https://relay.test", artistName: "Hollow Coast", slug: "hollow-coast",
+  relay: "https://relay.test", accounts: "https://accounts.test", artistName: "Hollow Coast", slug: "hollow-coast",
   onStep: (id, state) => steps.push(`${id}:${state}`),
 });
 
 ok("the account is asked for with Cloudflare's terms accepted", world.asked?.acceptTermsOfService === "yes"
   && world.asked?.termsOfService === "https://www.cloudflare.com/terms/");
 ok("  and a proof-of-work Cloudflare would check", world.asked?.solution?.checkpoints === expectedCheckpoints(3, 4));
+{
+  // Cloudflare refuses to make these accounts for a Worker, so not the relay.
+  const previews = log.filter((r) => r.path.startsWith("/preview/"));
+  ok("  through accounts/, not the relay", previews.length === 2 && previews.every((r) => r.host === "accounts.test"),
+    previews.map((r) => r.host + r.path).join(" "));
+}
 ok("the node goes live at its address", made.url === "https://hollow-coast.hollow-coast.workers.dev", made.url);
 ok("the claim link comes back", made.claimUrl === "https://dash.cloudflare.com/claim/abc");
 ok("  and is kept only for this tab", claimLink()?.url === made.claimUrl && !JSON.stringify([...local]).includes("claim/abc"));
@@ -146,7 +152,7 @@ ok("this browser remembers there's one to finish", pendingPreview()?.accountId =
 {
   const asked = world.asked;
   world.asked = null;
-  await provisionInstant({ relay: "https://relay.test", artistName: "Hollow Coast", slug: "hollow-coast" });
+  await provisionInstant({ relay: "https://relay.test", accounts: "https://accounts.test", artistName: "Hollow Coast", slug: "hollow-coast" });
   ok("a second run reuses the account rather than making another", world.asked === null);
   ok("  and the same storage", world.kv.length === 1);
   world.asked = asked;
@@ -175,7 +181,7 @@ ok("this browser remembers there's one to finish", pendingPreview()?.accountId =
   local.clear(); session.clear();
   const w = fresh();
   cloudflare(w);
-  await provisionInstant({ relay: "https://relay.test", artistName: "Hollow Coast", slug: "hollow-coast" });
+  await provisionInstant({ relay: "https://relay.test", accounts: "https://accounts.test", artistName: "Hollow Coast", slug: "hollow-coast" });
   w.accounts = [{ id: "99999999999999999999999999999999", name: "Someone else's" }];
   let kind = null;
   try {

@@ -955,18 +955,21 @@ export const INSTANT_STEPS = [
 ];
 
 /**
- * Ask Cloudflare for a temporary account, through the relay.
+ * Ask Cloudflare for a temporary account, through accounts/.
  *
  * Two calls with no credential: a proof-of-work challenge, solved here in
  * the browser, and the account itself, made with the artist's acceptance of
  * Cloudflare's terms. Back comes the account, a token for it, and a claim
  * link. Claiming the account ends the token.
+ *
+ * Not through the relay: Cloudflare refuses to make these accounts for a
+ * Worker (`worker_subrequest_blocked`), so accounts/ runs somewhere else.
  */
-export async function createTemporaryAccount({ relay, onProgress = () => {} }) {
+export async function createTemporaryAccount({ accounts, onProgress = () => {} }) {
   const post = async (path, body) => {
     let res;
     try {
-      res = await fetch(`${relay}${path}`, {
+      res = await fetch(`${accounts}${path}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1014,8 +1017,28 @@ export async function createTemporaryAccount({ relay, onProgress = () => {} }) {
  * the account is made in their name. Returns the node's address and the link
  * that makes the account theirs.
  */
+/**
+ * Wait for a new temporary account's token to start working.
+ *
+ * Cloudflare hands the token back before it is usable: for the first few
+ * seconds every call with it is `10000 Authentication error`, from anywhere,
+ * and then it works. Ask with the cheapest call the first step makes anyway,
+ * until it is answered or long enough has passed that it is really refused.
+ */
+async function tokenReady(ctx, { tries = 30, every = 2000 } = {}) {
+  for (let i = 1; ; i++) {
+    try {
+      await api(ctx, "GET", `/accounts/${ctx.progress.accountId}/storage/kv/namespaces?per_page=1`);
+      return;
+    } catch (e) {
+      if (e.kind !== "auth" || i >= tries) throw e;
+    }
+    await new Promise((r) => setTimeout(r, every));
+  }
+}
+
 export async function provisionInstant({
-  relay, artistName, slug,
+  relay, accounts, artistName, slug,
   workerUrl = "/node-worker.js",
   editorUrl = "/node-manage",
   versionUrl = "/node-version.json",
@@ -1045,12 +1068,13 @@ export async function provisionInstant({
     onStep(step.id, "running");
     if (step.id === "preview") {
       if (!preview) {
-        preview = await createTemporaryAccount({ relay, onProgress: onProof });
+        preview = await createTemporaryAccount({ accounts, onProgress: onProof });
         try { sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(preview)); } catch { /* resumes only within this page */ }
       }
       ctx.token = preview.token;
       progress.accountId = preview.accountId;
       saveProgress(progress);
+      await tokenReady(ctx);
     } else {
       await RUNNERS[step.id](ctx);
     }

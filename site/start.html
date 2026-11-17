@@ -393,6 +393,9 @@ const CONFIG = {
   // browser source. See .env.example.
   clientId: "3c90043d38e9a202d4147d82740092d7",
   relay: "https://amply-relay.sdarmistead.workers.dev",
+  // A temporary account, before signup. Not the relay: Cloudflare won't make
+  // these for a Worker. See accounts/.
+  accounts: "https://amply-accounts.vercel.app",
   redirectUri: window.location.origin + "/oauth/callback",
 };
 
@@ -560,6 +563,7 @@ async function runInstant() {
   try {
     const made = await provisionInstant({
       relay: CONFIG.relay,
+      accounts: CONFIG.accounts,
       artistName: state.artistName || "Untitled",
       slug: toSlug(state.artistName),
       onStep: markStep,

@@ -1,0 +1,11 @@
+{
+  "name": "amply-accounts",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Makes temporary Cloudflare accounts for artists who haven't signed up yet. Not a Worker: Cloudflare refuses these for Workers.",
+  "type": "module",
+  "engines": { "node": "22.x" },
+  "scripts": {
+    "deploy": "vercel deploy --prod"
+  }
+}
