@@ -61,17 +61,22 @@ export async function encodeMp3([left, right], { kbps = STREAM_KBPS, onProgress 
  * streams fine as it is; null altogether when the song can't be analysed
  * (then it simply goes up as it is).
  */
-export async function prepareStream(file, duration, { onProgress } = {}) {
+export async function prepareStream(file, duration, { onProgress, onStage } = {}) {
   if (!(duration > 0) || duration > LONGEST_S) return null;
   let channels;
+  onStage?.("Reading the song…");
   try { channels = await decodeStereo(file); } catch { return null; }
+  onStage?.("Measuring its volume…");
+  await breathe();
   const lufs = integratedLoudness(channels, STREAM_RATE);
   if (!Number.isFinite(lufs)) return null;
   const ext = String(file.name || "").split(".").pop();
   const kbps = (file.size * 8) / duration / 1000;
   if (!needsStreamCopy({ gainDb: gainFor(lufs), kbps, ext })) return { lufs, gainDb: 0, blob: null };
+  onStage?.(gainFor(lufs) >= 0 ? "Turning the volume up to match…" : "Turning the volume down to match…");
   await breathe();
   const { out, gainDb } = normalize(channels, STREAM_RATE);
+  onStage?.("Optimizing for streaming…");
   const blob = await encodeMp3(out, { onProgress });
   return { lufs, gainDb, blob };
 }

@@ -11,7 +11,28 @@
  * Talks to an injected `api` adapter rather than fetching directly, so the
  * interface stays testable without a live node.
  */
-import { useState, useEffect, useCallback, useRef, useMemo } from "preact/hooks";
+import { createContext } from "preact";
+import { useState, useEffect, useCallback, useRef, useMemo, useContext } from "preact/hooks";
+
+/**
+ * Work in progress (uploads, resizing, evening out a song's volume), shown in
+ * one floating card per job beside the other notices. `start(title)` returns
+ * a job: `step(text, fraction?)` says what it's doing now, `done()` clears it.
+ */
+const Jobs = createContext(null);
+const noJob = { step() {}, done() {} };
+const useJob = () => { const jobs = useContext(Jobs); return (title) => (jobs ? jobs.start(title) : noJob); };
+
+function JobCard({ job }) {
+  const pct = job.pct == null ? null : Math.max(0, Math.min(1, job.pct));
+  return (
+    <div class="banner job" role="status" aria-live="polite">
+      <div class="job-text"><b>{job.title}</b><span>{job.text}{pct != null ? ` ${Math.round(pct * 100)}%` : ""}</span></div>
+      <div class={`job-bar${pct == null ? " busy" : ""}`} role="progressbar" aria-valuemin="0" aria-valuemax="100"
+        aria-valuenow={pct == null ? undefined : Math.round(pct * 100)}><i style={pct == null ? undefined : `width:${pct * 100}%`} /></div>
+    </div>
+  );
+}
 import { validate } from "../../spec/manifest-rules.mjs";
 import { charges, SETTLE_WITHIN_DAYS } from "../../spec/pricing.mjs";
 import { bareDomain, recordFor, lookup, confirms } from "../../spec/domain.mjs";
@@ -364,7 +385,7 @@ function Release({
   const [problems, setProblems] = useState([]);
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(0);
-  const [levelling, setLevelling] = useState(null);   // a song's streaming copy being made: 0..1
+  const startJob = useJob();
   const [sizes, setSizes] = useState({});   // track url -> bytes
   const [warnOpen, setWarnOpen] = useState(null);   // track id whose reason is showing
   const asked = useRef(new Set());          // urls already sent a HEAD
@@ -390,26 +411,33 @@ function Release({
    * here from the file in hand while the song uploads. The song is what
    * matters: if the waves can't be made or sent, it goes up without them.
    */
-  async function uploadSong(file, duration) {
+  async function uploadSong(file, duration, job = noJob) {
     const key = `audio/${safeKey(file.name)}`;
     const streamKey = key.replace(/\.[^./]+$/, "") + ".stream.mp3";
-    const [, waves, stream] = await Promise.all([
-      upload(key, file),
-      makeWaves(file, duration).then(async (bytes) => {
-        const at = wavesKey(key);
-        await upload(at, new Blob([bytes], { type: "application/octet-stream" }));
-        return `${node.url}/${at}`;
-      }).catch(() => null),
-      // Its loudness, and a streaming copy at the common level where it needs
-      // one (stream-copy.js). If that can't be done, the song goes up as it is.
-      prepareStream(file, duration, { onProgress: setLevelling }).then(async (r) => {
-        if (!r) return null;
-        const loudness = Math.round(r.lufs * 10) / 10;
-        if (!r.blob) return { loudness };
-        await upload(streamKey, r.blob);
-        return { loudness, size: r.blob.size, url: `${node.url}/${streamKey}` };
-      }).catch(() => null).finally(() => setLevelling(null)),
-    ]);
+    // Its loudness, and a streaming copy at the common level where it needs
+    // one (stream-copy.js). If that can't be done, the song goes up as it is.
+    const r = await prepareStream(file, duration, {
+      onStage: (text) => job.step(text),
+      onProgress: (f) => job.step("Optimizing for streaming…", f),
+    }).catch(() => null);
+    job.step("Drawing its waveform…");
+    const wavesBytes = await makeWaves(file, duration).catch(() => null);
+    // Then everything goes up, with one bar for all of it.
+    const parts = [[key, file], ...(r?.blob ? [[streamKey, r.blob]] : []),
+      ...(wavesBytes ? [[wavesKey(key), new Blob([wavesBytes], { type: "application/octet-stream" })]] : [])];
+    const total = parts.reduce((n, [, b]) => n + b.size, 0) || 1;
+    let sent = 0;
+    for (const [k, b] of parts) {
+      const before = sent;
+      try {
+        await upload(k, b, (f) => job.step("Uploading…", (before + f * b.size) / total));
+      } catch (e) {
+        if (k === key) throw e;   // the song itself must arrive; the extras may not
+      }
+      sent += b.size;
+    }
+    const waves = wavesBytes ? `${node.url}/${wavesKey(key)}` : null;
+    const stream = r ? { loudness: Math.round(r.lufs * 10) / 10, ...(r.blob ? { size: r.blob.size, url: `${node.url}/${streamKey}` } : {}) } : null;
     const original = `${node.url}/${key}`;
     noteSize(original, file.size);
     if (stream?.url) noteSize(stream.url, stream.size);
@@ -423,13 +451,20 @@ function Release({
   }
 
   /** Put one audio file on the node and hand back a manifest track. */
-  async function ingest(file, taken) {
+  async function ingest(file, taken, label) {
     if (file.size > MAX_UPLOAD) {
       throw new Error(`It is larger than ${Math.round(MAX_UPLOAD / 1048576)}MB, which is the most your streaming service accepts in one go.`);
     }
-    const duration = await readDuration(file);
-    const song = await uploadSong(file, duration);
     const title = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+    const job = startJob(label || `Adding “${title}”`);
+    let song, duration;
+    try {
+      job.step("Reading the song…");
+      duration = await readDuration(file);
+      song = await uploadSong(file, duration, job);
+    } finally {
+      job.done();
+    }
     const id = makeId(title, taken);
     taken.add(id);
     return { id, title, duration, ...song };
@@ -440,9 +475,11 @@ function Release({
     const added = [];
     const failed = [];
     setBusy(files.length);
-    for (const file of Array.from(files)) {
+    const list = Array.from(files);
+    for (const [n, file] of list.entries()) {
       try {
-        added.push(await ingest(file, taken));
+        const name = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+        added.push(await ingest(file, taken, list.length > 1 ? `Song ${n + 1} of ${list.length}: “${name}”` : undefined));
       } catch (e) {
         failed.push({ key: `${file.name}-${Date.now()}`, file, message: e.message });
       } finally {
@@ -459,10 +496,12 @@ function Release({
   }
 
   async function replaceAudio(i, file) {
+    const job = startJob(`Replacing the audio on “${tracks[i].title}”`);
     try {
       setBusy((n) => n + 1);
+      job.step("Reading the song…");
       const duration = await readDuration(file);
-      const song = await uploadSong(file, duration);
+      const song = await uploadSong(file, duration, job);
       // The id never changes: listeners' saved state keys off it, and this is
       // the same song with a better master, not a new one. The old waves
       // belong to the old audio, so they go even if new ones couldn't be made.
@@ -475,6 +514,7 @@ function Release({
     } catch (e) {
       notify("error", `Could not replace that audio: ${e.message}`);
     } finally {
+      job.done();
       setBusy((n) => n - 1);
     }
   }
@@ -515,9 +555,7 @@ function Release({
           />
           <span class="count">
             {busy > 0
-              ? (levelling != null
-                ? `evening out the volume… ${Math.round(levelling * 100)}%`
-                : `uploading ${busy} file${busy === 1 ? "" : "s"}…`)
+              ? `adding ${busy} file${busy === 1 ? "" : "s"}…`
               : `${tracks.length} track${tracks.length === 1 ? "" : "s"} ready`}
           </span>
         </div>
@@ -684,6 +722,7 @@ function YoureLive({ url }) {
  */
 function EvenOut({ manifest, node, update, upload, readAudio, notify }) {
   const [working, setWorking] = useState(null);   // { done, of, pct }
+  const startJob = useJob();
   const older = [];
   (manifest.releases || []).forEach((r, ri) => (r.tracks || []).forEach((t, ti) => {
     if (t.loudness === undefined && !t.master && String(t.url || "").startsWith(`${node.url}/audio/`)) older.push([ri, ti, t]);
@@ -693,18 +732,23 @@ function EvenOut({ manifest, node, update, upload, readAudio, notify }) {
   async function go() {
     const changes = new Map();
     let n = 0;
+    const job = startJob("Evening out older songs");
     for (const [ri, ti, t] of older) {
       setWorking({ done: n, of: older.length, pct: 0 });
+      job.step(`Song ${n + 1} of ${older.length}: “${t.title || "Untitled"}”…`);
       try {
         const key = decodeURIComponent(new URL(t.url).pathname.slice(1));
         const blob = await readAudio(key);
         const file = new File([blob], key.split("/").pop(), { type: blob.type });
-        const r = await prepareStream(file, t.duration, { onProgress: (f) => setWorking({ done: n, of: older.length, pct: f }) });
+        const r = await prepareStream(file, t.duration, {
+          onStage: (text) => job.step(`Song ${n + 1} of ${older.length}: ${text}`),
+          onProgress: (f) => { setWorking({ done: n, of: older.length, pct: f }); job.step(`Song ${n + 1} of ${older.length}: Optimizing for streaming…`, f); },
+        });
         if (r) {
           const loudness = Math.round(r.lufs * 10) / 10;
           if (r.blob) {
             const streamKey = key.replace(/\.[^./]+$/, "") + ".stream.mp3";
-            await upload(streamKey, r.blob);
+            await upload(streamKey, r.blob, (f) => job.step(`Song ${n + 1} of ${older.length}: Uploading…`, f));
             changes.set(`${ri}.${ti}`, { url: `${node.url}/${streamKey}`, master: t.url, loudness });
           } else {
             changes.set(`${ri}.${ti}`, { loudness });
@@ -714,6 +758,7 @@ function EvenOut({ manifest, node, update, upload, readAudio, notify }) {
       n++;
     }
     setWorking(null);
+    job.done();
     if (!changes.size) { notify("error", "Couldn't even out those songs in this browser. Try again in Chrome on a computer."); return; }
     update({
       ...manifest,
@@ -2773,6 +2818,17 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
     return () => window.removeEventListener("keydown", close);
   }, [menu]);
   const [msg, setMsg] = useState(null);
+  const [jobs, setJobs] = useState([]);
+  const jobsApi = useMemo(() => ({
+    start(title) {
+      const id = Math.random().toString(36).slice(2);
+      setJobs((all) => [...all, { id, title, text: "Starting…", pct: null }]);
+      return {
+        step: (text, pct = null) => setJobs((all) => all.map((j) => (j.id === id ? { ...j, text, pct } : j))),
+        done: () => setJobs((all) => all.filter((j) => j.id !== id)),
+      };
+    },
+  }), []);
   // Good news goes by itself; problems stay until dismissed.
   useEffect(() => {
     if (msg?.kind !== "ok") return;
@@ -2803,7 +2859,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty]);
 
-  const upload = (key, file) => api.putObject(key, file);
+  const upload = (key, file, onProgress) => api.putObject(key, file, onProgress);
 
   /**
    * Put an image on the node and hand its public URL back to the caller —
@@ -2811,14 +2867,19 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
    * hundred KB rather than a phone photo's megabytes.
    */
   const art = useCallback(async (original, done, longest = COVER_PX) => {
-    const file = await shrink(original, longest);
+    const job = jobsApi.start("Adding a picture");
+    job.step("Resizing image…");
+    let file;
+    try { file = await shrink(original, longest); } catch { file = original; }
     if (file.size > MAX_ART) {
+      job.done();
       notify("error", `That picture is larger than ${Math.round(MAX_ART / 1048576)}MB. A smaller one will load faster for everyone anyway.`);
       return;
     }
     try {
       const key = `art/${safeKey(file.name)}`;
-      await api.putObject(key, file);
+      await api.putObject(key, file, (f) => job.step("Uploading image…", f));
+      job.done();
       done(`${node.url}/${key}`);
       // Said, and undoable: the original can go up in its place, at the same
       // address, so nothing already on the page needs to change.
@@ -2832,9 +2893,10 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
         });
       }
     } catch (e) {
+      job.done();
       notify("error", `Could not upload that picture: ${e.message}`);
     }
-  }, [api, node.url]);
+  }, [api, node.url, jobsApi]);
 
   async function publish() {
     let out = buildManifest(manifest, payees);
@@ -2912,7 +2974,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
   );
 
   return (
-    <>
+    <Jobs.Provider value={jobsApi}>
       <header class="top">
         <div class="top-in">
           <span class="top-mark">
@@ -2996,6 +3058,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
         {/* On a phone the header has no room for these. */}
         <div class="page-links">{links}</div>
         <div class="toasts">
+          {jobs.map((j) => <JobCard key={j.id} job={j} />)}
           <Banner kind={msg?.kind} action={msg?.action} onDismiss={() => setMsg(null)}>{msg?.text}</Banner>
           {isNewer(newer, version) && !updateHidden && (
             <div class="banner update" role="status">
@@ -3049,7 +3112,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
       </main>
 
       <PlayerBar player={player} />
-    </>
+    </Jobs.Provider>
   );
 }
 
