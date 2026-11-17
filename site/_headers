@@ -69,7 +69,7 @@
   Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-rw2sW8ZOOHYWXWnYHTbn8Omuajl/J2X8WmwUZD8tzl0='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://*.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 
 /start
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-cmtWet7Ywin44DwZaRuY0hOkeovDhqi/MfecB9J3KQw='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://amply-accounts.vercel.app https://*.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-ygTuizAsC1+UpYuALl5P5ng75m1yy7KnYS7dDSpbKOM='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://amply-accounts.vercel.app https://*.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 
 /stripe
   Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'

@@ -82,6 +82,70 @@ async function verifyAccess(request, config) {
   return payload.email || "authenticated";
 }
 
+// src/preview-key.ts
+var PREVIEW_KEY = "preview-key";
+var COOKIE = "amply_preview";
+function readPreviewKey(raw) {
+  if (!raw) return null;
+  try {
+    const k = JSON.parse(raw);
+    return k && /^[0-9a-f]{64}$/.test(k.hash) && Number.isFinite(k.until) ? k : null;
+  } catch {
+    return null;
+  }
+}
+async function hashKey(key) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+var shaped = (key) => typeof key === "string" && /^[A-Za-z0-9_-]{43}$/.test(key);
+async function matches(key, stored, now) {
+  if (!stored || now >= stored.until || !shaped(key)) return false;
+  return await hashKey(key) === stored.hash;
+}
+function cookieOf(request) {
+  const header = request.headers.get("Cookie") || "";
+  for (const part of header.split(";")) {
+    const [name, ...rest] = part.trim().split("=");
+    if (name === COOKIE) return rest.join("=");
+  }
+  return null;
+}
+function previewSession(request, stored, now = Date.now()) {
+  return matches(cookieOf(request), stored, now);
+}
+var OPEN_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>Opening your editor</title><p id="m" style="font:16px system-ui;margin:40px 16px">Opening your editor\u2026</p>
+<script>
+const key = location.hash.slice(1);
+history.replaceState(null, "", location.pathname);
+fetch("/manage/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }) })
+  .then((r) => r.ok ? location.replace("/manage") : r.text().then((t) => { document.getElementById("m").textContent = t; }))
+  .catch(() => { document.getElementById("m").textContent = "Couldn't reach your page. Check your connection and try again."; });
+<\/script>`;
+async function openPreview(request, stored, now = Date.now()) {
+  let key = null;
+  try {
+    key = (await request.json())?.key;
+  } catch {
+    key = null;
+  }
+  if (!await matches(key, stored, now)) {
+    return new Response(
+      "This link no longer opens your editor. If you've claimed your page, finish at amply.stream/start to open it.",
+      { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } }
+    );
+  }
+  const seconds = Math.max(0, Math.floor((stored.until - now) / 1e3));
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Set-Cookie": `${COOKIE}=${key}; Path=/manage; Max-Age=${seconds}; HttpOnly; Secure; SameSite=Strict`,
+      "Cache-Control": "no-store"
+    }
+  });
+}
+
 // ../spec/pricing.mjs
 function perMinute(manifest) {
   return (manifest?.payment || []).some(
@@ -2197,7 +2261,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.6";
+var VERSION = "3.19.7";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
@@ -2497,18 +2561,33 @@ function noStore(extra) {
 }
 async function handleManage(request, env, path) {
   const config = await accessConfig(env);
-  if (!config) {
+  const preview = config ? null : readPreviewKey(await setting(env.DB, PREVIEW_KEY));
+  if (path === "/open" && request.method === "GET") {
+    const h = noStore({ "Content-Type": "text/html; charset=utf-8", "Referrer-Policy": "no-referrer" });
+    h.set("Content-Security-Policy", MANAGE_CSP);
+    return new Response(OPEN_PAGE, { status: 200, headers: h });
+  }
+  if (path === "/open" && request.method === "POST") {
+    if (request.headers.get("Origin") !== new URL(request.url).origin) return fail(403, "that request did not come from your page");
+    return openPreview(request, preview);
+  }
+  if (!config && !preview) {
     return fail(
       503,
       "This streaming service has no sign-in set up, so the editor cannot be opened. Go to https://amply.stream/repair and rebuild it with your email address \u2014 your music and settings are untouched."
     );
   }
-  const email = await verifyAccess(request, config);
-  if (!email) {
-    if (!new URL(request.url).host.endsWith(".workers.dev")) {
-      return fail(401, "Your editor isn't on this address. Open it at your .workers.dev address, the one from setup.");
+  let email = "";
+  if (config) {
+    email = await verifyAccess(request, config);
+    if (!email) {
+      if (!new URL(request.url).host.endsWith(".workers.dev")) {
+        return fail(401, "Your editor isn't on this address. Open it at your .workers.dev address, the one from setup.");
+      }
+      return fail(401, "not signed in");
     }
-    return fail(401, "not signed in");
+  } else if (!await previewSession(request, preview)) {
+    return fail(401, "Your editor opens from the setup page until your page is yours. Claim it, then finish at https://amply.stream/start.");
   }
   if (request.method !== "GET" && request.method !== "HEAD") {
     const origin = request.headers.get("Origin");

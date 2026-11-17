@@ -24,7 +24,7 @@ const storage = (m) => ({
 globalThis.localStorage = storage(local);
 globalThis.sessionStorage = storage(session);
 
-const { provisionInstant, provision, claimLink, pendingPreview, clearProgress, ProvisionError } =
+const { provisionInstant, provision, claimLink, editorLink, pendingPreview, clearProgress, ProvisionError } =
   await import("../site/js/provision.js");
 
 let pass = 0, fail = 0;
@@ -94,6 +94,7 @@ function cloudflare(world) {
         return reply(ok_([{ results: v === undefined ? [] : [{ value: v }] }]));
       }
       if (/^INSERT INTO settings/.test(sql)) { world.settings[params[0]] = params[1]; }
+      if (/^DELETE FROM settings WHERE key = \?/.test(sql)) { delete world.settings[params[0]]; }
       return reply(ok_([{ results: [] }]));
     }
     if (path.endsWith("/workers/subdomain") && method === "GET") return reply(ok_({ subdomain: world.subdomain }));
@@ -147,6 +148,17 @@ ok("a starter page is published", JSON.parse(world.settings.manifest || "{}").ar
 ok("every step reports in", ["preview", "bucket", "database", "worker", "subdomain", "editor", "manifest"]
   .every((id) => steps.includes(`${id}:done`)), steps.join(" "));
 ok("this browser remembers there's one to finish", pendingPreview()?.accountId === ACC);
+{
+  // The editor before signup: a key in this tab, its hash on the node.
+  const link = editorLink() || "";
+  const key = link.split("#")[1] || "";
+  const stored = JSON.parse(world.settings["preview-key"] || "{}");
+  const hash = createHash("sha256").update(key).digest("hex");
+  ok("the editor can be opened before signup", link.startsWith("https://hollow-coast.hollow-coast.workers.dev/manage/open#")
+    && /^[A-Za-z0-9_-]{43}$/.test(key), link);
+  ok("  the node keeps only the key's hash", stored.hash === hash && !JSON.stringify(world.settings).includes(key));
+  ok("  for as long as the temporary account lasts", Math.abs(stored.until - (Date.now() + 3600e3)) < 60e3);
+}
 
 // ── running it again in the same tab ────────────────────────────────────────
 {
@@ -168,6 +180,7 @@ ok("this browser remembers there's one to finish", pendingPreview()?.accountId =
     email: "artist@example.com",
   });
   ok("finishing locks the editor to the artist", world.accessApp && JSON.parse(world.settings.access || "{}").aud === "aud-tag");
+  ok("  and the key from before signup is gone", !("preview-key" in world.settings));
   ok("  and says where it is", done.editorUrl === "https://hollow-coast.hollow-coast.workers.dev/manage");
   ok("  with the artist's own login", log.filter((r) => r.path.startsWith("/api/")).every((r) => r.token === "Bearer oauth-token"));
   ok("  without making an R2 bucket", !world.r2);

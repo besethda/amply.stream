@@ -163,10 +163,17 @@
 <!-- 3, claim ────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="claim">
   <h1 class="step">Your page is up.<br><span class="orange">Like it? Keep it.</span></h1>
-  <p class="lead">Open it and have a look. It's empty for now: you'll add your music in a few minutes, once it's yours.
-  Not for you? Do nothing, and it deletes itself.</p>
+  <p class="lead">Add your music now. Not for you? Do nothing, and it deletes itself.</p>
 
   <p class="live-url"><a id="live-link" href="#" target="_blank" rel="noopener"></a></p>
+
+  <!-- Before signup the editor opens with a key that lives only in this tab
+       (node/src/preview-key.ts). -->
+  <div class="actions" style="margin-bottom:26px" id="editor-row" hidden>
+    <a class="btn" id="editor-link" href="#" target="_blank" rel="noopener noreferrer">Open my editor &nearr;</a>
+  </div>
+
+  <h3 style="margin-bottom:12px">Keep it</h3>
 
   <ul class="rows stack">
     <li><span class="n">1</span><span class="t">Press <strong>Make it mine</strong>. Cloudflare opens in a new tab.</span></li>
@@ -176,14 +183,14 @@
   </ul>
 
   <div class="actions" style="margin-bottom:26px">
-    <a class="btn" id="claim-link" href="#" target="_blank" rel="noopener">Make it mine &nearr;</a>
+    <a class="btn ghost" id="claim-link" href="#" target="_blank" rel="noopener">Make it mine &nearr;</a>
   </div>
 
   <div class="card orange" style="margin-bottom:30px">
     <h3 style="margin-bottom:10px" id="claim-deadline">Claim it within the hour</h3>
-    <p style="margin-bottom:0">Until you do, it's a temporary account, and Cloudflare deletes it
-    after an hour. Once it's yours, Amply's access to it ends. <strong>Keep this tab open</strong>:
-    for your safety the claim link lives only here, and closing the tab loses it.</p>
+    <p style="margin-bottom:0">Until you do, it's a temporary account, and Cloudflare deletes it,
+    music and all, after an hour. Once it's yours, Amply's access to it ends. <strong>Keep this tab open</strong>:
+    the claim link and your editor's key live only here.</p>
   </div>
 
   <div class="actions">
@@ -385,7 +392,7 @@
 <script type="module">
 import { beginAuthorization, readCallback, completeAuthorization, revoke, ALL_SCOPES }
   from "/js/pkce.js";
-import { provision, provisionInstant, pendingPreview, claimLink, stillTemporary, clearProgress, toSlug, ProvisionError, STEPS }
+import { provision, provisionInstant, pendingPreview, claimLink, editorLink, stillTemporary, clearProgress, toSlug, ProvisionError, STEPS }
   from "/js/provision.js";
 
 const CONFIG = {
@@ -584,6 +591,9 @@ function paintClaim() {
   const live = $("#live-link");
   live.href = state.url || "#";
   live.textContent = state.url ? `${state.url.replace(/^https:\/\//, "")} \u2197` : "";
+  const editor = editorLink();
+  $("#editor-row").hidden = !editor;
+  if (editor) $("#editor-link").href = editor;
   const link = claimLink();
   const btn = $("#claim-link");
   const deadline = $("#claim-deadline");

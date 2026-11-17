@@ -126,6 +126,31 @@ export function claimLink() {
 }
 
 /**
+ * The link that opens the editor before signup, while this tab still has its
+ * key (node/src/preview-key.ts). The key is in the fragment, so it is never
+ * sent to a server; it lives only in this tab.
+ */
+export function editorLink() {
+  const p = loadPreview();
+  const { url } = loadProgress();
+  return p?.editorKey && url ? `${url}/manage/open#${p.editorKey}` : null;
+}
+
+/**
+ * Make the key that opens a temporary node's editor, and give the node its
+ * hash. It opens the editor until the temporary account would expire; after
+ * that, or once the editor is locked to the artist, it opens nothing.
+ */
+async function makeEditorKey(ctx, until) {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const key = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)));
+  const hash = [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
+  await putSetting(ctx, "preview-key", JSON.stringify({ hash, until: Date.parse(until) }));
+  return key;
+}
+
+/**
  * Whether the temporary account still looks unclaimed.
  *
  * Claiming it ends its token, so a token that still works means the claim
@@ -615,6 +640,9 @@ async function stepAccess(ctx) {
   // 4. Tell the node what to verify against. Without this it refuses every
   //    write — an unverifiable guard is a closed one.
   await putSetting(ctx, "access", JSON.stringify({ team: org.auth_domain, aud: app.aud }));
+  // The node ignores the key from before signup once Access is set; this
+  // makes sure it isn't there to ignore.
+  await query(ctx, "DELETE FROM settings WHERE key = ?", ["preview-key"]);
 
   ctx.progress.editorUrl = `${url}/manage`;
   ctx.progress.accessDone = true;
@@ -1080,6 +1108,10 @@ export async function provisionInstant({
     }
     onStep(step.id, "done");
   }
+
+  // So the artist can add their music now, before they've signed up.
+  preview.editorKey = await makeEditorKey(ctx, preview.expiresAt);
+  try { sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(preview)); } catch { /* the editor then waits for the claim */ }
 
   return {
     url: progress.url,

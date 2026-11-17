@@ -16,6 +16,7 @@
  */
 
 import { verifyAccess, type AccessConfig } from "./access";
+import { PREVIEW_KEY, OPEN_PAGE, readPreviewKey, previewSession, openPreview } from "./preview-key";
 import { renderPage, renderPrivacy, pageCsp, pageWebManifest } from "./page";
 import {
   setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale,
@@ -266,7 +267,21 @@ function noStore(extra?: HeadersInit): Headers {
  */
 async function handleManage(request: Request, env: Env, path: string): Promise<Response> {
   const config = await accessConfig(env);
-  if (!config) {
+  // Before signup, a key from setup opens the editor instead (preview-key.ts).
+  // Never once Access is set up: then Access is the only way in.
+  const preview = config ? null : readPreviewKey(await setting(env.DB, PREVIEW_KEY));
+  if (path === "/open" && request.method === "GET") {
+    const h = noStore({ "Content-Type": "text/html; charset=utf-8", "Referrer-Policy": "no-referrer" });
+    h.set("Content-Security-Policy", MANAGE_CSP);
+    return new Response(OPEN_PAGE, { status: 200, headers: h });
+  }
+  if (path === "/open" && request.method === "POST") {
+    // Same-origin only: the page above is the one place this is asked from.
+    if (request.headers.get("Origin") !== new URL(request.url).origin) return fail(403, "that request did not come from your page");
+    return openPreview(request, preview);
+  }
+
+  if (!config && !preview) {
     // Reachable by an artist who ran setup without an email address, which
     // skips the step that locks the editor. Tell them how to finish rather
     // than stating a fact about a database they cannot see.
@@ -278,14 +293,19 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     );
   }
 
-  const email = await verifyAccess(request, config);
-  if (!email) {
-    // The sign-in lock is on the workers.dev address. On an artist's own
-    // domain the editor is simply not here, which is worth saying plainly.
-    if (!new URL(request.url).host.endsWith(".workers.dev")) {
-      return fail(401, "Your editor isn't on this address. Open it at your .workers.dev address, the one from setup.");
+  let email: string | null = "";
+  if (config) {
+    email = await verifyAccess(request, config);
+    if (!email) {
+      // The sign-in lock is on the workers.dev address. On an artist's own
+      // domain the editor is simply not here, which is worth saying plainly.
+      if (!new URL(request.url).host.endsWith(".workers.dev")) {
+        return fail(401, "Your editor isn't on this address. Open it at your .workers.dev address, the one from setup.");
+      }
+      return fail(401, "not signed in");
     }
-    return fail(401, "not signed in");
+  } else if (!(await previewSession(request, preview))) {
+    return fail(401, "Your editor opens from the setup page until your page is yours. Claim it, then finish at https://amply.stream/start.");
   }
 
   // Signed in is not the same as meant it.
