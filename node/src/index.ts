@@ -374,6 +374,23 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
   // The website: read it, or save it. Saved through cleanSite, the one gate
   // between what the editor sends and what visitors are shown.
+  // Where the artist chose to be paid, kept here the moment they choose, so a
+  // reload or an update before publishing doesn't lose it (and so every device
+  // knows a Coinbase address is Coinbase's). Not in the manifest: fans don't
+  // need to know which app an artist uses.
+  if (path === "/payout" && request.method === "GET") {
+    const t = await setting(env.DB, "payout");
+    return new Response(t || "null", { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+  if (path === "/payout" && request.method === "POST") {
+    const body = await jsonBody(request, 1_000);
+    const address = typeof body?.address === "string" ? body.address : "";
+    const via = body?.via;
+    if (!keyOf(address) || (via !== "coinbase" && via !== "cashapp" && via !== "wallet")) return fail(400, "not a payout address");
+    await putSetting(env.DB, "payout", JSON.stringify({ address, via }));
+    return new Response(JSON.stringify({ address, via }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+
   if (path === "/site" && request.method === "GET") {
     const t = await setting(env.DB, "site");
     return new Response(t || "null", { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });

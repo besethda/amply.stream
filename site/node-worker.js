@@ -2369,7 +2369,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.20";
+var VERSION = "3.19.21";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
@@ -2753,6 +2753,18 @@ async function handleManage(request, env, path) {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
     });
+  }
+  if (path === "/payout" && request.method === "GET") {
+    const t = await setting(env.DB, "payout");
+    return new Response(t || "null", { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+  if (path === "/payout" && request.method === "POST") {
+    const body = await jsonBody(request, 1e3);
+    const address = typeof body?.address === "string" ? body.address : "";
+    const via = body?.via;
+    if (!keyOf(address) || via !== "coinbase" && via !== "cashapp" && via !== "wallet") return fail(400, "not a payout address");
+    await putSetting(env.DB, "payout", JSON.stringify({ address, via }));
+    return new Response(JSON.stringify({ address, via }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
   }
   if (path === "/site" && request.method === "GET") {
     const t = await setting(env.DB, "site");

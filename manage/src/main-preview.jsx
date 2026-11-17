@@ -88,6 +88,8 @@ const api = {
   async stripeStatus() { return { connected: false }; },
   async stats() { return { songs: [] }; },
   async readSite() { return null; },
+  async payout() { return null; },
+  async savePayout(address, via) { return { address, via }; },
   async writeSite(site) { await wait(400); return { site: cleanSite(site) }; },
   // ?fees-off shows an empty fees account.
   async fees() {

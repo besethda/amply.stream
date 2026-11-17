@@ -105,6 +105,18 @@ export function nodeApi() {
     },
 
     /** The website, as last published, or null if there isn't one. */
+    /** Where the artist chose to be paid ({ address, via }), or null. */
+    async payout() {
+      return (await req("GET", "/payout")).json();
+    },
+
+    async savePayout(address, via) {
+      return (await req("POST", "/payout", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address, via }),
+      })).json();
+    },
+
     async readSite() {
       return (await req("GET", "/site")).json();
     },
