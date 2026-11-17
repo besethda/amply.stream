@@ -215,6 +215,7 @@ export function renderSite(input, manifest, { edit = false, slots = {}, listenUr
     return `<section class="s-sec s-sec-${s.type}${s.hidden ? " is-hidden" : ""}" id="${esc(s.id)}" data-section="${i}">${head}${inner}</section>`;
   }).join("\n");
 
+  const dark = site.look.theme === "dark";
   const css = `
 .s-site{--bg:${t.bg};--bg2:${t.bg2};--ink:${t.ink};--ink2:${t.ink2};--mut:${t.mut};--line:${t.line};--ac:${site.look.accent};
  background:var(--bg);color:var(--ink);font:17px/1.6 ${font};-webkit-font-smoothing:antialiased;min-height:100%}
@@ -235,6 +236,23 @@ export function renderSite(input, manifest, { edit = false, slots = {}, listenUr
  padding:13px 24px;border-radius:999px;font-size:16px}
 .s-btn.sm{margin:0;padding:8px 16px;font-size:14px}
 .s-btn.ghost{background:transparent;border:1.5px dashed var(--line);color:var(--mut) !important}
+/* Lit buttons: a light top edge, a darker bottom edge, a tight drop shadow, and a soft
+   glow in the button's own colour (--glow: the accent). Links and the dashed placeholder
+   get the quiet version. Pressed: smaller glow, no bottom edge. */
+.s-site{--lit-hi:rgba(255,255,255,.35);--lit-lo:rgba(0,0,0,.2);--lit-drop:rgba(0,0,0,.4);
+ --lit-sheen:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,0) 70%);
+ --lit-quiet:${dark ? "inset 0 1px 0 rgba(255,255,255,.08),inset 0 -2px 0 rgba(0,0,0,.3),0 1px 2px rgba(0,0,0,.5)" : "inset 0 1px 0 rgba(255,255,255,.9),inset 0 -2px 0 rgba(19,17,16,.07),0 1px 2px rgba(19,17,16,.14)"};
+ --lit-quiet-down:${dark ? "inset 0 1px 0 rgba(255,255,255,.06),0 1px 1px rgba(0,0,0,.5)" : "inset 0 1px 0 rgba(255,255,255,.9),0 1px 1px rgba(19,17,16,.12)"}}
+.s-btn{--glow:var(--ac);--glow-a:60%;background-image:var(--lit-sheen);
+ box-shadow:inset 0 1px 0 var(--lit-hi),inset 0 -2px 0 var(--lit-lo),0 1px 2px var(--lit-drop),0 8px 24px -6px color-mix(in srgb,var(--glow) var(--glow-a),transparent);
+ transition:box-shadow .15s ease}
+.s-btn.sm{box-shadow:inset 0 1px 0 var(--lit-hi),inset 0 -2px 0 var(--lit-lo),0 1px 2px var(--lit-drop),0 5px 14px -4px color-mix(in srgb,var(--glow) var(--glow-a),transparent)}
+.s-btn:hover{--glow-a:80%}
+.s-btn:active{box-shadow:inset 0 1px 0 var(--lit-hi),0 1px 2px var(--lit-drop),0 3px 10px -5px color-mix(in srgb,var(--glow) var(--glow-a),transparent)}
+.s-btn.ghost,.s-btn.ghost:active{background-image:none;box-shadow:none}
+.s-link{box-shadow:var(--lit-quiet);transition:box-shadow .15s ease}
+.s-link:active{box-shadow:var(--lit-quiet-down)}
+@media (prefers-reduced-motion:reduce){.s-btn,.s-link{transition:none}}
 .s-sec{max-width:960px;margin:0 auto;padding:clamp(40px,6vw,72px) clamp(20px,4vw,48px);border-top:1px solid var(--line)}
 .s-sec h2{font-size:clamp(28px,4vw,40px);letter-spacing:-.03em;margin:0 0 24px;font-weight:800}
 .s-text p{margin:0 0 14px;color:var(--ink2);max-width:38em}

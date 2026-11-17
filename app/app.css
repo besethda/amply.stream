@@ -679,3 +679,42 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 .hint-text { display: block; margin-top: 6px; font-weight: 400; }
 .tag-cheap { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 99px; font-size: 12px;
   font-weight: 700; background: rgba(44, 160, 90, .18); color: #3fbf73; vertical-align: middle; }
+
+/* ── lit buttons ───────────────────────────────────────────────────────
+   One look for every button: a light line on the top inner edge, a darker
+   bottom inner edge, a tight drop shadow, and a soft glow in the button's own
+   colour. A filled button sets --glow (its fill); the layers are shared.
+   Dark screens get a subtler highlight and stronger shadows. Pressed: the
+   glow shrinks and the bottom edge goes. Disabled: flat. */
+:root {
+  --lit-hi: rgba(255, 255, 255, .28); --lit-lo: rgba(0, 0, 0, .3); --lit-drop: rgba(0, 0, 0, .55);
+  --lit-sheen: linear-gradient(180deg, rgba(255, 255, 255, .14), rgba(255, 255, 255, 0) 70%);
+  --lit-quiet: inset 0 1px 0 rgba(255, 255, 255, .07), inset 0 -2px 0 rgba(0, 0, 0, .25), 0 1px 2px rgba(0, 0, 0, .5);
+  --lit-quiet-down: inset 0 1px 0 rgba(255, 255, 255, .05), 0 1px 1px rgba(0, 0, 0, .5);
+}
+:root[data-theme="light"] {
+  --lit-hi: rgba(255, 255, 255, .4); --lit-lo: rgba(0, 0, 0, .2); --lit-drop: rgba(0, 0, 0, .35);
+  --lit-quiet: inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -2px 0 rgba(19, 17, 16, .07), 0 1px 2px rgba(19, 17, 16, .14);
+  --lit-quiet-down: inset 0 1px 0 rgba(255, 255, 255, .9), 0 1px 1px rgba(19, 17, 16, .12);
+}
+.btn-primary, .seg.on, .float-pill.follow, .play-big {
+  --glow: var(--orange); --glow-a: 60%; --glow-size: 8px 24px -6px;
+  background-image: var(--lit-sheen);
+  box-shadow: inset 0 1px 0 var(--lit-hi), inset 0 -2px 0 var(--lit-lo), 0 1px 2px var(--lit-drop),
+              0 var(--glow-size) color-mix(in srgb, var(--glow) var(--glow-a), transparent);
+  transition: box-shadow .15s ease, background-color .6s ease, color .6s ease;
+}
+.btn-primary.danger { --glow: var(--warn); }
+.seg.on, .float-pill.follow { --glow-size: 5px 14px -4px; }
+.play-big { --glow: var(--np-accent, var(--orange)); }
+:root[data-theme="light"] .play-big { --glow: var(--np-accent-light, var(--orange)); }
+.btn-primary:hover:not(:disabled), .seg.on:hover, .float-pill.follow:hover, .play-big:hover { --glow-a: 80%; }
+.btn-primary:active:not(:disabled), .seg.on:active, .float-pill.follow:active, .play-big:active {
+  --glow-size: 2px 8px -4px;
+  box-shadow: inset 0 1px 0 var(--lit-hi), 0 1px 2px var(--lit-drop),
+              0 var(--glow-size) color-mix(in srgb, var(--glow) var(--glow-a), transparent);
+}
+.btn-quiet-solid, .pill, .seg:not(.on), .circle-btn, .scan-cta { box-shadow: var(--lit-quiet); transition: box-shadow .15s ease, border-color .12s; }
+.btn-quiet-solid:active, .pill:active, .seg:not(.on):active, .circle-btn:active, .scan-cta:active { box-shadow: var(--lit-quiet-down); }
+.btn-primary:disabled, .btn-quiet-solid:disabled, .pill:disabled { box-shadow: none; background-image: none; }
+@media (prefers-reduced-motion: reduce) { .btn-primary, .btn-quiet-solid, .pill, .seg, .circle-btn, .play-big { transition: none; } }

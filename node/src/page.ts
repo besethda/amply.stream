@@ -267,6 +267,24 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;ov
 .linked p{margin:0 0 10px;color:var(--mut);font-size:14px}
 .linked h2{margin:0 0 4px;font-size:21px}
 .t.focus .tt{color:var(--ac);font-weight:700}
+/* Lit buttons: a light top edge, a darker bottom edge, a tight drop shadow and a
+   soft glow in the button's own colour (--glow). Pressed: smaller glow, no bottom
+   edge. Disabled: flat. */
+:root{--lit-hi:rgba(255,255,255,.35);--lit-lo:rgba(0,0,0,.2);--lit-drop:rgba(0,0,0,.4);
+ --lit-sheen:linear-gradient(180deg,rgba(255,255,255,.16),rgba(255,255,255,0) 70%);
+ --lit-quiet:inset 0 1px 0 rgba(255,255,255,.9),inset 0 -2px 0 rgba(19,17,16,.07),0 1px 2px rgba(19,17,16,.14);
+ --lit-quiet-down:inset 0 1px 0 rgba(255,255,255,.9),0 1px 1px rgba(19,17,16,.12)}
+.btn,.play[aria-pressed=true]{--glow:var(--ac);--glow-a:60%;background-image:var(--lit-sheen);
+ box-shadow:inset 0 1px 0 var(--lit-hi),inset 0 -2px 0 var(--lit-lo),0 1px 2px var(--lit-drop),0 8px 24px -6px color-mix(in srgb,var(--glow) var(--glow-a),transparent);
+ transition:box-shadow .15s ease}
+.btn{--glow:var(--on-ac);--glow-a:45%}
+.play[aria-pressed=true]{box-shadow:inset 0 1px 0 var(--lit-hi),inset 0 -2px 0 var(--lit-lo),0 1px 2px var(--lit-drop),0 5px 14px -4px color-mix(in srgb,var(--glow) var(--glow-a),transparent)}
+.btn:hover,.play[aria-pressed=true]:hover{--glow-a:80%}
+.btn:active,.play[aria-pressed=true]:active{box-shadow:inset 0 1px 0 var(--lit-hi),0 1px 2px var(--lit-drop),0 3px 10px -5px color-mix(in srgb,var(--glow) var(--glow-a),transparent)}
+.play:not([aria-pressed=true]){box-shadow:var(--lit-quiet);transition:box-shadow .15s ease}
+.play:not([aria-pressed=true]):active{box-shadow:var(--lit-quiet-down)}
+.play:disabled{box-shadow:none}
+@media (prefers-reduced-motion:reduce){.btn,.play{transition:none}}
 ${siteCss}
 </style>
 </head><body>${siteMode ? siteBody : `<div class="w">
