@@ -72,6 +72,10 @@
   @media (prefers-reduced-motion: reduce) { li[data-state="run"] .dot::after { content: "\25B8"; animation: none; } }
 
   .back { margin-top: 24px; }
+  /* one bar for the wait while the editor is protected */
+  .bar { height: 8px; border-radius: var(--pill); background: var(--line); overflow: hidden; margin: 0 0 34px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--orange); transition: width .6s ease; }
+  @media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
   /* accepting Cloudflare's terms */
   label.agree { display: flex; gap: 14px; align-items: flex-start; font-size: 17px; color: var(--ink2); margin: 0 0 30px; cursor: pointer; }
   label.agree input { flex: none; width: 22px; height: 22px; margin: 2px 0 0; accent-color: var(--orange); }
@@ -100,101 +104,49 @@
 </ol>
 <p class="stepname" id="stepname">Step 1 of 4, What happens</p>
 
-<!-- 1 ─────────────────────────────────────────────────────────────── -->
-<section class="panel" data-panel="intro">
-  <h1 class="step">Try it first.<br>See your page in a minute.</h1>
-
-  <ul class="rows stack">
-    <li><span class="n">1</span><span class="t">Try it: name your page and watch it go up. No sign-up, no card.</span></li>
-    <li><span class="n">2</span><span class="t">Like it? Keep it: sign up with Cloudflare, the free hosting it runs on. Google or Apple sign-in works.</span></li>
-    <li><span class="n">3</span><span class="t">Protect your editor, so only you can sign in.</span></li>
-  </ul>
-
-  <p class="lead" style="margin-bottom:30px">It's a trial page. You can open it, look around and send it to a friend.
-  If you don't keep it, Cloudflare deletes it after an hour and nothing is left behind.</p>
-
-  <div class="actions" style="margin-bottom:38px">
-    <button class="btn" data-go="instant">Try it free</button>
-    <a class="link" href="/">Not now</a>
-  </div>
-
-  <div class="card orange" style="margin-bottom:30px">
-    <h2 style="font-size:clamp(28px,3.4vw,44px);margin-bottom:22px">No card needed.</h2>
-    <ul class="marks">
-      <li class="yes"><span class="m">&rarr;</span><span>Your page runs on Cloudflare's free plan, in an account in your name.</span></li>
-      <li class="yes"><span class="m">&rarr;</span><span><strong>Amply never charges you anything, and keeps no way into your account.</strong></span></li>
-      <li class="yes"><span class="m">&rarr;</span><span>Room for about <strong>250 songs</strong> free. Need more later? Bigger storage is free too, but Cloudflare asks for a card to switch it on.</span></li>
-    </ul>
-  </div>
-
-  <p class="muted">This is <strong>your</strong> account, in your name. That's the whole point,
-  nobody can take your music down or change the terms on you. It also means the account is
-  yours to look after.</p>
-
-  <p class="muted" style="margin-top:26px">Already have a Cloudflare account?
-    <button class="link" data-go="cloudflare">Use it instead</button> (Cloudflare asks for a card on
-    that route; nothing is charged).</p>
-</section>
-
 <!-- 2, instant ──────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="instant">
-  <h1 class="step">Name your page.</h1>
-  <p class="lead">We'll put it up straight away, in a new Cloudflare account, so you can see it. It lasts an hour. Keep it if you like it.</p>
+  <h1 class="step">What's your artist name?</h1>
 
   <label class="f" for="instant-name">
-    <span>Your name</span>
-    <em>This names your page and your link. Use the name you release music under.</em>
-    <input id="instant-name" type="text" autocomplete="off" spellcheck="false" placeholder="Hollow Coast">
+    <input id="instant-name" type="text" autocomplete="off" spellcheck="false" placeholder="Hollow Coast" aria-label="Your artist name">
   </label>
 
   <label class="agree" for="instant-terms">
     <input id="instant-terms" type="checkbox">
-    <span>The account is Cloudflare's, in your name. I accept Cloudflare's
-      <a href="https://www.cloudflare.com/terms/" target="_blank" rel="noopener">Terms of Service</a> and
-      <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Privacy Policy</a>.</span>
+    <span>I accept Cloudflare's
+      <a href="https://www.cloudflare.com/terms/" target="_blank" rel="noopener">Terms</a> and
+      <a href="https://www.cloudflare.com/privacypolicy/" target="_blank" rel="noopener">Privacy Policy</a>.
+      Your page runs on a free Cloudflare account in your name.</span>
   </label>
 
   <div class="actions">
     <button class="btn" id="instant-btn" disabled>Make my page</button>
   </div>
-  <div class="back"><button class="link" data-go="intro">&larr; Back</button></div>
+  <p class="muted" style="margin-top:30px">Already on Cloudflare? <button class="link" data-go="cloudflare">Use your account</button></p>
 </section>
 
 <!-- 3, claim ────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="claim">
-  <h1 class="step">Your page is up.<br><span class="orange">Like it? Keep it.</span></h1>
-  <p class="lead">Add your music now. Not for you? Do nothing, and it deletes itself.</p>
+  <h1 class="step">Your page is up.</h1>
 
   <p class="live-url"><a id="live-link" href="#" target="_blank" rel="noopener"></a></p>
 
   <!-- Before signup the editor opens with a key that lives only in this tab
        (node/src/preview-key.ts). -->
-  <div class="actions" style="margin-bottom:26px" id="editor-row" hidden>
+  <div class="actions" style="margin-bottom:46px" id="editor-row" hidden>
     <a class="btn" id="editor-link" href="#" target="_blank" rel="noopener noreferrer">Open my editor &nearr;</a>
   </div>
 
-  <h3 style="margin-bottom:12px">Keep it</h3>
-
-  <ul class="rows stack">
-    <li><span class="n">1</span><span class="t">Press <strong>Make it mine</strong>. Cloudflare opens in a new tab.</span></li>
-    <li><span class="n">2</span><span class="t">Sign up, or sign in if you already have an account. Google or Apple works.</span></li>
-    <li><span class="n">3</span><span class="t">Cloudflare asks whether to claim the account. Say yes.</span></li>
-    <li><span class="n">4</span><span class="t">Come back to this tab.</span></li>
-  </ul>
-
-  <div class="actions" style="margin-bottom:26px">
-    <a class="btn ghost" id="claim-link" href="#" target="_blank" rel="noopener">Make it mine &nearr;</a>
+  <h2 style="font-size:clamp(24px,2.8vw,34px);margin-bottom:18px">Claim this page by making an account.</h2>
+  <div class="actions" style="margin-bottom:16px">
+    <a class="btn ghost" id="claim-link" href="#" target="_blank" rel="noopener">Make an account &nearr;</a>
   </div>
+  <p class="muted" id="claim-deadline">Claim it within the hour</p>
+  <p class="muted">Keep this tab open.</p>
 
-  <div class="card orange" style="margin-bottom:30px">
-    <h3 style="margin-bottom:10px" id="claim-deadline">Claim it within the hour</h3>
-    <p style="margin-bottom:0">Until you do, it's a temporary account, and Cloudflare deletes it,
-    music and all, after an hour. Once it's yours, Amply's access to it ends. <strong>Keep this tab open</strong>:
-    the claim link and your editor's key live only here.</p>
-  </div>
-
-  <div class="actions">
-    <button class="btn ghost" id="claimed-btn">I've claimed it, carry on</button>
+  <div class="actions" style="margin-top:26px">
+    <button class="link" id="claimed-btn">I've claimed it</button>
   </div>
   <p id="claim-said" role="status" hidden style="margin:14px 0 0;color:var(--ink)"></p>
 </section>
@@ -251,7 +203,7 @@
   <div class="actions">
     <button class="btn" id="to-connect" data-go="connect">Done, all three are open</button>
   </div>
-  <div class="back"><button class="link" data-go="intro">&larr; Back</button></div>
+  <div class="back"><button class="link" data-go="instant">&larr; Back</button></div>
 </section>
 
 <!-- 3 ─────────────────────────────────────────────────────────────── -->
@@ -265,7 +217,7 @@
     <li class="yes"><span class="m">&check;</span><span>The thing that plays it, and your editor</span></li>
   </ul>
 
-  <div class="card" style="margin-bottom:30px">
+  <div class="card" id="connect-never" style="margin-bottom:30px">
     <p class="eyebrow" style="margin-bottom:20px">What we never ask for</p>
     <ul class="marks">
       <li class="no"><span class="m">&times;</span><span>Your card, or anything to do with your bank</span></li>
@@ -275,7 +227,7 @@
     </ul>
   </div>
 
-  <div class="card orange" style="margin-bottom:38px">
+  <div class="card orange" id="connect-gone" style="margin-bottom:38px">
     <h3 style="margin-bottom:12px">Amply's access is gone the moment this finishes.</h3>
     <p style="margin-bottom:0">You approve this on your host's page, not ours. Nothing from setup is kept or logged, and we're never given a way back in.</p>
   </div>
@@ -289,7 +241,7 @@
 
   <label class="f" for="artist-email">
     <span>Your email</span>
-    <em>The email you'll sign in to your editor with. Only this address will be let in. Amply uses it once, to set that up, and doesn't keep it.</em>
+    <em id="email-hint">The email you'll sign in to your editor with. Only this address will be let in. Amply uses it once, to set that up, and doesn't keep it.</em>
     <input id="artist-email" type="email" autocomplete="email" spellcheck="false" placeholder="you@example.com">
   </label>
 
@@ -301,8 +253,9 @@
 
 <!-- working ────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="working">
-  <h1 class="step">Setting up.</h1>
-  <p class="lead">Under a minute. Put the kettle on.</p>
+  <h1 class="step" id="work-title">Setting up.</h1>
+  <p class="lead" id="work-lead">Under a minute. Put the kettle on.</p>
+  <div class="bar" id="work-bar" hidden><i></i></div>
   <ul class="log" id="log">
     <li data-state="wait" data-task="preview" hidden><span class="dot"></span><span id="preview-label">Making your account</span></li>
     <li data-state="wait" data-task="account"><span class="dot"></span><span>Finding your account</span></li>
@@ -335,17 +288,14 @@
 
 <!-- done ───────────────────────────────────────────────────────────── -->
 <section class="panel" data-panel="done">
-  <h1 class="step">It's yours.<br><span class="orange">Now add your music.</span></h1>
+  <h1 class="step"><span id="done-wait" hidden>Please wait while your account protection is being set up.</span><span
+    id="done-ready">Everything is set up.<br><span class="orange">Happy streaming!</span></span></h1>
+  <div class="bar" id="done-bar" hidden><i></i></div>
 
-  <div class="actions" style="margin-bottom:26px">
-    <a class="btn" id="edit-link" href="/start">Open my streaming service</a>
-    <p class="muted" id="signin-wait" hidden style="margin:0">Turning on your sign-in. Usually a minute or two.</p>
+  <div class="actions" style="margin-bottom:22px">
+    <a class="btn" id="edit-link" href="/start">Open my editor</a>
   </div>
-
-  <p class="lead" style="margin-bottom:0">You're now hosting your own streaming service, and
-  your own editor for adding songs to it. <strong>Next:</strong> open it, and Cloudflare emails a
-  short code to the address you gave. Type it in, and you're in. There's no password to
-  remember. The editor then walks you through adding music, choosing your price and publishing.</p>
+  <p class="muted" id="done-how">Cloudflare emails you a code to sign in.</p>
 
   <p class="muted" id="edit-where" hidden></p>
 
@@ -424,6 +374,8 @@ const stepEls = document.querySelectorAll("#steps li");
 const $ = (sel) => document.querySelector(sel);
 
 function show(step) {
+  // There's no intro any more: the first thing asked is the artist's name.
+  if (step === "intro") step = "instant";
   state.step = step; save();
   panels.forEach((p) => p.toggleAttribute("data-active", p.dataset.panel === step));
   if (step === "connect") paintConnect();
@@ -447,7 +399,7 @@ function show(step) {
   });
   // The segments carry no text, so the label under them says where you are.
   const NAMES = state.path === "instant"
-    ? ["Your page", "Claim it", "Private editor", "Done"]
+    ? ["Your page", "Claim it", "Protect it", "Done"]
     : ["What happens", "Your storage", "Connect", "Your page"];
   const name = document.getElementById("stepname");
   if (name) name.textContent = `Step ${idx + 1} of 4 \u2014 ${NAMES[idx]}`;
@@ -556,6 +508,15 @@ instantBtn.addEventListener("click", () => { if (!instantBtn.disabled) runInstan
 
 /** Which progress lines a run shows: an instant one makes its account, an ordinary one finds it. */
 function logFor(mode) {
+  // Protecting a claimed page: one line and a bar, not a list of jobs.
+  const protecting = mode !== "instant" && !!pendingPreview();
+  $("#work-title").textContent = protecting
+    ? "Please wait while your account protection is being set up."
+    : "Setting up.";
+  $("#work-lead").hidden = protecting;
+  $("#log").hidden = protecting;
+  $("#work-bar").hidden = !protecting;
+  setBar($("#work-bar"), 3);
   document.querySelectorAll("#log li").forEach((li) => {
     li.setAttribute("data-state", "wait");
     const t = li.dataset.task;
@@ -670,11 +631,15 @@ function paintConnect() {
   $("#connect-makes").hidden = finishing;
   document.querySelector('label[for="artist-name"]').hidden = finishing;
   $("#slug-preview").hidden = finishing;
+  // Protecting is one field and one button: the rest is for a first connect.
+  $("#connect-never").hidden = finishing;
+  $("#connect-gone").hidden = finishing;
+  $("#email-hint").hidden = finishing;
   connectBtn.textContent = finishing ? "Protect my editor" : "Set up my streaming service";
   // Back from here is back to claiming, for a page that's already live.
   document.querySelector('[data-panel="connect"] .back .link').dataset.go = finishing ? "claim" : "cloudflare";
   $("#connect-lead").textContent = finishing
-    ? "Approve Amply on Cloudflare, with the account you just claimed. After that only your email opens your editor, and Amply's access ends."
+    ? "Only this email will be able to open your editor."
     : "We set your streaming up for you, then remove our own access. Cloudflare will show a list of what Amply is asking to do: approve it.";
 }
 paintConnect();
@@ -809,10 +774,17 @@ addEventListener("pagehide", () => {
   session.token = null;
 });
 
+function setBar(bar, pct) { bar.firstElementChild.style.width = `${Math.min(100, Math.max(0, pct))}%`; }
+
 function markStep(id, s, detail) {
   const li = document.querySelector(`#log li[data-task="${id}"]`);
   if (!li) return;
   li.setAttribute("data-state", s === "running" ? "run" : s === "skipped" ? "skip" : "ok");
+  // Setup's own steps fill the first half of the bar; Cloudflare switching
+  // the sign-in on fills the rest (waitForSignIn).
+  const lines = [...document.querySelectorAll("#log li")].filter((x) => !x.hidden);
+  const finished = lines.filter((x) => ["ok", "skip"].includes(x.getAttribute("data-state"))).length;
+  setBar($("#work-bar"), 3 + 47 * (finished / Math.max(1, lines.length)));
   if (s === "skipped") {
     // Show the reason inline. A tooltip is useless for diagnosis, nobody
     // hovers, and the reason is the only thing that explains what to do next.
@@ -849,7 +821,7 @@ async function runProvision(token, chosenAccountId = null) {
     $("#node-url").textContent = url;
     const edit = $("#edit-link");
     edit.href = editorUrl || "/start";
-    edit.textContent = editorUrl ? "Open my streaming service" : "Run setup again";
+    edit.textContent = editorUrl ? "Open my editor" : "Run setup again";
 
     // The progress list disappears a moment after this screen appears, so any
     // skip reason has to be restated here or it is lost.
@@ -920,10 +892,19 @@ async function reachable(url) {
  */
 async function waitForSignIn(url) {
   const edit = $("#edit-link");
-  const wait = $("#signin-wait");
+  const how = $("#done-how");
+  const bar = $("#done-bar");
   const host = new URL(url).host;
+  $("#done-wait").hidden = false;
+  $("#done-ready").hidden = true;
   edit.hidden = true;
-  wait.hidden = false;
+  how.hidden = true;
+  bar.hidden = false;
+  // How long Cloudflare takes isn't known, so the bar eases towards the end
+  // and only reaches it when the sign-in is really there.
+  const t0 = Date.now();
+  setBar(bar, 50);
+  const creep = setInterval(() => setBar(bar, 50 + 45 * (1 - Math.exp(-(Date.now() - t0) / 60_000))), 500);
   for (let i = 0; i < 60; i++) {
     try {
       const res = await fetch(`${CONFIG.relay}/ready?host=${encodeURIComponent(host)}`, { cache: "no-store" });
@@ -931,8 +912,14 @@ async function waitForSignIn(url) {
     } catch { /* ask again */ }
     await new Promise((r) => setTimeout(r, 5000));
   }
-  wait.hidden = true;
+  clearInterval(creep);
+  setBar(bar, 100);
+  await new Promise((r) => setTimeout(r, 500));
+  bar.hidden = true;
+  $("#done-wait").hidden = true;
+  $("#done-ready").hidden = false;
   edit.hidden = false;
+  how.hidden = false;
 }
 
 async function watchCertificate(url) {
