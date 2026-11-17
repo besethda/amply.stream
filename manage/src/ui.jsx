@@ -1311,10 +1311,10 @@ function PasskeyWallet({ onAddress }) {
       // (BackupReminder): the passkey only works at this editor's address.
       try { localStorage.setItem(PASSKEY_WALLET_KEY, address); } catch { /* the reminder just won't show */ }
       onAddress(address);
-      setSaid({ good: true, text: "Your payout wallet is ready and filled in below. Publish to start being paid into it." });
+      setSaid({ good: true, text: "Wallet ready. Publish to start getting paid." });
     } catch (e) {
       if (e instanceof NoPasskeySecret) {
-        setSaid({ text: "This device's passkey can't make a wallet. Try again and choose your phone in the window that appears, or use a wallet app below." });
+        setSaid({ text: "This device can't make it. Try again and choose your phone." });
       } else if (e.name !== "Cancelled") setSaid({ text: e.message });
     } finally { setBusy(false); }
   }
@@ -1322,9 +1322,9 @@ function PasskeyWallet({ onAddress }) {
   return (
     <div class="passkey-wallet">
       <button class="btn sm" disabled={busy} onClick={() => go(createPasskeySeed)}>
-        {busy ? "Waiting for you…" : "Make my payout wallet with Face ID"}
+        {busy ? "Waiting for you…" : "Make my wallet with Face ID"}
       </button>
-      <p class="muted small">Face ID, Touch ID or Windows Hello · syncs through your Apple or Google account ·{" "}
+      <p class="muted small">Syncs with your Apple or Google account ·{" "}
         <button class="quiet-link" disabled={busy} onClick={() => go(restorePasskeySeed)}>Made one before?</button></p>
       {said && <p class={said.good ? "good" : "warn"} role="status">{said.text}</p>}
     </div>
@@ -2364,11 +2364,9 @@ function SendToBank({ api, payees, network, routeName }) {
   if (feesOn === false) {
     return (
       <div class="send-setup">
-        <p><b>One-time setup before your first send.</b> Your fees account pays the tiny network fee on each
-          transfer, so nothing comes out of your earnings. It needs about $5 of a small network coin (called SOL) first, which lasts a long time.</p>
+        <p>First, add $5 to your fees account. It pays the network fee on sends.</p>
         <button class="btn sm" onClick={() => document.getElementById("fees")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-          Set up my fees account</button>
-        <p class="muted small">Takes about 5 minutes. Come back here when it says <b>On</b>.</p>
+          Go to fees account</button>
       </div>
     );
   }
@@ -2379,7 +2377,7 @@ function SendToBank({ api, payees, network, routeName }) {
       <Field label={`Your ${routeName} deposit address`}>
         <Text value={to} class="mono" placeholder="Paste the address from step 1" onInput={(v) => setTo(v)} />
       </Field>
-      {to.trim() && !toOk && <p class="warn small">That doesn't look like a deposit address. Copy it again from {routeName}.</p>}
+      {to.trim() && !toOk && <p class="warn small">Not a deposit address. Copy it again.</p>}
       <Field label="How much">
         <div class="send-amount">
           <span class="money">$<input type="number" min="0.01" step="0.01" value={amount} placeholder="0.00"
@@ -2390,14 +2388,10 @@ function SendToBank({ api, payees, network, routeName }) {
           )}
         </div>
       </Field>
-      {tooMuch && <p class="warn small">That's more than your payout wallet holds.</p>}
+      {tooMuch && <p class="warn small">More than your wallet holds.</p>}
       <button class="btn sm" disabled={disabled} onClick={go}>
         {state?.busy ? state.text : "Send with Face ID"}</button>
-      {disabled && !state?.busy && !tooMuch && (
-        <p class="muted small">{!toOk ? "Paste your deposit address to continue." : "Enter an amount (at least 1¢) to continue."}</p>
-      )}
-      <p class="muted small">You'll confirm the details, then Face ID. Your fees account pays the tiny network fee, so
-        nothing comes out of your earnings. It usually arrives within a minute or two.</p>
+      <p class="muted small">Network fee paid by your fees account · arrives in a minute or two</p>
       {state?.error && <p class="warn" role="alert">{state.error}</p>}
     </div>
   );
@@ -2476,8 +2470,7 @@ function CoinbaseCashOut({ api, payees, network }) {
   if (state?.sent || state?.done) {
     return (
       <div class="send-done" role="status">
-        <p class="good"><b>{state.sent ? `Sent $${state.usd} to Coinbase.` : "Done."}</b> Coinbase pays it out where you chose,
-          and tells you when.</p>
+        <p class="good"><b>{state.sent ? `Sent $${state.usd} to Coinbase.` : "Done."}</b> Coinbase pays it out.</p>
         <button class="link" onClick={() => setState(null)}>Cash out more</button>
       </div>
     );
@@ -2485,8 +2478,7 @@ function CoinbaseCashOut({ api, payees, network }) {
   if (state?.send) {
     return (
       <div class="send-form">
-        <p><b>Coinbase is ready for ${(state.send.micros / 1e6).toFixed(2)}.</b> Send it within 30 minutes of pressing
-          Cash out now.</p>
+        <p><b>Coinbase is ready for ${(state.send.micros / 1e6).toFixed(2)}.</b> Send within 30 minutes.</p>
         <button class="btn" disabled={state.busy} onClick={send}>{state.busy ? state.text : "Send with Face ID"}</button>
         {state.error && <p class="warn" role="alert">{state.error}</p>}
       </div>
@@ -2497,7 +2489,7 @@ function CoinbaseCashOut({ api, payees, network }) {
       <div class="send-form">
         <a class="btn" href={state.link} target="_blank" rel="noopener noreferrer"
           onClick={() => setState({ waiting: true, link: state.link })}>Open Coinbase</a>
-        <p class="muted small">Choose where the money goes and press <b>Cash out now</b>, then come back here.</p>
+        <p class="muted small">Press <b>Cash out now</b> on Coinbase, then come back.</p>
         {state.waiting && <p class="muted small">Waiting for Coinbase… <button class="link" onClick={() => setState(null)}>Start again</button></p>}
       </div>
     );
@@ -2514,7 +2506,7 @@ function CoinbaseCashOut({ api, payees, network }) {
           )}
         </div>
       </Field>
-      {tooMuch && <p class="warn small">That's more than your wallet holds.</p>}
+      {tooMuch && <p class="warn small">More than your wallet holds.</p>}
       <button class="btn" disabled={!ok || state?.busy} onClick={sign}>{state?.busy ? state.text : "Cash out with Coinbase"}</button>
       <p class="muted small">At least $1 · needs a Coinbase account with your bank added · Face ID twice</p>
       {state?.error && <p class="warn" role="alert">{state.error}</p>}
@@ -2541,13 +2533,12 @@ function CashOut({ api, payees, network, via: chosen, onVia }) {
         ))}
       </div>
       {via && !passkey && (
-        <p class="muted">In Phantom: tap <b>USDC</b>, then <b>Send</b>, and paste your {routes[via].name} USDC address
-          (Solana network).</p>
+        <p class="muted">In Phantom: <b>USDC</b> → <b>Send</b> → paste your {routes[via].name} address (Solana).</p>
       )}
       {via === "coinbase" && passkey && <CoinbaseCashOut api={api} payees={payees} network={network} />}
       {via === "cashapp" && passkey && (
         <ol class="cash-steps">
-          <li>In Cash App: tap <b>Money</b> → <b>Deposit USDC</b> → <b>Solana</b>, and copy the address.</li>
+          <li>In Cash App: <b>Money</b> → <b>Deposit USDC</b> → <b>Solana</b> → copy.</li>
           <li><SendToBank api={api} payees={payees} network={network} routeName="Cash App" /></li>
         </ol>
       )}
@@ -2556,9 +2547,8 @@ function CashOut({ api, payees, network, via: chosen, onVia }) {
           {passkey ? "My payout wallet is in the Phantom app" : "I made my payout wallet with Face ID"}</button>
       )}
       <details class="cash-out-passkey">
-        <summary>Want to open your Face ID wallet in another app?</summary>
-        <p class="muted">You don't need to, but you can: Phantom calls this backup key a "private key".
-          In Phantom: Add account, then <b>Import private key</b>, choose Solana, and paste.</p>
+        <summary>Open your wallet in another app</summary>
+        <p class="muted">In Phantom: <b>Add account</b> → <b>Import private key</b> → Solana → paste.</p>
         <ShowWalletKey payees={payees} />
       </details>
     </section>
@@ -2692,7 +2682,7 @@ function GetPaid({ payees, setPayees, manifest, update, api, perMinuteOnly }) {
   return (
     <section class="card">
       <h2>{perMinuteOnly ? "Also take payments by the minute" : "Get paid"}</h2>
-      <p>Fans pay into your own wallet, opened with Face ID. Move it to Coinbase or Cash App whenever you like.</p>
+      <p>Fans pay into your own wallet. Cash out to Coinbase or Cash App anytime.</p>
       <PasskeyWallet onAddress={setAddress} />
       <p class="muted small">Amply: 0% · Solana network fee ~0.1¢ a payment, from your fees account</p>
       <details class="more">
@@ -2709,7 +2699,7 @@ function GetPaid({ payees, setPayees, manifest, update, api, perMinuteOnly }) {
           </button>
         </div>
         {cards && <Subscriptions manifest={manifest} update={update} api={api} />}
-        <p class="muted small">Until then, your music is free to listen to.</p>
+        <p class="muted small">Until then, your music is free.</p>
       </>}
     </section>
   );
