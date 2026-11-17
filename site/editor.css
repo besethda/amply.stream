@@ -1040,3 +1040,15 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .toasts .banner { animation: toast-in .2s ease-out; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .toasts .banner { animation: none; } }
+
+/* A narrow phone has no room for the status pill beside Publish. While there
+   are changes, the orange Publish button says so; when everything is live,
+   the small "Live" pill stays. The logo never gets squeezed under them. */
+.top-mark { flex: none; }
+.top-right { min-width: 0; }
+@media (max-width: 480px) {
+  .state:not(.clean) { display: none; }
+}
+@media (max-width: 700px) {
+  .menu-pop { max-height: calc(100dvh - 70px); overflow-y: auto; overscroll-behavior: contain; }
+}
