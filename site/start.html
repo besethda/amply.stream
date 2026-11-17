@@ -130,25 +130,14 @@
 <section class="panel" data-panel="claim">
   <h1 class="step">Your page is up.</h1>
 
-  <p class="live-url"><a id="live-link" href="#" target="_blank" rel="noopener"></a></p>
-
-  <!-- Before signup the editor opens with a key that lives only in this tab
-       (node/src/preview-key.ts). -->
-  <div class="actions" style="margin-bottom:46px" id="editor-row" hidden>
-    <a class="btn" id="editor-link" href="#" target="_blank" rel="noopener noreferrer">Open my editor &nearr;</a>
+  <!-- The editor opens with a key that lives only in this tab
+       (node/src/preview-key.ts). Keeping the page, and protecting it, are
+       offered from the editor itself. -->
+  <div class="actions">
+    <a class="btn" id="editor-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Open my page &nearr;</a>
   </div>
-
-  <h2 style="font-size:clamp(24px,2.8vw,34px);margin-bottom:18px">Claim this page by making an account.</h2>
-  <div class="actions" style="margin-bottom:16px">
-    <a class="btn ghost" id="claim-link" href="#" target="_blank" rel="noopener">Make an account &nearr;</a>
-  </div>
-  <p class="muted" id="claim-deadline">Claim it within the hour</p>
-  <p class="muted">Keep this tab open.</p>
-
-  <div class="actions" style="margin-top:26px">
-    <button class="link" id="claimed-btn">I've claimed it</button>
-  </div>
-  <p id="claim-said" role="status" hidden style="margin:14px 0 0;color:var(--ink)"></p>
+  <p class="muted" id="editor-gone" hidden>This tab can't open your page any more.
+    Claimed it already? <button class="link" data-go="connect">Protect it</button></p>
 </section>
 
 <!-- 2 ─────────────────────────────────────────────────────────────── -->
@@ -343,7 +332,7 @@
 <script type="module">
 import { beginAuthorization, readCallback, completeAuthorization, revoke, ALL_SCOPES }
   from "/js/pkce.js";
-import { provision, provisionInstant, pendingPreview, claimLink, editorLink, stillTemporary, clearProgress, toSlug, ProvisionError, STEPS }
+import { provision, provisionInstant, pendingPreview, editorLink, stillTemporary, clearProgress, toSlug, ProvisionError, STEPS }
   from "/js/provision.js";
 
 const CONFIG = {
@@ -548,78 +537,26 @@ async function runInstant() {
   }
 }
 
-let claimTimer = null;
 function paintClaim() {
-  const live = $("#live-link");
-  live.href = state.url || "#";
-  live.textContent = state.url ? `${state.url.replace(/^https:\/\//, "")} \u2197` : "";
   const editor = editorLink();
-  $("#editor-row").hidden = !editor;
+  $("#editor-link").hidden = !editor;
+  $("#editor-gone").hidden = !!editor;
   if (editor) $("#editor-link").href = editor;
-  const link = claimLink();
-  const btn = $("#claim-link");
-  const deadline = $("#claim-deadline");
-  clearInterval(claimTimer);
-  if (!link) {
-    // The claim link lives only as long as the tab it was made in. Without
-    // it, either it has been claimed already or the hour has run out.
-    btn.hidden = true;
-    deadline.textContent = "This tab no longer has the claim link. If you've claimed the account, carry on below. " +
-      "If not, start again: the page was in a temporary account, which Cloudflare deletes after an hour. " +
-      "You hadn't added any music yet, so nothing of yours is lost, and starting again takes a minute.";
-    return;
-  }
-  btn.hidden = false;
-  btn.href = link.url;
-  const tick = () => {
-    const left = Math.max(0, Math.round((Date.parse(link.expiresAt) - Date.now()) / 60000));
-    deadline.textContent = left > 0 ? `Claim it within ${left} minute${left === 1 ? "" : "s"}` : "The claim link has expired. Start again.";
-  };
-  tick();
-  claimTimer = setInterval(tick, 30000);
 }
 
-// Check the claim before moving on: learning it hadn't happened only after
-// signing in again is a long way round. A second press carries on regardless,
-// in case Cloudflare is slow to end the old token.
-let claimAsked = false;
-$("#claimed-btn").addEventListener("click", async () => {
-  const btn = $("#claimed-btn");
-  const said = $("#claim-said");
-  if (!claimAsked) {
-    btn.disabled = true;
-    const temporary = await stillTemporary({ relay: CONFIG.relay });
-    btn.disabled = false;
-    if (temporary === true) {
-      claimAsked = true;
-      said.hidden = false;
-      said.textContent = "Cloudflare doesn't show it as claimed yet. Finish in the Cloudflare tab " +
-        "(it asks whether to claim the account: say yes), then press the button again. " +
-        "If you're sure you've claimed it, pressing again carries on anyway.";
-      return;
-    }
-  }
-  said.hidden = true;
-  show("connect");
-});
-
-// Coming back from Cloudflare's tab: once the account is claimed, go straight
-// on to protecting the editor rather than waiting for "I've claimed it".
+// Claimed from the editor's "Keep it" and back in this tab: on to protecting
+// the editor, without being asked.
 document.addEventListener("visibilitychange", async () => {
-  if (document.visibilityState !== "visible" || state.step !== "claim" || !claimLink()) return;
-  if (await stillTemporary({ relay: CONFIG.relay }) === false) { $("#claim-said").hidden = true; show("connect"); }
+  if (document.visibilityState !== "visible" || state.step !== "claim" || !editorLink()) return;
+  if (await stillTemporary({ relay: CONFIG.relay }) === false) show("connect");
 });
 
-// The claim link is only in this tab. While it's needed, closing or
-// reloading away from it asks first.
+// Until the page has been opened once, the key that opens it is only in this
+// tab, so leaving asks first.
+let pageOpened = false;
+$("#editor-link").addEventListener("click", () => { pageOpened = true; });
 window.addEventListener("beforeunload", (e) => {
-  if (state.step === "claim" && claimLink()) { e.preventDefault(); e.returnValue = ""; }
-});
-// Once Cloudflare has been opened, coming back is the next thing to do, so
-// that button becomes the main one.
-$("#claim-link").addEventListener("click", () => {
-  $("#claim-link").classList.add("ghost");
-  $("#claimed-btn").classList.remove("ghost");
+  if (state.step === "claim" && editorLink() && !pageOpened) { e.preventDefault(); e.returnValue = ""; }
 });
 
 /** The connect step reads differently when it finishes a page that's already live. */
