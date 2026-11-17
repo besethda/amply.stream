@@ -61,7 +61,8 @@ function App() {
       api={api}
       // Shared as the artist's own domain once they have attached one; the
       // editor itself always lives at the workers.dev address.
-      node={{ slug: location.host.split(".")[0], url: state.who?.home || location.origin }}
+      // Only ever an https address: it becomes a link, and a link can run script.
+      node={{ slug: location.host.split(".")[0], url: /^https:\/\/[^\s"<>]+$/.test(state.who?.home || "") ? state.who.home : location.origin }}
       initial={state.manifest}
       published={state.published}
       version={state.who?.version || null}

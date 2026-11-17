@@ -74,7 +74,9 @@ async function fetchAt(url) {
   try {
     res = await fetch(url, { cache: "no-store" });
   } catch {
-    throw new Error("Couldn't reach that address. It may be offline, or the link may be wrong.");
+    // Also what a page past Cloudflare's free daily limit looks like from
+    // here: its error page has no CORS headers, so it can't be told apart.
+    throw new Error("Couldn't reach that address. It may be offline or resting until tomorrow, or the link may be wrong.");
   }
   if (res.status === 404) throw new Error("There's no music published at that address yet.");
   if (!res.ok) throw new Error(`That address answered with an error (${res.status}).`);

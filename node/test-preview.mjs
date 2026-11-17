@@ -85,11 +85,16 @@ ok("  and not with none", !(await previewSession(new Request("https://a.b.worker
   ok("a token that still works: not kept yet", (await claimedYet(k)) === false);
   ok("  asked of Cloudflare's API, with that token", answer.sent?.url.startsWith("https://api.cloudflare.com/client/v4/") && answer.sent?.auth === `Bearer ${TOKEN}`);
   answer(401);
-  ok("a refused token: kept", (await claimedYet(k)) === true);
+  ok("a token refused twice: kept", (await claimedYet(k, 0)) === true);
+  const sequence = (...statuses) => { globalThis.fetch = async () => new Response("{}", { status: statuses.shift() ?? 200 }); };
+  sequence(401, 200);
+  ok("  refused once, then working: not kept", (await claimedYet(k, 0)) === null);
+  answer(403);
+  ok("a 403, which is about something else: can't say", (await claimedYet(k, 0)) === null);
   answer(500);
-  ok("Cloudflare having trouble: can't say", (await claimedYet(k)) === null);
+  ok("Cloudflare having trouble: can't say", (await claimedYet(k, 0)) === null);
   globalThis.fetch = async () => { throw new Error("offline"); };
-  ok("no connection: can't say", (await claimedYet(k)) === null);
+  ok("no connection: can't say", (await claimedYet(k, 0)) === null);
   globalThis.fetch = real;
 
   const after = readPreviewKey(JSON.stringify(afterClaim(k)));

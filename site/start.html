@@ -120,6 +120,8 @@
       Your page runs on a free Cloudflare account in your name.</span>
   </label>
 
+  <div id="human" style="margin:0 0 24px"></div>
+
   <div class="actions">
     <button class="btn" id="instant-btn" disabled>Make my page</button>
   </div>
@@ -343,6 +345,9 @@ const CONFIG = {
   // A temporary account, before signup. Not the relay: Cloudflare won't make
   // these for a Worker. See accounts/.
   accounts: "https://amply-accounts.vercel.app",
+  // Cloudflare Turnstile's site key, for the check that a person is making a
+  // page. Empty means off; its secret goes on accounts/ as TURNSTILE_SECRET.
+  turnstile: "",
   redirectUri: window.location.origin + "/oauth/callback",
 };
 
@@ -513,6 +518,32 @@ function logFor(mode) {
   });
 }
 
+// ── Turnstile: is a person making this page? ───────────────────────────────
+// Cloudflare's own check, shown on the name screen, and off while
+// CONFIG.turnstile is empty. Each token works once, so a retry asks again.
+let humanToken = null;
+function loadTurnstile() {
+  if (!CONFIG.turnstile || window.turnstile) return;
+  window.onTurnstile = () => window.turnstile.render("#human", {
+    sitekey: CONFIG.turnstile,
+    callback: (t) => { humanToken = t; },
+    "expired-callback": () => { humanToken = null; },
+  });
+  const s = document.createElement("script");
+  s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=onTurnstile";
+  document.head.appendChild(s);
+}
+loadTurnstile();
+
+async function human() {
+  if (!CONFIG.turnstile) return null;
+  for (let i = 0; i < 60 && !humanToken; i++) await new Promise((r) => setTimeout(r, 500));
+  const token = humanToken;
+  humanToken = null;
+  try { window.turnstile?.reset("#human"); } catch { /* a fresh token comes with the next check */ }
+  return token;
+}
+
 async function runInstant() {
   session.mode = "instant";
   show("working");
@@ -522,6 +553,7 @@ async function runInstant() {
     const made = await provisionInstant({
       relay: CONFIG.relay,
       accounts: CONFIG.accounts,
+      human,
       artistName: state.artistName || "Untitled",
       slug: toSlug(state.artistName),
       onStep: markStep,
@@ -637,6 +669,17 @@ const ERRORS = {
     title: "Connection lost",
     body: "We lost contact partway through. Your progress was saved, so nothing needs redoing.",
     retry: "Resume setup",
+  },
+  preview_busy: {
+    title: "Too many new pages right now",
+    body: "Cloudflare limits how many trial pages can be made at once. Try again in a few minutes, " +
+          "or use your own Cloudflare account instead.",
+    retry: "Try again",
+  },
+  not_human: {
+    title: "We couldn't check you're a person",
+    body: "Try again. If it keeps happening, reload the page.",
+    retry: "Try again",
   },
   preview_failed: {
     title: "Cloudflare couldn't make your account",

@@ -8,7 +8,7 @@
  *
  *   node scripts/test-accounts.mjs
  */
-import { handle, temporaryAccountProblem } from "../accounts/preview.mjs";
+import { handle, temporaryAccountProblem, allowedNow, PER_ADDRESS, WINDOW_MS } from "../accounts/preview.mjs";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -73,6 +73,45 @@ const good = {
   await refused("no challenge token: refused", { ...good, challengeToken: "" });
   await refused("not JSON: refused", "terms=yes");
   ok("the same rules, directly", temporaryAccountProblem(good) === null && temporaryAccountProblem([]) !== null);
+}
+
+// ── a person, and not too many from one address ────────────────────────────
+{
+  const make = (address, { turnstile, env = {} } = {}) => {
+    sent = [];
+    return handle(new Request("https://accounts.test/preview/account", {
+      method: "POST",
+      body: JSON.stringify(good),
+      headers: { Origin: ORIGIN, "x-forwarded-for": `${address}, 10.0.0.1`, ...(turnstile ? { "X-Turnstile": turnstile } : {}) },
+    }), env);
+  };
+  const statuses = [];
+  for (let i = 0; i < PER_ADDRESS + 1; i++) statuses.push((await make("203.0.113.7")).status);
+  ok(`${PER_ADDRESS} new pages from one address go through`, statuses.slice(0, PER_ADDRESS).every((s) => s === 200), statuses.join(","));
+  ok("  and the next is turned away, without asking Cloudflare", statuses[PER_ADDRESS] === 429 && sent.length === 0);
+  ok("  while another address is fine", (await make("198.51.100.4")).status === 200);
+  ok("  and the window passes", allowedNow("192.0.2.9", 0) && allowedNow("192.0.2.9", 1) && allowedNow("192.0.2.9", 2)
+    && !allowedNow("192.0.2.9", 3) && allowedNow("192.0.2.9", WINDOW_MS + 3));
+
+  // Turnstile, once its secret is set: verified with Cloudflare, and nothing made without it.
+  const env = { TURNSTILE_SECRET: "secret" };
+  const real = globalThis.fetch;
+  let verified = null;
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url).includes("turnstile/v0/siteverify")) {
+      verified = Object.fromEntries(new URLSearchParams(init.body));
+      return new Response(JSON.stringify({ success: verified.response === "a-person" }));
+    }
+    return real(url, init);
+  };
+  ok("with Turnstile on, no token: refused", (await make("198.51.100.20", { env })).status === 403 && sent.length === 0);
+  ok("  a failed check: refused", (await make("198.51.100.21", { env, turnstile: "a-script" })).status === 403);
+  ok("  a passed check: made", (await make("198.51.100.22", { env, turnstile: "a-person" })).status === 200);
+  ok("  checked with the secret and the visitor's own address", verified?.secret === "secret" && verified?.remoteip === "198.51.100.22");
+  ok("  a token is only sent in its own header, never in the account request", JSON.parse(sent[0]?.init.body || "{}").solution !== undefined
+    && !("X-Turnstile" in JSON.parse(sent[0]?.init.body || "{}")));
+  globalThis.fetch = real;
+  ok("the browser may send that header", (await call("/preview/account", { method: "OPTIONS" })).headers.get("Access-Control-Allow-Headers").includes("X-Turnstile"));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -623,11 +623,17 @@ async function stepAccess(ctx) {
     const admits = (rule) => (rule.decision === "allow" ? rule.include || [] : []);
     const rules = (policies || []).flatMap(admits);
 
-    if (rules.some((r) => "everyone" in r || "certificate" in r || "any_valid_service_token" in r)) {
+    // Only named email addresses are something setup can vouch for. Anything
+    // else could be anybody: everyone, any one-time-PIN user, a whole email
+    // domain, an IP range, a group. A bypass rule lets people in with no
+    // sign-in at all. Either way, stop rather than adopt it.
+    const vouched = (r) => Object.keys(r).length === 1 && typeof r.email?.email === "string";
+    const bypass = (policies || []).some((p) => p.decision === "bypass" || p.decision === "non_identity");
+    if (bypass || !rules.every(vouched)) {
       throw new ProvisionError(
         "zt_policy_open",
-        "The sign-in rule protecting your editor lets anyone in.",
-        "There is already an Access application for this address that admits everybody. Delete it in Zero Trust → Access → Applications and run this again, and Amply will make one that admits only you.",
+        "The sign-in rule protecting your editor could let other people in.",
+        "There is already an Access application for this address that admits more than named email addresses. Delete it in Zero Trust → Access → Applications and run this again, and Amply will make one that admits only you.",
         { fatal: true },
       );
     }
@@ -647,8 +653,9 @@ async function stepAccess(ctx) {
     }
   }
 
-  // 4. Tell the node what to verify against. Without this it refuses every
-  //    write — an unverifiable guard is a closed one.
+  // 4. Tell the node what to verify against. From now on Access is the only
+  //    way into the editor; if this setting were ever damaged, the editor
+  //    stays closed rather than falling back to anything else.
   await putSetting(ctx, "access", JSON.stringify({ team: org.auth_domain, aud: app.aud }));
   // The node ignores the key from before signup once Access is set; this
   // makes sure it isn't there to ignore.
@@ -982,10 +989,11 @@ export async function provision({
  * The steps of a node set up before the artist has a Cloudflare account.
  *
  * The same steps as setup, in a temporary account, with storage in KV and no
- * Access: temporary accounts can't use either R2 or Access. The node is live
- * and read-only (it refuses every edit without Access) until the artist
- * claims the account and finishes setup with their own login, which runs
- * `provision` over the same progress and adds only what is missing.
+ * Access: temporary accounts can't use either R2 or Access. Until the artist
+ * claims the account and finishes setup with their own login (which runs
+ * `provision` over the same progress and adds only what is missing), the
+ * editor opens for whoever holds the key made below (makeEditorKey), and for
+ * nobody once that key's hour is up.
  */
 export const INSTANT_STEPS = [
   { id: "preview", label: "Making your account" },
@@ -1003,13 +1011,19 @@ export const INSTANT_STEPS = [
  * Not through the relay: Cloudflare refuses to make these accounts for a
  * Worker (`worker_subrequest_blocked`), so accounts/ runs somewhere else.
  */
-export async function createTemporaryAccount({ accounts, onProgress = () => {} }) {
-  const post = async (path, body) => {
+/** Turnstile's token, if the page has one, in the header accounts/ checks. */
+async function humanHeader(human) {
+  const token = await human();
+  return token ? { "X-Turnstile": token } : {};
+}
+
+export async function createTemporaryAccount({ accounts, human = async () => null, onProgress = () => {} }) {
+  const post = async (path, body, headers = {}) => {
     let res;
     try {
       res = await fetch(`${accounts}${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify(body),
       });
     } catch (e) {
@@ -1018,6 +1032,10 @@ export async function createTemporaryAccount({ accounts, onProgress = () => {} }
     const json = await res.json().catch(() => null);
     if (!res.ok || !json || json.success === false) {
       const why = json?.errors?.[0]?.message || json?.error || `HTTP ${res.status}`;
+      // Too many trial accounts: from this address (accounts/), or from all
+      // of Amply's (Cloudflare's own limit, which it doesn't publish).
+      if (res.status === 429) throw new ProvisionError("preview_busy", "Too many new pages right now.", why);
+      if (res.status === 403 && /person/.test(why)) throw new ProvisionError("not_human", "The check that you're a person didn't pass.", why);
       throw new ProvisionError("preview_failed", "Cloudflare couldn't make the account.", why);
     }
     return json.result;
@@ -1034,7 +1052,7 @@ export async function createTemporaryAccount({ accounts, onProgress = () => {} }
     acceptTermsOfService: "yes",
     challengeToken: challenge.challengeToken,
     solution: { checkpoints },
-  });
+  }, await humanHeader(human));
   const { account, claim } = made || {};
   if (!account?.id || !account?.apiToken || !account?.expiresAt || !claim?.url || !claim?.expiresAt) {
     throw new ProvisionError("preview_failed", "Cloudflare's answer was missing something.", "no account, token or claim link");
@@ -1076,7 +1094,7 @@ async function tokenReady(ctx, { tries = 30, every = 2000 } = {}) {
 }
 
 export async function provisionInstant({
-  relay, accounts, artistName, slug,
+  relay, accounts, human, artistName, slug,
   workerUrl = "/node-worker.js",
   editorUrl = "/node-manage",
   versionUrl = "/node-version.json",
@@ -1106,7 +1124,7 @@ export async function provisionInstant({
     onStep(step.id, "running");
     if (step.id === "preview") {
       if (!preview) {
-        preview = await createTemporaryAccount({ accounts, onProgress: onProof });
+        preview = await createTemporaryAccount({ accounts, human, onProgress: onProof });
         try { sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(preview)); } catch { /* resumes only within this page */ }
       }
       ctx.token = preview.token;

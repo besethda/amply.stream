@@ -54,11 +54,56 @@ export function temporaryAccountProblem(body) {
 
 const origins = (env) => (env.ALLOWED_ORIGINS || "https://amply.stream").split(",").map((s) => s.trim()).filter(Boolean);
 
+/**
+ * Who is asking, as far as this host can tell. The Origin header proves
+ * nothing outside a browser, so two more things stand between a script and a
+ * free Cloudflare account per second:
+ *
+ *   - Turnstile, Cloudflare's check that a person is there, verified here with
+ *     the secret (TURNSTILE_SECRET). Off until that secret is set, so setting
+ *     it up is a matter of adding it, not a deploy that breaks "Try it free".
+ *   - A few accounts per address per window, counted in this instance's memory.
+ *     Instances come and go, so it is a speed bump rather than a wall; with
+ *     Turnstile on, it only has to slow down someone who passes Turnstile.
+ */
+export const PER_ADDRESS = 3;
+export const WINDOW_MS = 10 * 60_000;
+const recent = new Map();   // address -> times accounts were made, in the window
+
+export function addressOf(request) {
+  const forwarded = request.headers.get("x-forwarded-for");
+  return (forwarded ? forwarded.split(",")[0] : request.headers.get("x-real-ip") || "").trim() || "unknown";
+}
+
+export function allowedNow(address, now = Date.now()) {
+  const times = (recent.get(address) || []).filter((t) => now - t < WINDOW_MS);
+  if (times.length >= PER_ADDRESS) { recent.set(address, times); return false; }
+  times.push(now);
+  recent.set(address, times);
+  if (recent.size > 10_000) recent.clear();   // never a memory problem, at worst a reset
+  return true;
+}
+
+export async function human(token, address, env) {
+  if (!env.TURNSTILE_SECRET) return true;
+  if (typeof token !== "string" || !token || token.length > 2048) return false;
+  try {
+    const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      body: new URLSearchParams({ secret: env.TURNSTILE_SECRET, response: token, ...(address !== "unknown" ? { remoteip: address } : {}) }),
+    });
+    const out = await res.json();
+    return out.success === true;
+  } catch {
+    return false;
+  }
+}
+
 function cors(origin, extra = {}) {
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Turnstile",
     "Access-Control-Max-Age": "86400",
     "Cache-Control": "no-store",
     Vary: "Origin",
@@ -95,6 +140,11 @@ export async function handle(request, env = {}) {
     try { parsed = JSON.parse(raw); } catch { return refuse(400, "body must be JSON", allowed); }
     const problem = temporaryAccountProblem(parsed);
     if (problem) return refuse(403, problem, allowed);
+    const address = addressOf(request);
+    if (!(await human(request.headers.get("X-Turnstile"), address, env))) {
+      return refuse(403, "the check that a person is here didn't pass", allowed);
+    }
+    if (!allowedNow(address)) return refuse(429, "too many new pages from here; try again in a few minutes", allowed);
     upstream = await fetch(`${API}/provisioning/previews`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: raw,
     });

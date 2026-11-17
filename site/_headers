@@ -69,7 +69,7 @@
   Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-rw2sW8ZOOHYWXWnYHTbn8Omuajl/J2X8WmwUZD8tzl0='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://*.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 
 /start
-  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-kQ7AIdZk9SB89VraTP2TX5jb2Ygaroiddm7rgDXCB0Y='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://amply-accounts.vercel.app https://*.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'sha256-pZ2jEmp+4la5XXcgEmN/e4WpaTpwTQOUoS+jbB67QVs='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://amply-relay.sdarmistead.workers.dev https://amply-accounts.vercel.app https://*.workers.dev; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
 
 /stripe
   Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
@@ -79,6 +79,12 @@
 
 /why
   Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+
+/oauth/callback
+  Content-Security-Policy: default-src 'none'; script-src 'sha256-OhTocS+Dw4anjcFpPhGQnp9ssFxZEpDxOXV+b7HRoKo='; style-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+
+/node-manage
+  Content-Security-Policy: sandbox; default-src 'none'
 
 # Holds every listener's wallet key. The camera is allowed here and nowhere
 # else: the listening app scans an artist's QR code to add them. The site-wide

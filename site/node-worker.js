@@ -77,8 +77,12 @@ async function verifyAccess(request, config) {
   if (!ok) return null;
   const auds = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
   if (!auds.includes(config.aud)) return null;
-  if (payload.iss && payload.iss !== `https://${config.team}`) return null;
-  if (!payload.exp || payload.exp * 1e3 <= Date.now()) return null;
+  if (payload.iss !== `https://${config.team}`) return null;
+  const now = Date.now();
+  if (!payload.exp || payload.exp * 1e3 <= now) return null;
+  const SKEW = 6e4;
+  if (payload.nbf && payload.nbf * 1e3 > now + SKEW) return null;
+  if (payload.iat && payload.iat * 1e3 > now + SKEW) return null;
   return payload.email || "authenticated";
 }
 
@@ -103,18 +107,24 @@ function readPreviewKey(raw) {
     return null;
   }
 }
-async function claimedYet(k) {
+async function claimedYet(k, pause = 1500) {
   if (k.claimed) return true;
   if (!k.token) return null;
-  try {
-    const res = await fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", {
-      headers: { Authorization: `Bearer ${k.token}` }
-    });
-    if (res.status === 401 || res.status === 403) return true;
-    return res.ok ? false : null;
-  } catch {
-    return null;
-  }
+  const ask = async () => {
+    try {
+      const res = await fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", {
+        headers: { Authorization: `Bearer ${k.token}` }
+      });
+      return res.status;
+    } catch {
+      return null;
+    }
+  };
+  const first = await ask();
+  if (first !== null && first >= 200 && first < 300) return false;
+  if (first !== 401) return null;
+  await new Promise((r) => setTimeout(r, pause));
+  return await ask() === 401 ? true : null;
 }
 var afterClaim = (k) => ({ hash: k.hash, until: k.until, claimed: true });
 function previewNotice(k, claimed, now = Date.now()) {
@@ -2299,7 +2309,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.10";
+var VERSION = "3.19.11";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
@@ -2447,6 +2457,27 @@ function kvMedia(kv) {
   };
 }
 
+// src/quota.ts
+function hoursToReset(now = Date.now()) {
+  const next = new Date(now);
+  next.setUTCHours(24, 0, 0, 0);
+  return Math.max(1, Math.ceil((next.getTime() - now) / 36e5));
+}
+function quotaFailure(e, now = Date.now()) {
+  const text = String(e?.message ?? e);
+  const back = `It resets at midnight UTC, in about ${hoursToReset(now)} hour${hoursToReset(now) === 1 ? "" : "s"}.`;
+  if (/storage limit|maximum (db|database) size|database (or disk )?is full|SQLITE_FULL|namespace.*(full|storage)/i.test(text)) {
+    return {
+      status: 507,
+      message: "Your storage is full: that's as much as Cloudflare's free plan holds. Delete some songs, or switch on R2 storage in Cloudflare, which holds more (free, but Cloudflare asks for a card)."
+    };
+  }
+  if (/limit exceeded for the day|daily (row )?(read|write)s? limit|exceeded .*daily|daily .*exceeded/i.test(text)) {
+    return /put\(\)|delete\(\)|list\(\)|writ/i.test(text) ? { status: 429, message: `You've used Cloudflare's free limit for changes today. ${back}` } : { status: 503, message: `This page has reached Cloudflare's free daily limit. ${back}` };
+  }
+  return null;
+}
+
 // src/index.ts
 var MANIFEST_KEY = "manifest";
 var ACCESS_KEY = "access";
@@ -2584,12 +2615,12 @@ async function serveManifest(env) {
 }
 async function accessConfig(env) {
   const raw = await setting(env.DB, ACCESS_KEY);
-  if (!raw) return null;
+  if (raw === null) return { set: false, config: null };
   try {
     const c = JSON.parse(raw);
-    return c && c.team && c.aud ? c : null;
+    return { set: true, config: c && typeof c.team === "string" && c.team && typeof c.aud === "string" && c.aud ? c : null };
   } catch {
-    return null;
+    return { set: true, config: null };
   }
 }
 function noStore(extra) {
@@ -2598,8 +2629,8 @@ function noStore(extra) {
   return h;
 }
 async function handleManage(request, env, path) {
-  const config = await accessConfig(env);
-  const preview = config ? null : readPreviewKey(await setting(env.DB, PREVIEW_KEY));
+  const { set: locked, config } = await accessConfig(env);
+  const preview = locked ? null : readPreviewKey(await setting(env.DB, PREVIEW_KEY));
   if (path === "/open" && request.method === "GET") {
     const h = noStore({ "Content-Type": "text/html; charset=utf-8", "Referrer-Policy": "no-referrer" });
     h.set("Content-Security-Policy", MANAGE_CSP);
@@ -2608,6 +2639,12 @@ async function handleManage(request, env, path) {
   if (path === "/open" && request.method === "POST") {
     if (request.headers.get("Origin") !== new URL(request.url).origin) return fail(403, "that request did not come from your page");
     return openPreview(request, preview);
+  }
+  if (locked && !config) {
+    return fail(
+      503,
+      "This streaming service's sign-in setting is damaged, so the editor stays closed. Go to https://amply.stream/repair and rebuild it \u2014 your music and settings are untouched."
+    );
   }
   if (!config && !preview) {
     return fail(
@@ -2634,7 +2671,7 @@ async function handleManage(request, env, path) {
     const origin = request.headers.get("Origin");
     const site = request.headers.get("Sec-Fetch-Site");
     const here = new URL(request.url).origin;
-    const sameOrigin = origin ? origin === here : site === "same-origin" || site === null;
+    const sameOrigin = origin ? origin === here : site === "same-origin";
     if (!sameOrigin) return fail(403, "that request did not come from your editor");
   }
   if (request.method === "GET" && (path === "" || path === "/")) {
@@ -3188,161 +3225,170 @@ async function handleListen(request, env, path) {
 }
 var index_default = {
   async fetch(request, env) {
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: withCors() });
+    try {
+      return await serve(request, env);
+    } catch (e) {
+      const said = quotaFailure(e);
+      if (said) return fail(said.status, said.message);
+      throw e;
     }
-    const { pathname, host } = new URL(request.url);
-    const rule = ruleFor(request.method, pathname);
-    if (rule) {
-      const from = request.headers.get("CF-Connecting-IP") || "unknown";
-      if (!await allow(env, rule, `${host}|${from}`)) return tooMany(withCors(new Headers()));
-    }
-    if (pathname === "/manage" || pathname.startsWith("/manage/")) {
-      return handleManage(request, env, pathname.slice("/manage".length));
-    }
-    if (pathname === "/stripe/webhook" && request.method === "POST") {
-      if (Number(request.headers.get("Content-Length") || 0) > 256 * 1024) return fail(413, "too large");
-      const raw = await request.text();
-      const outcome = await handleEvent(env.DB, raw, request.headers.get("Stripe-Signature"));
-      if (outcome === "refused") return fail(400, "not a valid notice from Stripe");
-      return new Response(JSON.stringify({ received: true, outcome }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-    if (pathname === "/listen" || pathname.startsWith("/listen/")) {
-      const answered = await handleListen(request, env, pathname.slice("/listen".length));
-      if (answered) return answered;
-      return fail(404, "not found");
-    }
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      const h = withCors(new Headers({ Allow: "GET, HEAD, OPTIONS" }));
-      return new Response(null, { status: 405, headers: h });
-    }
-    if (pathname === "/") {
-      if (arriving(request) && !await accessConfig(env) && await previewSession(request, readPreviewKey(await setting(env.DB, PREVIEW_KEY)))) {
-        return new Response(null, { status: 302, headers: noStore({ Location: "/manage" }) });
-      }
-      const body = await manifestText(env);
-      if (body === null) return fail(404, "no manifest published yet");
-      let manifest;
-      try {
-        manifest = JSON.parse(body);
-      } catch {
-        return fail(500, "manifest is not valid JSON");
-      }
-      const nonce = crypto.randomUUID().replace(/-/g, "");
-      const headers = withCors(new Headers({
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-        "Content-Security-Policy": pageCsp(nonce)
-      }));
-      if (request.method === "HEAD") return new Response(null, { status: 200, headers });
-      const q = new URL(request.url).searchParams;
-      const kind = q.has("song") ? "song" : q.has("album") ? "album" : null;
-      const id = kind ? String(q.get(kind) || "") : "";
-      const focus = kind && /^[a-z0-9-]{1,64}$/.test(id) ? { kind, id } : null;
-      let site = null;
-      try {
-        const t = await siteText(env);
-        site = t ? JSON.parse(t) : null;
-      } catch {
-      }
-      return new Response(renderPage(manifest, new URL(request.url).origin, nonce, focus, site), {
-        status: 200,
-        headers
-      });
-    }
-    if (pathname === "/manifest.json") return serveManifest(env);
-    if (pathname === "/privacy") {
-      const body = await manifestText(env);
-      let manifest = {};
-      try {
-        if (body) manifest = JSON.parse(body);
-      } catch {
-      }
-      const nonce = crypto.randomUUID().replace(/-/g, "");
-      const headers = withCors(new Headers({
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-        "Content-Security-Policy": pageCsp(nonce)
-      }));
-      if (request.method === "HEAD") return new Response(null, { status: 200, headers });
-      return new Response(renderPrivacy(manifest, new URL(request.url).origin, nonce), {
-        status: 200,
-        headers
-      });
-    }
-    if (pathname === "/page.webmanifest") {
-      let manifest = null;
-      try {
-        const t = await manifestText(env);
-        manifest = t ? JSON.parse(t) : null;
-      } catch {
-      }
-      return new Response(pageWebManifest(manifest || {}), {
-        status: 200,
-        headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=3600" }))
-      });
-    }
-    if (pathname === MANIFEST_PATH) {
-      return new Response(studioManifest(), {
-        status: 200,
-        headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=86400" }))
-      });
-    }
-    if (ICONS[pathname]) {
-      return new Response(ICONS[pathname], {
-        status: 200,
-        headers: withCors(new Headers({ "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" }))
-      });
-    }
-    if (pathname === "/version") {
-      const headers = withCors(
-        new Headers({
-          "Content-Type": "application/json; charset=utf-8",
-          "Cache-Control": "no-store"
-        })
-      );
-      return new Response(
-        JSON.stringify({ version: VERSION, spec: SPEC_VERSION }),
-        { status: 200, headers }
-      );
-    }
-    if (pathname.startsWith("/audio/")) {
-      const key = safeKey("audio", pathname.slice("/audio/".length));
-      if (key === null) return fail(400, "bad key");
-      const manifest = await manifestText(env);
-      let guarded = /* @__PURE__ */ new Set();
-      let masters = /* @__PURE__ */ new Set();
-      try {
-        if (manifest) {
-          const m = JSON.parse(manifest);
-          guarded = guardedKeys(m);
-          masters = masterKeys(m);
-        }
-      } catch {
-        return fail(503, "this music is temporarily unavailable");
-      }
-      if (masters.has(key.slice("audio/".length))) {
-        return fail(403, "this file is only available as a download, to someone who bought it");
-      }
-      if (guarded.has(key.slice("audio/".length))) {
-        const who = await whoIsAsking(request, env);
-        if (!who) {
-          return fail(401, "this track is for listeners who have said who they are");
-        }
-      }
-      return serveObject(env, request, key, CACHE_AUDIO, "audio/mpeg");
-    }
-    if (pathname.startsWith("/art/")) {
-      const key = safeKey("art", pathname.slice("/art/".length));
-      if (key === null) return fail(400, "bad key");
-      return serveObject(env, request, key, CACHE_ART, "image/jpeg");
-    }
-    return fail(404, "not found");
   }
 };
+async function serve(request, env) {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: withCors() });
+  }
+  const { pathname, host } = new URL(request.url);
+  const rule = ruleFor(request.method, pathname);
+  if (rule) {
+    const from = request.headers.get("CF-Connecting-IP") || "unknown";
+    if (!await allow(env, rule, `${host}|${from}`)) return tooMany(withCors(new Headers()));
+  }
+  if (pathname === "/manage" || pathname.startsWith("/manage/")) {
+    return handleManage(request, env, pathname.slice("/manage".length));
+  }
+  if (pathname === "/stripe/webhook" && request.method === "POST") {
+    if (Number(request.headers.get("Content-Length") || 0) > 256 * 1024) return fail(413, "too large");
+    const raw = await request.text();
+    const outcome = await handleEvent(env.DB, raw, request.headers.get("Stripe-Signature"));
+    if (outcome === "refused") return fail(400, "not a valid notice from Stripe");
+    return new Response(JSON.stringify({ received: true, outcome }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+  if (pathname === "/listen" || pathname.startsWith("/listen/")) {
+    const answered = await handleListen(request, env, pathname.slice("/listen".length));
+    if (answered) return answered;
+    return fail(404, "not found");
+  }
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    const h = withCors(new Headers({ Allow: "GET, HEAD, OPTIONS" }));
+    return new Response(null, { status: 405, headers: h });
+  }
+  if (pathname === "/") {
+    if (arriving(request) && !(await accessConfig(env)).set && await previewSession(request, readPreviewKey(await setting(env.DB, PREVIEW_KEY)))) {
+      return new Response(null, { status: 302, headers: noStore({ Location: "/manage" }) });
+    }
+    const body = await manifestText(env);
+    if (body === null) return fail(404, "no manifest published yet");
+    let manifest;
+    try {
+      manifest = JSON.parse(body);
+    } catch {
+      return fail(500, "manifest is not valid JSON");
+    }
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const headers = withCors(new Headers({
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": pageCsp(nonce)
+    }));
+    if (request.method === "HEAD") return new Response(null, { status: 200, headers });
+    const q = new URL(request.url).searchParams;
+    const kind = q.has("song") ? "song" : q.has("album") ? "album" : null;
+    const id = kind ? String(q.get(kind) || "") : "";
+    const focus = kind && /^[a-z0-9-]{1,64}$/.test(id) ? { kind, id } : null;
+    let site = null;
+    try {
+      const t = await siteText(env);
+      site = t ? JSON.parse(t) : null;
+    } catch {
+    }
+    return new Response(renderPage(manifest, new URL(request.url).origin, nonce, focus, site), {
+      status: 200,
+      headers
+    });
+  }
+  if (pathname === "/manifest.json") return serveManifest(env);
+  if (pathname === "/privacy") {
+    const body = await manifestText(env);
+    let manifest = {};
+    try {
+      if (body) manifest = JSON.parse(body);
+    } catch {
+    }
+    const nonce = crypto.randomUUID().replace(/-/g, "");
+    const headers = withCors(new Headers({
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": pageCsp(nonce)
+    }));
+    if (request.method === "HEAD") return new Response(null, { status: 200, headers });
+    return new Response(renderPrivacy(manifest, new URL(request.url).origin, nonce), {
+      status: 200,
+      headers
+    });
+  }
+  if (pathname === "/page.webmanifest") {
+    let manifest = null;
+    try {
+      const t = await manifestText(env);
+      manifest = t ? JSON.parse(t) : null;
+    } catch {
+    }
+    return new Response(pageWebManifest(manifest || {}), {
+      status: 200,
+      headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=3600" }))
+    });
+  }
+  if (pathname === MANIFEST_PATH) {
+    return new Response(studioManifest(), {
+      status: 200,
+      headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=86400" }))
+    });
+  }
+  if (ICONS[pathname]) {
+    return new Response(ICONS[pathname], {
+      status: 200,
+      headers: withCors(new Headers({ "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" }))
+    });
+  }
+  if (pathname === "/version") {
+    const headers = withCors(
+      new Headers({
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store"
+      })
+    );
+    return new Response(
+      JSON.stringify({ version: VERSION, spec: SPEC_VERSION }),
+      { status: 200, headers }
+    );
+  }
+  if (pathname.startsWith("/audio/")) {
+    const key = safeKey("audio", pathname.slice("/audio/".length));
+    if (key === null) return fail(400, "bad key");
+    const manifest = await manifestText(env);
+    let guarded = /* @__PURE__ */ new Set();
+    let masters = /* @__PURE__ */ new Set();
+    try {
+      if (manifest) {
+        const m = JSON.parse(manifest);
+        guarded = guardedKeys(m);
+        masters = masterKeys(m);
+      }
+    } catch {
+      return fail(503, "this music is temporarily unavailable");
+    }
+    if (masters.has(key.slice("audio/".length))) {
+      return fail(403, "this file is only available as a download, to someone who bought it");
+    }
+    if (guarded.has(key.slice("audio/".length))) {
+      const who = await whoIsAsking(request, env);
+      if (!who) {
+        return fail(401, "this track is for listeners who have said who they are");
+      }
+    }
+    return serveObject(env, request, key, CACHE_AUDIO, "audio/mpeg");
+  }
+  if (pathname.startsWith("/art/")) {
+    const key = safeKey("art", pathname.slice("/art/".length));
+    if (key === null) return fail(400, "bad key");
+    return serveObject(env, request, key, CACHE_ART, "image/jpeg");
+  }
+  return fail(404, "not found");
+}
 export {
   index_default as default
 };

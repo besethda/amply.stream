@@ -8,14 +8,16 @@
  *
  * So setup makes a random key in the artist's browser and stores only its
  * hash here, with the moment the temporary account would expire. Setup links
- * to /manage/open#<key>: the key is in the fragment, so it is never sent in a
- * request or written to a log, and the page there swaps it for a cookie with
- * a same-origin request. The key opens the editor only until the account
+ * to /manage/open#<key>: the key is in the fragment, so the address never
+ * carries it to a server or a log, and the page there swaps it for a cookie
+ * with a same-origin request. The cookie holds the key itself (HttpOnly), so
+ * from then on it travels with the artist's own requests to this node, and
+ * nowhere else. The key opens the editor only until the account
  * would expire, and never once Access is set up: from then on Access is the
  * only way in, as on every other node.
  */
 
-export const PREVIEW_KEY = "preview-key";   // { hash, until, claim?, claimUntil? } in settings, written at setup
+export const PREVIEW_KEY = "preview-key";   // PreviewKey, below, in settings: written at setup
 const COOKIE = "amply_preview";
 const CLAIM = /^https:\/\/dash\.cloudflare\.com\/[^\s"<>]+$/;
 
@@ -56,19 +58,29 @@ export function readPreviewKey(raw: string | null): PreviewKey | null {
 /**
  * Whether the temporary account has been claimed: true once its token is
  * refused, false while it works, null when Cloudflare can't say.
+ *
+ * Refused means 401, the answer for a token that no longer exists, and twice,
+ * a moment apart: believing it drops the claim link for good, so a one-off
+ * refusal, or a 403 about something else, must not be enough.
  */
-export async function claimedYet(k: PreviewKey): Promise<boolean | null> {
+export async function claimedYet(k: PreviewKey, pause = 1500): Promise<boolean | null> {
   if (k.claimed) return true;
   if (!k.token) return null;
-  try {
-    const res = await fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", {
-      headers: { Authorization: `Bearer ${k.token}` },
-    });
-    if (res.status === 401 || res.status === 403) return true;
-    return res.ok ? false : null;
-  } catch {
-    return null;
-  }
+  const ask = async (): Promise<number | null> => {
+    try {
+      const res = await fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", {
+        headers: { Authorization: `Bearer ${k.token}` },
+      });
+      return res.status;
+    } catch {
+      return null;
+    }
+  };
+  const first = await ask();
+  if (first !== null && first >= 200 && first < 300) return false;
+  if (first !== 401) return null;
+  await new Promise((r) => setTimeout(r, pause));
+  return (await ask()) === 401 ? true : null;
 }
 
 /** The same key, after the claim: nothing left that only mattered before it. */
