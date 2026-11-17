@@ -983,7 +983,8 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .pay-choice[aria-pressed="true"] { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(246, 113, 30, .18); }
 .pay-next { display: grid; gap: 12px; margin-bottom: 10px; }
 .connect-coinbase { display: grid; gap: 8px; justify-items: start; }
-.connect-coinbase input { width: 100%; }
+.connect-coinbase .paste-row { display: flex; gap: 8px; width: 100%; }
+.connect-coinbase .paste-row input { flex: 1; min-width: 0; }
 .connect-coinbase .cash-steps { margin: 0; }
 .connect-coinbase p { margin: 0; }
 .pay-next p { margin: 0; }
