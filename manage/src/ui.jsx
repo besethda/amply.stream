@@ -2586,9 +2586,8 @@ function PasteCoinbase({ onAddress }) {
   return (
     <div class="connect-coinbase">
       <ol class="cash-steps">
-        <li><a class="btn ghost sm" href={coinbaseAppLink()} target="_blank" rel="noopener noreferrer">Open Coinbase</a>{" "}
-          <span class="muted small">free to join</span></li>
-        <li>Tap <b>Receive</b> → <b>USDC</b> → network <b>Solana</b> → <b>Copy</b>.</li>
+        <li>In <a href={coinbaseAppLink()} target="_blank" rel="noopener noreferrer">Coinbase</a> (free to join),
+          tap <b>Receive</b> → <b>USDC</b> → network <b>Solana</b> → <b>Copy</b>.</li>
         <li>Come back and paste it:</li>
       </ol>
       {canPaste && <button class="btn" onClick={paste}>Paste my Coinbase address</button>}
