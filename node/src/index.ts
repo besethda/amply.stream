@@ -21,7 +21,7 @@ import {
   setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale,
   subscribedUntil, pruneSubscriptions, heard, songTotals,
 } from "./store";
-import { introduce, readToken, guardedKeys, proveOwnership } from "./listen";
+import { introduce, readToken, guardedKeys, masterKeys, proveOwnership } from "./listen";
 import { challenge } from "./identity";
 import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, claim, refresh, StripeError, setSales, claimSale } from "./stripe";
 import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, itemFor, CHAINS, type Sale } from "./sales";
@@ -552,6 +552,13 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       await media(env).delete(key);
       return new Response(null, { status: 204, headers: noStore() });
     }
+    // The artist reading their own file back (evening out an older song's
+    // volume): behind the sign-in, so paid songs and originals included.
+    if (request.method === "GET" && kind[1] === "audio") {
+      const object = await media(env).get(key);
+      if (!object || !("body" in object)) return fail(404, "that file is missing");
+      return new Response(object.body, { status: 200, headers: noStore({ "Content-Type": storedType("audio", key) }) });
+    }
   }
 
   return fail(404, "not found");
@@ -795,14 +802,15 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     if (!body) return fail(400, "bad request");
     const proof = await proveOwnership(host, body as never);
     if (!proof.ok) return fail(403, proof.why);
-    const manifest = await manifestNow() as { releases?: { tracks?: { id: string; title: string; url: string }[] }[] } | null;
+    const manifest = await manifestNow() as { releases?: { tracks?: { id: string; title: string; url: string; master?: string }[] }[] } | null;
     const trackId = String(body.track || "");
     const track = (manifest?.releases || []).flatMap((r) => r.tracks || []).find((t) => t.id === trackId);
     if (!track) return fail(404, "no such song");
-    // Only a file this server holds: the song's own address, here.
+    // Only a file this server holds: the song's original if it streams from an
+    // evened-out copy, else its own address, here.
     let key: string | null = null;
     try {
-      const u = new URL(track.url);
+      const u = new URL(track.master || track.url);
       if (u.origin === new URL(request.url).origin && u.pathname.startsWith("/audio/")) key = safeKey("audio", u.pathname.slice("/audio/".length));
     } catch { /* not a URL */ }
     if (!key) return fail(409, "this song's file isn't kept on this server");
@@ -1065,12 +1073,17 @@ export default {
       // shared link working.
       const manifest = await manifestText(env);
       let guarded = new Set<string>();
+      let masters = new Set<string>();
       try {
-        if (manifest) guarded = guardedKeys(JSON.parse(manifest));
+        if (manifest) { const m = JSON.parse(manifest); guarded = guardedKeys(m); masters = masterKeys(m); }
       } catch {
         // An unreadable manifest must not be a way past the guard. Nothing is
         // known to be open, so nothing is served without a wallet.
         return fail(503, "this music is temporarily unavailable");
+      }
+      // An original behind an evened-out copy: only ever a purchase download.
+      if (masters.has(key.slice("audio/".length))) {
+        return fail(403, "this file is only available as a download, to someone who bought it");
       }
       if (guarded.has(key.slice("audio/".length))) {
         const who = await whoIsAsking(request, env);

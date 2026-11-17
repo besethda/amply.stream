@@ -11,7 +11,7 @@
  */
 import { renderPage, renderPrivacy } from "./src/page.ts";
 import { validate } from "../spec/manifest-rules.mjs";
-import { guardedKeys } from "./src/listen.ts";
+import { guardedKeys, masterKeys } from "./src/listen.ts";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -170,6 +170,22 @@ ok("a bio can't break out of the tags", !sneaky.includes("<script>alert(1)") && 
   ok("  so is an https page", check("https://example.com/contact").length === 0);
   ok("  but not an http one", check("http://example.com").length === 1);
   ok("  or something that is neither", check("call me").length === 1);
+}
+
+// ── originals behind evened-out copies ──
+{
+  const m = manifest(PRICE, [
+    track("one", { url: `${ORIGIN}/audio/one.stream.mp3`, master: `${ORIGIN}/audio/one.wav`, loudness: -22.7 }),
+    track("two", { free: true }),
+  ]);
+  const masters = masterKeys(m);
+  ok("an original behind a streaming copy is never served from its address", masters.has("one.wav"));
+  ok("  but the copy listeners stream is not blocked as an original", !masters.has("one.stream.mp3"));
+  ok("  and a paid song's copy is still behind the listener check", guardedKeys(m).has("one.stream.mp3"));
+  const shared = manifest(PRICE, [track("a", { url: `${ORIGIN}/audio/a.mp3` }), track("b", { url: `${ORIGIN}/audio/b.stream.mp3`, master: `${ORIGIN}/audio/a.mp3` })]);
+  ok("a file that is also some song's stream stays playable", !masterKeys(shared).has("a.mp3"));
+  ok("the manifest rules accept the new fields", !validate(m).errors.some((e) => /master|loudness/.test(e)), JSON.stringify(validate(m).errors));
+  ok("  and refuse a nonsense loudness", validate(manifest(PRICE, [track("x", { loudness: "loud" })])).errors.some((e) => /loudness/.test(e)));
 }
 
 // ── installable on a fan's Home Screen ──

@@ -52,6 +52,10 @@ export function nodeApi() {
         body: file,
       });
     },
+    /** One of the artist's own audio files, as a Blob, paid songs included. */
+    async readAudio(key) {
+      return (await req("GET", `/${key}`)).blob();
+    },
     /** A published file's size in bytes, or null. Same origin, so the
      *  Access cookie rides along and every header is readable. */
     async sizeOf(url) {

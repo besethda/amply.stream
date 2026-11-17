@@ -11,6 +11,7 @@
     "test": "esbuild test-changes.mjs test-render.mjs test-price.mjs test-publish.mjs --bundle --format=esm --platform=node --target=es2022 --jsx=automatic --jsx-import-source=preact --outdir=../.build/test && node ../.build/test/test-changes.js && node ../.build/test/test-price.js && node ../.build/test/test-publish.js && node ../.build/test/test-render.js && node test-images.mjs"
   },
   "dependencies": {
+    "@breezystack/lamejs": "1.2.7",
     "preact": "^10.24.0"
   },
   "devDependencies": {

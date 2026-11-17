@@ -281,6 +281,11 @@ function check(m) {
       else if (t.duration <= 0) err(`${tp}.duration`, "must be greater than 0");
       httpsUrl(t.url, `${tp}.url`, { required: true });
       if (t.waves !== undefined) httpsUrl(t.waves, `${tp}.waves`);
+      // The original file behind an evened-out streaming copy, and the song's
+      // measured loudness (LUFS). Both optional; players need neither.
+      if (t.master !== undefined) httpsUrl(t.master, `${tp}.master`);
+      if (t.loudness !== undefined && !(typeof t.loudness === "number" && t.loudness >= -70 && t.loudness <= 10))
+        err(`${tp}.loudness`, "must be a number of LUFS between -70 and 10");
       if (t.explicit !== undefined && typeof t.explicit !== "boolean") err(`${tp}.explicit`, "must be a boolean");
       if (t.needsWallet !== undefined && typeof t.needsWallet !== "boolean")
         err(`${tp}.needsWallet`, "must be a boolean");

@@ -124,6 +124,30 @@ export async function introduce(
  * last said it was. Keys rather than URLs, because that is what a request
  * carries, and an artist may move house.
  */
+/**
+ * The original files behind songs that stream from an evened-out copy
+ * (`master`). They're never served from their address, paid or not: listeners
+ * stream the copy, and a buyer gets the original through /listen/download.
+ * A file that is also some song's streaming `url` stays playable.
+ */
+export function masterKeys(manifest: unknown): Set<string> {
+  const masters = new Set<string>(), streamed = new Set<string>();
+  type Track = { url?: string; master?: string };
+  const keyOf = (u?: string) => {
+    try { const p = new URL(String(u)).pathname; return p.startsWith("/audio/") ? decodeURIComponent(p.slice("/audio/".length)) : null; }
+    catch { return null; }
+  };
+  for (const release of (manifest as { releases?: { tracks?: Track[] }[] })?.releases ?? []) {
+    for (const track of release.tracks ?? []) {
+      const m = keyOf(track?.master), u = keyOf(track?.url);
+      if (m) masters.add(m);
+      if (u) streamed.add(u);
+    }
+  }
+  for (const k of streamed) masters.delete(k);
+  return masters;
+}
+
 export function guardedKeys(manifest: unknown): Set<string> {
   const keys = new Set<string>();
   type Track = { url?: string; needsWallet?: boolean; free?: boolean };
