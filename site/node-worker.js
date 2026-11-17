@@ -390,6 +390,7 @@ function pageCsp(nonce) {
     `style-src 'nonce-${nonce}' https://fonts.googleapis.com`,
     "font-src https://fonts.gstatic.com",
     "img-src https: data:",
+    "manifest-src 'self'",
     "media-src https:",
     "form-action 'none'",
     "base-uri 'none'",
@@ -504,6 +505,11 @@ ${empty}
 <meta name="twitter:card" content="${cardWide ? "summary_large_image" : "summary"}">
 <meta name="twitter:title" content="${cardTitle}">
 <meta name="twitter:description" content="${esc2(cardAbout)}">
+<link rel="manifest" href="/page.webmanifest">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="${name}">
+<link rel="apple-touch-icon" href="${esc2(avatar || "/studio/icon-180.png")}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;700;800&display=swap">
@@ -698,6 +704,24 @@ for what it keeps.</p>
 ${body}
 <footer><a href="/">Back to ${name}</a></footer>
 </div></body></html>`;
+}
+function pageWebManifest(manifest) {
+  const name = String(manifest.artist?.name || "Music").slice(0, 60);
+  return JSON.stringify({
+    name,
+    short_name: name.slice(0, 20),
+    description: `Listen to ${name}.`,
+    start_url: "/",
+    scope: "/",
+    display: "standalone",
+    background_color: "#ffffff",
+    theme_color: "#ffffff",
+    icons: [
+      { src: "/studio/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/studio/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/studio/icon-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
+    ]
+  });
 }
 
 // src/store.ts
@@ -2122,7 +2146,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.1";
+var VERSION = "3.19.2";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
@@ -3062,6 +3086,18 @@ var index_default = {
       return new Response(renderPrivacy(manifest, new URL(request.url).origin, nonce), {
         status: 200,
         headers
+      });
+    }
+    if (pathname === "/page.webmanifest") {
+      let manifest = null;
+      try {
+        const t = await manifestText(env);
+        manifest = t ? JSON.parse(t) : null;
+      } catch {
+      }
+      return new Response(pageWebManifest(manifest || {}), {
+        status: 200,
+        headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=3600" }))
       });
     }
     if (pathname === MANIFEST_PATH) {

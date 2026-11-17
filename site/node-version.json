@@ -1,5 +1,5 @@
 {
-  "version": "3.19.1",
+  "version": "3.19.2",
   "spec": 1,
   "schema": [
     "CREATE TABLE IF NOT EXISTS settings ( key TEXT PRIMARY KEY, value TEXT NOT NULL )",
@@ -41,5 +41,5 @@
       "namespace": "7104"
     }
   ],
-  "published": "2026-11-16"
+  "published": "2026-11-17"
 }

@@ -172,6 +172,17 @@ ok("a bio can't break out of the tags", !sneaky.includes("<script>alert(1)") && 
   ok("  or something that is neither", check("call me").length === 1);
 }
 
+// ── installable on a fan's Home Screen ──
+{
+  const { pageWebManifest, pageCsp } = await import("./src/page.ts");
+  ok("the page links its install manifest", html.includes('<link rel="manifest" href="/page.webmanifest">'));
+  ok("  and the policy allows it", pageCsp("n").includes("manifest-src 'self'"));
+  const m = JSON.parse(pageWebManifest(paid));
+  ok("  named after the artist, opening their page", m.name === "Someone" && m.start_url === "/" && m.display === "standalone");
+  ok("  with icons a phone accepts", m.icons.some((i) => i.sizes === "512x512") && m.icons.some((i) => i.sizes === "192x192"));
+  ok("  and a name with markup in it stays text", !JSON.stringify(pageWebManifest({ artist: { name: "<b>x</b>" } })).includes("<b>") || JSON.parse(pageWebManifest({ artist: { name: "<b>x</b>" } })).name === "<b>x</b>");
+}
+
 // ── with a website ──────────────────────────────────────────────────────────
 {
   const site = { sections: [

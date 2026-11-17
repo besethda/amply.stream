@@ -2272,7 +2272,7 @@ function HomeTab({ api, manifest, payees, rate, network, live, onGo }) {
         <section class="card">
           <h2>Most played</h2>
           {songs == null ? <p class="muted">Loading…</p>
-            : !top.length ? <p class="muted">Song counts start once people play your music in the latest Amply app.</p>
+            : !top.length ? <p class="muted">No plays yet.</p>
             : (
               <ol class="top-songs">
                 {top.map((s) => (
@@ -2284,7 +2284,6 @@ function HomeTab({ api, manifest, payees, rate, network, live, onGo }) {
                 ))}
               </ol>
             )}
-          <p class="muted small">Counted for each song, from everyone together: nothing about who played what.</p>
         </section>
       </div>
     </>
@@ -2486,7 +2485,7 @@ function PlayerBar({ player }) {
         </button>
         <div class="what">
           <b>{player.track.title || "Untitled"}</b>
-          <span>only you can hear this, it is not a listen anyone paid for</span>
+          <span>doesn't count as a listen</span>
         </div>
         <span class="time">{mmss(player.at)} / {mmss(player.of || player.track.duration)}</span>
         <button class="close" onClick={player.stop} aria-label="Close the player">×</button>
@@ -2668,6 +2667,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
   const [saving, setSaving] = useState(false);
   const [tab, setTab] = useState(initialTab);
   const [menu, setMenu] = useState(false);
+  const [updateHidden, setUpdateHidden] = useState(false);
   // The website (spec/site.mjs): the draft being edited, and what's published.
   // undefined while loading; null when there's no website yet.
   const [site, setSite] = useState(undefined);
@@ -2686,6 +2686,12 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
     return () => window.removeEventListener("keydown", close);
   }, [menu]);
   const [msg, setMsg] = useState(null);
+  // Good news goes by itself; problems stay until dismissed.
+  useEffect(() => {
+    if (msg?.kind !== "ok") return;
+    const t = setTimeout(() => setMsg(null), msg.action ? 10_000 : 5_000);
+    return () => clearTimeout(t);
+  }, [msg]);
   const player = usePlayer();
   const newer = useUpdate(version);
 
@@ -2902,19 +2908,16 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
       <main class="page">
         {/* On a phone the header has no room for these. */}
         <div class="page-links">{links}</div>
-        <Banner kind={msg?.kind} action={msg?.action} onDismiss={() => setMsg(null)}>{msg?.text}</Banner>
-
-        {isNewer(newer, version) && (
-          <div class="banner update" role="status">
-            <span>
-              There's a newer version of Amply ({newer}; you have {version}). Updates aren't
-              automatic, because nobody at Amply can reach your streaming service.
-            </span>
-            <a class="link" href="https://amply.stream/repair" target="_blank" rel="noopener">
-              Update mine
-            </a>
-          </div>
-        )}
+        <div class="toasts">
+          <Banner kind={msg?.kind} action={msg?.action} onDismiss={() => setMsg(null)}>{msg?.text}</Banner>
+          {isNewer(newer, version) && !updateHidden && (
+            <div class="banner update" role="status">
+              <span>A newer version of Amply is ready ({newer}).</span>
+              <a class="link" href="https://amply.stream/repair" target="_blank" rel="noopener">Update</a>
+              <button class="link" onClick={() => setUpdateHidden(true)}>later</button>
+            </div>
+          )}
+        </div>
 
         {menu && <button class="menu-scrim" aria-label="Close menu" onClick={() => setMenu(false)} />}
 
