@@ -2588,7 +2588,7 @@ function PasteCoinbase({ onAddress }) {
     <div class="connect-coinbase">
       <ol class="cash-steps">
         <li>Open <a href={COINBASE_USDC} target="_blank" rel="noopener noreferrer">USDC in Coinbase</a> (free to join),
-          tap <b>Transfer</b> → <b>Receive</b> → network <b>Solana</b> → <b>Copy</b>.</li>
+          tap <b>Transfer</b> → <b>Receive crypto</b> → <b>Solana</b>, then copy the address.</li>
         <li>Come back and paste it:</li>
       </ol>
       {canPaste && <button class="btn" onClick={paste}>Paste my Coinbase address</button>}
