@@ -180,11 +180,12 @@ textarea { resize: vertical; line-height: 1.5; min-height: 110px; }
 .btn.ghost.danger, .btn.ghost.danger:hover { --glow: var(--bad); }
 
 /* The small buttons take the same lit look (see style.css): the quiet one for
-   white buttons, a smaller glow for the filled round ones. */
-.play, .track-edit-btn, .menu-btn, .icon:not(.stack2), .pay-choice {
+   white buttons, a smaller glow for the filled round ones. Not the header's
+   menu button, which stays flat: a lit circle there looked out of place. */
+.play, .track-edit-btn, .icon:not(.stack2), .pay-choice {
   box-shadow: var(--lit-quiet); transition: box-shadow .15s ease, background .12s, color .12s, border-color .12s;
 }
-.play:active, .track-edit-btn:active, .menu-btn:active, .icon:not(.stack2):active, .pay-choice:active { box-shadow: var(--lit-quiet-down); }
+.play:active, .track-edit-btn:active, .icon:not(.stack2):active, .pay-choice:active { box-shadow: var(--lit-quiet-down); }
 .play[disabled], .icon[disabled] { box-shadow: none; }
 .play.on, .warn-toggle {
   --glow: var(--orange);
@@ -192,7 +193,7 @@ textarea { resize: vertical; line-height: 1.5; min-height: 110px; }
   box-shadow: inset 0 1px 0 var(--lit-hi), inset 0 -2px 0 var(--lit-lo), 0 1px 2px var(--lit-drop),
               0 5px 14px -4px color-mix(in srgb, var(--glow) 60%, transparent);
 }
-@media (prefers-reduced-motion: reduce) { .play, .track-edit-btn, .menu-btn, .icon, .pay-choice { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .play, .track-edit-btn, .icon, .pay-choice { transition: none; } }
 
 /* a square icon button: remove, reorder */
 .icon {
