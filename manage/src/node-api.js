@@ -46,10 +46,31 @@ export function nodeApi() {
         body: JSON.stringify(manifest, null, 2),
       });
     },
-    async putObject(key, file) {
-      await req("PUT", `/${key}`, {
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-        body: file,
+    /** Upload a file. With onProgress, it's told how far it has got (0..1):
+     *  fetch can't report an upload's progress, so that goes by XHR. */
+    async putObject(key, file, onProgress) {
+      if (!onProgress || typeof XMLHttpRequest === "undefined") {
+        await req("PUT", `/${key}`, {
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+          body: file,
+        });
+        onProgress?.(1);
+        return;
+      }
+      await new Promise((resolve, reject) => {
+        const x = new XMLHttpRequest();
+        x.open("PUT", `${base}/manage/${key}`);
+        x.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+        x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+        x.onload = () => {
+          if (x.status === 401) return reject(new Error("Your sign-in expired. Reload the page to sign in again."));
+          if (x.status >= 200 && x.status < 300) { onProgress(1); return resolve(); }
+          let said = x.responseText;
+          try { said = JSON.parse(x.responseText)?.error || said; } catch { /* plain text */ }
+          reject(new Error(String(said).slice(0, 300) || `Your streaming service returned ${x.status}.`));
+        };
+        x.onerror = () => reject(new Error("The upload didn't go through. Check your connection and try again."));
+        x.send(file);
       });
     },
     /** One of the artist's own audio files, as a Blob, paid songs included. */

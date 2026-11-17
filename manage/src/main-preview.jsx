@@ -77,7 +77,10 @@ const api = {
   async readManifest() { return sample; },
   // What would have been sent, kept for anyone poking at the preview.
   async writeManifest(m) { window.__published = m; await wait(700); },
-  async putObject(key, body) { (window.__uploads ||= []).push({ key, size: body.size, body }); await wait(700); },
+  async putObject(key, body, onProgress) {
+    (window.__uploads ||= []).push({ key, size: body.size, body });
+    for (let i = 1; i <= 7; i++) { await wait(100); onProgress?.(i / 7); }
+  },
   async deleteObject() { await wait(200); },
   // The first track is a 46MB WAV, like a real first upload tends to be.
   async sizeOf(url) { return url.endsWith("/a.mp3") ? 46101094 : 6_500_000; },

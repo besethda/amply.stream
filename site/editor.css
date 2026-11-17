@@ -1025,3 +1025,18 @@ select { max-width: 100%; text-overflow: ellipsis; }
   /* The phone menu drops over the page rather than pushing it down. */
   .menu-pop { position: absolute; left: 0; right: 0; top: 100%; z-index: 55; }
 }
+
+/* Work in progress: a card per job, floating with the other notices. */
+.toasts .banner.job { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; gap: 8px; background: var(--bg); border: 1px solid var(--line); }
+.job-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.job-text b { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-text span { font-size: 14px; color: var(--ink3); font-variant-numeric: tabular-nums; }
+.job-bar { height: 6px; border-radius: 99px; background: var(--bg2); overflow: hidden; position: relative; }
+.job-bar i { display: block; height: 100%; background: var(--orange); border-radius: 99px; transition: width .25s ease; }
+.job-bar.busy i { position: absolute; width: 35%; animation: job-slide 1.1s ease-in-out infinite; }
+@keyframes job-slide { from { left: -35%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .job-bar.busy i { animation: none; left: 0; width: 100%; opacity: .5; } .job-bar i { transition: none; } }
+/* Notices slide into place as others come and go. */
+.toasts .banner { animation: toast-in .2s ease-out; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .toasts .banner { animation: none; } }
