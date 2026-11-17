@@ -13,7 +13,8 @@ import { SCHEMA } from "./src/store.ts";
 import { onCurve, tokenAccountOf, readTransaction, writeTransaction, base64 } from "./src/solana-tx.ts";
 import { TOKEN_PROGRAM, ATA_PROGRAM } from "./src/feepay.ts";
 import { draftCashOut, cashOutProblem } from "./src/cashout.ts";
-import { settle, feeAddress, forgetFeeKey } from "./src/settle.ts";
+import { settle, feeAddress, forgetFeeKey, feeOnrampSignature } from "./src/settle.ts";
+import { onrampProblem } from "../relay/src/index.ts";
 import { signWithSeed, publicKeyOf, base58 as b58 } from "../spec/passkey-wallet.mjs";
 
 const require = createRequire(resolve("app/package.json"));
@@ -106,6 +107,7 @@ const rpc = async (method, params) => {
   if (method === "simulateTransaction") return { value: { err: null, logs: [] } };
   if (method === "sendTransaction") { sent.push(params[0]); return "ok"; }
   if (method === "getSignatureStatuses") return { value: [{ confirmationStatus: "confirmed", err: null }] };
+  if (method === "getMultipleAccounts") return { value: params[0].map(() => ({ lamports: 2039280 })) };
   throw new Error(method);
 };
 const quick = { wait: async () => {}, confirmWithinMs: 20 };
@@ -143,6 +145,16 @@ ok("not to the fees account", /fees account/.test(cashOutProblem(from, feePayer,
 ok("not to something that isn't an address", /isn't a Solana address/.test(cashOutProblem(from, "cashapp.com/$me", 412_000, rules)));
 ok("not less than a cent", /at least a cent/.test(cashOutProblem(from, cashApp, 9_999, rules)));
 ok("not a fraction of a micro", !!cashOutProblem(from, cashApp, 412_000.5, rules));
+
+// ── buying SOL into the fees account through Coinbase ───────────────────────
+{
+  const now = Date.now();
+  const signed = await feeOnrampSignature(DB, now, now);
+  ok("the node signs a Coinbase purchase for its fees account", signed?.address === feePayer);
+  const problem = await onrampProblem({ address: signed.address, amount: 5, signedAt: now, signature: signed.signature, asset: "SOL" }, now);
+  ok("  in exactly the words Amply's relay checks", problem === null, problem);
+  ok("  only for a time that is now", (await feeOnrampSignature(DB, now - 60_000, now)) === null && (await feeOnrampSignature(DB, NaN, now)) === null);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

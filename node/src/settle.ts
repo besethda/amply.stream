@@ -15,8 +15,8 @@
  * What a listener gets back is the signature: proof it was sent, and nothing
  * they could send again themselves.
  */
-import { readTransaction, writeTransaction, base58, base64, TxError } from "./solana-tx";
-import { checkFeePayment, type FeePayExpect } from "./feepay";
+import { readTransaction, writeTransaction, base58, base64, TxError, tokenAccountOf } from "./solana-tx";
+import { checkFeePayment, TOKEN_PROGRAM, ATA_PROGRAM, type FeePayExpect } from "./feepay";
 import { setting } from "./store";
 
 /** Bounds on a listening payment, in micro-dollars. The floor makes spam cost
@@ -43,6 +43,12 @@ const capOf = (kind: FeeKind) => (kind === "send" ? DAILY_SENDS : DAILY_PAYMENTS
 /** Below this, the node stops offering: enough for a payee's USDC account
  *  and a few hundred fees, and keeps the wallet itself above rent. */
 export const OFFER_ABOVE_LAMPORTS = 3_000_000;
+
+/** What a listener pays the artist, in USDC, when the artist's node pays the
+ *  network fee on their withdrawal: the fee, and more when the destination's
+ *  USDC account has to be opened (about 0.002 SOL of rent). */
+export const WITHDRAW_FEE_MICROS = 50_000;
+export const NEW_ACCOUNT_FEE_MICROS = 500_000;
 
 const FEE_KEY = "fee-wallet";
 const RPC_TIMEOUT_MS = 10_000;
@@ -86,6 +92,23 @@ export async function feeKey(db: D1Database): Promise<FeeKey> {
 /** Only the address, for the artist's editor and the offer. */
 export async function feeAddress(db: D1Database): Promise<string> {
   return (await feeKey(db)).address;
+}
+
+/** The words Amply's relay checks before opening Coinbase for a wallet
+ *  (relay/src/index.ts, onrampMessage); test-coinbase.mjs keeps them equal. */
+export const onrampMessage = (address: string, signedAt: number) =>
+  `Amply: add money to ${address} through Coinbase (${signedAt})`;
+
+/**
+ * The fees account's signature for a Coinbase purchase of SOL into itself,
+ * so the artist can top it up in one tap. All it can start is a purchase
+ * into this account; the time must be now, so it's soon useless if copied.
+ */
+export async function feeOnrampSignature(db: D1Database, signedAt: number, now = Date.now()): Promise<{ address: string; signature: string } | null> {
+  if (!Number.isSafeInteger(signedAt) || Math.abs(now - signedAt) > 30_000) return null;
+  const key = await feeKey(db);
+  const sig = await key.sign(new TextEncoder().encode(onrampMessage(key.address, signedAt)));
+  return { address: key.address, signature: base58(sig) };
 }
 
 /** Forget the loaded key (tests). */
@@ -168,6 +191,23 @@ export async function countFee(db: D1Database, now = Date.now(), kind: FeeKind =
   }
 }
 
+// ── opening payees' accounts, once each ─────────────────────────────────────
+
+/**
+ * Opening a USDC account costs the fee wallet about 0.002 SOL of rent, which
+ * goes to whoever later closes it. So the node opens each payee's account at
+ * most once: a payee who closed theirs (and kept the rent) can't have the fee
+ * wallet pay to reopen it again and again. Recorded in fee_days, under the
+ * owner's address, which holds nothing about any listener.
+ */
+async function openedBefore(db: D1Database, owner: string): Promise<boolean> {
+  const row = await db.prepare("SELECT count FROM fee_days WHERE day = ?").bind(`opened:${owner}`).first<{ count: number }>();
+  return !!row;
+}
+async function noteOpened(db: D1Database, owner: string): Promise<void> {
+  await db.prepare("INSERT INTO fee_days (day, count) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET count = count + 1").bind(`opened:${owner}`).run();
+}
+
 // ── settling ────────────────────────────────────────────────────────────────
 
 export type Settled =
@@ -185,8 +225,10 @@ const refuse = (status: number, why: string): Settled => ({ ok: false, status, w
  */
 export async function settle(
   db: D1Database, rpc: Rpc, txBase64: unknown, expect: Omit<FeePayExpect, "feePayer">,
-  { allowed = async (_listener: string) => true, now = Date.now(), wait = (ms: number) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS, from, kind = "pay" }:
-    { allowed?: (listener: string) => Promise<boolean>; now?: number; wait?: (ms: number) => Promise<unknown>; confirmWithinMs?: number; from?: string[]; kind?: FeeKind } = {},
+  { allowed = async (_listener: string) => true, now = Date.now(), wait = (ms: number) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS, from, kind = "pay", openOnce }:
+    { allowed?: (listener: string) => Promise<boolean>; now?: number; wait?: (ms: number) => Promise<unknown>; confirmWithinMs?: number; from?: string[]; kind?: FeeKind;
+      /** Whose accounts the node will open only once; by default every payee. */
+      openOnce?: string[] } = {},
 ): Promise<Settled> {
   const bytes = base64.decode(String(txBase64 ?? ""));
   if (!bytes) return refuse(400, "that isn't a transaction");
@@ -206,6 +248,25 @@ export async function settle(
     ? "that's the most sends to the bank in one day; try again tomorrow"
     : "this artist's node has paid all the fees it will today; try again tomorrow");
   if (!(await feeRoom(db, kind, now))) return full;
+  // Which payees' accounts this transfer would open, and whether any was
+  // opened before (and so has been closed since).
+  const once = openOnce ?? verdict.shares.map((s) => s.address);
+  const opening: string[] = [];
+  if (once.length) {
+    try {
+      const accounts = await Promise.all(once.map((o) => tokenAccountOf(o, expect.mint, TOKEN_PROGRAM, ATA_PROGRAM)));
+      const found = await rpc("getMultipleAccounts", [accounts, { encoding: "base64", commitment: "confirmed" }]);
+      once.forEach((o, i) => { if (!found?.value?.[i]) opening.push(o); });
+    } catch (e) {
+      return refuse(502, e instanceof RpcError ? e.message : "couldn't reach the network");
+    }
+    for (const o of opening) {
+      if (await openedBefore(db, o).catch(() => true)) {
+        return refuse(403, "a payee closed their USDC account after this server opened it; they need to open it again themselves");
+      }
+    }
+  }
+
 
   tx.signatures[0] = await key.sign(tx.message);
   const signed = base64.encode(writeTransaction(tx));
@@ -222,6 +283,7 @@ export async function settle(
   }
   // Only now does it count: it would succeed, and it's about to be paid for.
   if (!(await countFee(db, now, kind))) return full;
+  for (const o of opening) await noteOpened(db, o).catch(() => {});
 
   try {
     await rpc("sendTransaction", [signed, { encoding: "base64", skipPreflight: true, maxRetries: 5 }]);

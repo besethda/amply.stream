@@ -204,6 +204,24 @@ await refuses("an artist with no wallet is refused", honest(), { exp: { ...expec
   await refuses("  for less than the price, refused", [...honest(7_999_999), note(buy.memo)], { exp: buy }, /too small/);
 }
 
+// ── a listener sending their own money out, the artist paying the fee ──────
+{
+  const dest = Keypair.generate().publicKey;
+  const w = { ...expect, payees: [{ address: dest.toBase58() }, { address: artist.publicKey.toBase58() }], minMicros: 10_000, maxMicros: 10_000_000_000, withdrawal: { fee: 50_000 } };
+  const out = (toDest, toArtist, extra = []) => [create(dest), send(dest, toDest), create(artist.publicKey), send(artist.publicKey, toArtist), ...extra];
+  const v = await accepts("a withdrawal with the fee to the artist is accepted", out(4_000_000, 50_000), { exp: w });
+  ok("  and says what went where", v.shares?.[0].micros === 4_000_000 && v.shares?.[1].micros === 50_000);
+  await refuses("  without enough fee, refused", out(4_000_000, 49_999), { exp: w }, /fee for sending/);
+  await refuses("  with nothing for the artist, refused", [create(dest), send(dest, 4_000_000)], { exp: w }, /destination and the fee/);
+  await refuses("  paying a third person too, refused", out(4_000_000, 50_000, [create(thief.publicKey), send(thief.publicKey, 1)]), { exp: w }, /isn't paid/);
+  await refuses("  to anyone but the stated destination, refused",
+    [create(thief.publicKey), send(thief.publicKey, 4_000_000), create(artist.publicKey), send(artist.publicKey, 50_000)], { exp: w }, /isn't paid/);
+  await refuses("  with the fee wallet's own money, refused",
+    [create(dest), send(dest, 4_000_000, { from: fee.publicKey }), create(artist.publicKey), send(artist.publicKey, 50_000)], { exp: w }, /listener must sign/);
+  await refuses("  sending SOL from the fee wallet on the side, refused",
+    out(4_000_000, 50_000, [SystemProgram.transfer({ fromPubkey: fee.publicKey, toPubkey: thief.publicKey, lamports: 1e9 })]), { exp: w }, /doesn't need/);
+}
+
 // ── a few facts the rules rest on ──────────────────────────────────────────
 ok("the programs are Solana's own", spl.TOKEN_PROGRAM_ID.toBase58() === TOKEN_PROGRAM && spl.ASSOCIATED_TOKEN_PROGRAM_ID.toBase58() === ATA_PROGRAM);
 ok("the app's create-if-missing is the idempotent kind", create(artist.publicKey).data.length === 1 && create(artist.publicKey).data[0] === 1);

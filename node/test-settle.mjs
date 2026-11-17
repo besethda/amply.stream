@@ -80,7 +80,7 @@ function payment(micros = 100_000, { to = artist.publicKey } = {}) {
 }
 
 /** A network that answers as told and remembers what it was asked. */
-function network({ simulate = { value: { err: null, logs: [] } }, status = { confirmationStatus: "confirmed", err: null }, down = [] } = {}) {
+function network({ simulate = { value: { err: null, logs: [] } }, status = { confirmationStatus: "confirmed", err: null }, down = [], missing = [] } = {}) {
   const calls = [];
   const rpc = async (method, params) => {
     calls.push({ method, params });
@@ -88,6 +88,7 @@ function network({ simulate = { value: { err: null, logs: [] } }, status = { con
     if (method === "simulateTransaction") return simulate;
     if (method === "sendTransaction") return "sent";
     if (method === "getSignatureStatuses") return { value: [status] };
+    if (method === "getMultipleAccounts") return { value: params[0].map((a) => (missing.includes(a) ? null : { lamports: 2039280 })) };
     if (method === "getBalance") return { value: 50_000_000 };
     throw new Error(`unexpected ${method}`);
   };
@@ -102,13 +103,13 @@ const today = (db = sqlite) => db.prepare("SELECT count FROM fee_days").get()?.c
   const r = await settle(DB, net.rpc, tx, expect, quick);
   ok("an honest payment is settled", r.ok && r.confirmed, r.why);
   ok("  simulated, then sent, then confirmed, in that order",
-    net.methods().join() === "simulateTransaction,sendTransaction,getSignatureStatuses", net.methods().join());
-  const sent = readTransaction(Buffer.from(net.calls[1].params[0], "base64"));
+    net.methods().join() === "getMultipleAccounts,simulateTransaction,sendTransaction,getSignatureStatuses", net.methods().join());
+  const sent = readTransaction(Buffer.from(net.calls[2].params[0], "base64"));
   ok("  what was sent carries the fee wallet's valid signature", await verifySignature(feePayer.toBase58(), sent.signatures[0], sent.message));
   ok("  and the listener's, untouched", await verifySignature(listener.publicKey.toBase58(), sent.signatures[1], sent.message));
   ok("  the message is exactly what the listener signed", Buffer.from(sent.message).equals(Buffer.from(readTransaction(Buffer.from(tx, "base64")).message)));
-  ok("  the simulation checked signatures", net.calls[0].params[1].sigVerify === true);
-  ok("  the answer is the signature, not the signed transaction", r.signature === base58(sent.signatures[0]) && !JSON.stringify(r).includes(net.calls[1].params[0].slice(0, 40)));
+  ok("  the simulation checked signatures", net.calls[1].params[1].sigVerify === true);
+  ok("  the answer is the signature, not the signed transaction", r.signature === base58(sent.signatures[0]) && !JSON.stringify(r).includes(net.calls[2].params[0].slice(0, 40)));
   ok("  and the day's count went up by one", today() === 1);
 }
 
@@ -214,6 +215,23 @@ for (const [name, junk] of [["nothing", undefined], ["not base64", "%%%"], ["too
   s4.prepare("INSERT OR REPLACE INTO fee_days (day, count) VALUES (?, ?)").run(`send:${new Date().toISOString().slice(0, 10)}`, DAILY_SENDS);
   const sendFull = await settle(db4, network().rpc, payment(), expect, { ...quick, kind: "send" });
   ok("  up to their own daily limit", !sendFull.ok && /sends to the bank/.test(sendFull.why));
+  forgetFeeKey();
+}
+
+// ── a payee's account is opened by the fee wallet once, not again ──────────
+{
+  const { sqlite: s5, DB: db5 } = fresh();
+  forgetFeeKey();
+  s5.prepare("INSERT INTO settings (key, value) VALUES ('fee-wallet', ?)").run(sqlite.prepare("SELECT value FROM settings WHERE key = 'fee-wallet'").get().value);
+  const theirs = spl.getAssociatedTokenAddressSync(USDC, artist.publicKey, true).toBase58();
+  const first = await settle(db5, network({ missing: [theirs] }).rpc, payment(), expect, quick);
+  ok("opening a payee's USDC account the first time is fine", first.ok, first.why);
+  const again = network({ missing: [theirs] });
+  const second = await settle(db5, again.rpc, payment(), expect, quick);
+  ok("  but after they've closed it, the fee wallet won't pay to open it again", !second.ok && second.status === 403 && /closed their USDC account/.test(second.why), second.why);
+  ok("  and nothing was signed or sent", !again.methods().includes("simulateTransaction"));
+  const open = await settle(db5, network().rpc, payment(), expect, quick);
+  ok("  once they open it themselves, payments flow again", open.ok, open.why);
   forgetFeeKey();
 }
 

@@ -127,6 +127,40 @@ const request = async (over = {}) => {
   reply = { status: 200, body: { token: "SESSION-TOKEN" } };
 }
 
+// ── SOL for an artist's fees account, opened as a page from the editor ─────
+{
+  const app = await import("../app/src/topup.js");
+  const solPage = async ({ amount = 5, signedAt = Date.now(), signature, ip = "203.0.113.9" } = {}) => {
+    const href = app.coinbaseSolPage(address, amount, signedAt, signature ?? (await signFor(onrampMessage(address, signedAt))));
+    sent = [];
+    return relay.fetch(new Request(href.replace(app.RELAY, "https://relay.test"), { headers: { "CF-Connecting-IP": ip } }), configured);
+  };
+  const res = await solPage();
+  ok("the node's signed page goes straight to Coinbase", res.status === 303, String(res.status));
+  const link = new URL(res.headers.get("Location") || "about:blank");
+  ok("  to buy SOL on Solana, $5", link.origin === "https://pay.coinbase.com" && link.searchParams.get("defaultAsset") === "SOL" && link.searchParams.get("presetFiatAmount") === "5");
+  ok("  with no return address Coinbase couldn't know", !link.searchParams.has("redirectUrl"));
+  const asked = JSON.parse(sent[0]?.init.body || "{}");
+  ok("  Coinbase is asked for SOL only, for this wallet", asked.assets?.join() === "SOL" && asked.addresses?.[0]?.address === address);
+  ok("  tied to the artist's own connection", asked.clientIp === "203.0.113.9");
+  ok("  and the address isn't passed on to Coinbase's page", res.headers.get("Referrer-Policy") === "no-referrer");
+
+  const stale = await solPage({ signedAt: Date.now() - 10 * 60_000 });
+  ok("an old signature gets a page saying so, not Coinbase", stale.status === 403 && sent.length === 0 && /too old/.test(await stale.text()));
+  const big = await solPage({ amount: 30 });
+  ok("more SOL than offered is refused", big.status === 403 && sent.length === 0);
+  const forged = await solPage({ signature: await signFor(onrampMessage(address, Date.now()), (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign"])).privateKey) });
+  ok("someone else's signature is refused", forged.status === 403 && sent.length === 0);
+  const off = await relay.fetch(new Request(app.coinbaseSolPage(address, 5, Date.now(), "x").replace(app.RELAY, "https://relay.test")), bare);
+  ok("without a key, it says Coinbase isn't set up", off.status === 503);
+  ok("the app offers the relay's SOL amounts", app.COINBASE_SOL_AMOUNTS.join() === (await import("../relay/src/index.ts")).COINBASE_SOL_AMOUNTS.join());
+
+  const amply = await call("/coinbase/onramp", { body: JSON.stringify({ ...(await request({ amount: 10 })), asset: "SOL" }) });
+  ok("Amply's own site may ask for SOL by the usual route too", amply.status === 200);
+  const eth = await call("/coinbase/onramp", { body: JSON.stringify({ ...(await request()), asset: "ETH" }) });
+  ok("only USDC or SOL", eth.status === 403 && sent.length === 0);
+}
+
 // ── the app and the relay agree ─────────────────────────────────────────────
 {
   const app = await import("../app/src/topup.js");

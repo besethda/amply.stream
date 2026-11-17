@@ -104,8 +104,6 @@ export function nodeApi() {
       });
     },
 
-    /** The wallet that pays listeners' network fees: its address, balance and
-     *  today's count. Never its key: no route returns that. */
     /** The website, as last published, or null if there isn't one. */
     async readSite() {
       return (await req("GET", "/site")).json();
@@ -124,8 +122,18 @@ export function nodeApi() {
       return (await req("GET", "/stats")).json();
     },
 
+    /** The wallet that pays listeners' network fees: its address, balance and
+     *  today's count. Never its key: no route returns that. */
     async fees() {
       return (await req("GET", "/fees")).json();
+    },
+
+    /** The fees account's signature for buying SOL into it through Coinbase. */
+    async feesOnramp(signedAt) {
+      return (await req("POST", "/fees/onramp", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signedAt }),
+      })).json();
     },
 
     /** Draft a transfer out of a payout wallet, for the editor to check and

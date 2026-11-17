@@ -96,7 +96,7 @@ function destinationOf(value, pair) {
  * rather than a lesson in importing private keys. Opens the destination's
  * USDC account if it has none, which costs this wallet a little SOL.
  */
-export async function sendDollarsOut(pair, destination, micros = "all") {
+export async function sendDollarsOut(pair, destination, micros = "all", { nodes = [] } = {}) {
   const conn = rpc();
   const to = destinationOf(destination, pair);
   const mint = new PublicKey(network().usdc);
@@ -110,6 +110,35 @@ export async function sendDollarsOut(pair, destination, micros = "all") {
   if (!(amount > 0)) throw new PaymentError("nothing", "There are no dollars in this wallet to send.");
 
   const toAccount = await getAssociatedTokenAddress(mint, to, false, TOKEN_PROGRAM_ID);
+
+  // No SOL for the network fee? An artist's node that pays fees can pay it,
+  // and is paid back a few cents in the same transfer (node/src/index.ts,
+  // /listen/withdraw). With SOL of its own, the wallet just pays.
+  const sol = await conn.getBalance(pair.publicKey).catch(() => 0);
+  if (sol < 3 * BASE_FEE + 2_100_000 && nodes.length) {
+    const exists = !!(await conn.getAccountInfo(toAccount).catch(() => null));
+    for (const origin of nodes) {
+      const w = await withdrawOffer(origin);
+      if (!w) continue;
+      const fee = w.fee + (exists ? 0 : w.newAccountFee);
+      if (amount <= fee + 10_000) {
+        throw new PaymentError("nothing", `That's too little to send: sending costs $${toUsd(fee).toFixed(2)} here.`);
+      }
+      const artistKey = addressOf(w.to, "This artist");
+      const artistAccount = await getAssociatedTokenAddress(mint, artistKey, false, TOKEN_PROGRAM_ID);
+      const tx = new Transaction();
+      tx.add(createAssociatedTokenAccountIdempotentInstruction(w.feePayer, toAccount, to, mint, TOKEN_PROGRAM_ID));
+      tx.add(createTransferCheckedInstruction(from, mint, toAccount, pair.publicKey, amount - fee, 6, [], TOKEN_PROGRAM_ID));
+      tx.add(createAssociatedTokenAccountIdempotentInstruction(w.feePayer, artistAccount, artistKey, mint, TOKEN_PROGRAM_ID));
+      tx.add(createTransferCheckedInstruction(from, mint, artistAccount, pair.publicKey, fee, 6, [], TOKEN_PROGRAM_ID));
+      tx.feePayer = w.feePayer;
+      const sent = await sendThroughNode(conn, { origin, route: "/listen/withdraw", extra: { to: to.toBase58() } }, tx, pair);
+      if (sent) {
+        await confirmed(conn, sent);
+        return { signature: sent, micros: amount - fee, fee };
+      }
+    }
+  }
   const tx = new Transaction();
   tx.add(createAssociatedTokenAccountIdempotentInstruction(pair.publicKey, toAccount, to, mint, TOKEN_PROGRAM_ID));
   tx.add(createTransferCheckedInstruction(from, mint, toAccount, pair.publicKey, amount, 6, [], TOKEN_PROGRAM_ID));
@@ -285,6 +314,23 @@ export async function feeOffer(origin, { micros, owners = [], pair, item } = {})
  * the listener's own wallet can pay the fee instead. Throws where something
  * may have gone out, so the same debt is never paid twice.
  */
+/** What an artist's node charges to pay the fee on a withdrawal, or null. */
+async function withdrawOffer(origin) {
+  let o;
+  try {
+    const res = await fetch(`${origin}/listen/fees`, { signal: AbortSignal.timeout(NODE_TIMEOUT_MS) });
+    if (!res.ok) return null;
+    o = await res.json();
+  } catch { return null; }
+  if (!o?.feePayer || o.network !== networkName() || !o.withdraw?.to) return null;
+  const fee = Number(o.withdraw.fee), newAccountFee = Number(o.withdraw.newAccountFee);
+  // A node can't ask more than this, whatever it says.
+  if (!(fee >= 0 && fee <= 100_000 && newAccountFee >= 0 && newAccountFee <= 1_000_000)) return null;
+  let feePayer;
+  try { feePayer = new PublicKey(o.feePayer); } catch { return null; }
+  return { feePayer, to: String(o.withdraw.to), fee, newAccountFee };
+}
+
 async function sendThroughNode(conn, node, tx, pair) {
   tx.recentBlockhash = (await conn.getLatestBlockhash("confirmed")).blockhash;
   tx.partialSign(pair);
@@ -292,10 +338,10 @@ async function sendThroughNode(conn, node, tx, pair) {
 
   let res;
   try {
-    res = await fetch(`${node.origin}/listen/settle`, {
+    res = await fetch(`${node.origin}${node.route || "/listen/settle"}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(node.item === undefined ? { tx: wire } : { tx: wire, item: node.item }),
+      body: JSON.stringify({ tx: wire, ...(node.item === undefined ? {} : { item: node.item }), ...(node.extra || {}) }),
       signal: AbortSignal.timeout(45_000),
     });
   } catch {

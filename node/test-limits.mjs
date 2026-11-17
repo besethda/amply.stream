@@ -37,7 +37,7 @@ ok("listener requests that cost: the strict count", ruleFor("POST", "/listen/pla
 ok("  a challenge costs nothing: the loose one", ruleFor("POST", "/listen/challenge") === RULES.media);
 ok("audio, pictures and pages: the loose count", ruleFor("GET", "/audio/a.mp3") === RULES.media && ruleFor("GET", "/") === RULES.media && ruleFor("GET", "/manifest.json") === RULES.media);
 ok("the artist's editor isn't counted (it's behind their sign-in)", ruleFor("PUT", "/manage/manifest") === null && ruleFor("GET", "/manage") === null);
-ok("  nor Stripe's signed notices", ruleFor("POST", "/stripe/webhook") === null);
+ok("Stripe's notices are counted per address too", ruleFor("POST", "/stripe/webhook") === RULES.listen);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

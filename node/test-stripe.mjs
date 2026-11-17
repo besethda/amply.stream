@@ -332,6 +332,22 @@ ok("the period end is found wherever Stripe's API version puts it",
   ok("  but a link that was never this artist's still buys nothing", other.outcome === "refused");
 }
 
+// ── refunded card purchases ──
+{
+  const { refundedSale } = await import("./src/stripe.ts");
+  const { DatabaseSync } = await import("node:sqlite");
+  const { SCHEMA } = await import("./src/store.ts");
+  const sq = new DatabaseSync(":memory:"); for (const q of SCHEMA) sq.exec(q);
+  const db = { prepare(sql) { const st = sq.prepare(sql); let a = []; const api = { bind(...x) { a = x; return api; }, async run() { st.run(...a); }, async first() { return st.get(...a) ?? null; }, async all() { return { results: st.all(...a) }; } }; return api; } };
+  sq.prepare("INSERT INTO settings (key, value) VALUES ('stripe', ?)").run(JSON.stringify({ key: "rk_test_x", live: false, product: "", portal: null, plans: [] }));
+  const with_ = (charge) => ({ load: async () => ({ payment_intent: { latest_charge: charge } }) });
+  ok("a refunded card purchase is recognised", (await refundedSale(db, "cs_test_aaaaaaaaaa", with_({ refunded: true, amount_refunded: 900 }))) === true);
+  ok("  so is a disputed one", (await refundedSale(db, "cs_test_aaaaaaaaaa", with_({ refunded: false, amount_refunded: 0, disputed: true }))) === true);
+  ok("  a paid one isn't", (await refundedSale(db, "cs_test_aaaaaaaaaa", with_({ refunded: false, amount_refunded: 0, disputed: false }))) === false);
+  ok("  and a key that can't read charges leaves it unknown, so buyers aren't blocked",
+    (await refundedSale(db, "cs_test_aaaaaaaaaa", { load: async () => { throw new Error("permission"); } })) === null);
+}
+
 // ── only restricted keys ──
 {
   const { newKeyProblem } = await import("./src/stripe.ts");

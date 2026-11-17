@@ -718,6 +718,7 @@ details.advanced > .stack { margin-top: 26px; }
 /* Covering listeners' fees: on or off at a glance. */
 .fee-status { padding: 10px 14px; border-radius: 12px; background: var(--bg2); margin: 4px 0 12px; }
 .fee-status.on b { color: var(--good); }
+.buy-sol { margin: 12px 0 6px; }
 .fee-how { margin: 10px 0; }
 .fee-how > summary, .cash-out-passkey > summary { cursor: pointer; font-weight: 600; color: var(--ink); }
 .fee-how ol, .cash-out-passkey ol { padding-left: 22px; display: grid; gap: 8px; margin: 10px 0; }

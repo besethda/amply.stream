@@ -56,6 +56,10 @@ export interface FeePayExpect {
   minMicros: number;
   maxMicros: number;
   memo?: string;                                 // a purchase's note; none for listening
+  /** A listener sending their own money out: `payees` is then exactly
+   *  [destination, the artist's wallet], any amount goes to the destination,
+   *  and at least `fee` to the artist, who is paying the network fee. */
+  withdrawal?: { fee: number };
 }
 
 export type FeePayVerdict =
@@ -162,11 +166,22 @@ export async function checkFeePayment(tx: Transaction, expect: FeePayExpect): Pr
   // ── how much, and to whom ──
   const micros = [...paid.values()].reduce((a, b) => a + b, 0);
   if (!Number.isSafeInteger(micros)) return no("the amount is impossibly large");
-  if (micros < expect.minMicros) return no("too small to pay the network fee for");
-  if (micros > expect.maxMicros) return no("more than one payment can be");
-  const shares = shareOut(micros, payees).map((s) => ({ address: s.address, micros: s.micros }));
-  if (shares.length !== paid.size || !shares.every((s) => paid.get(s.address) === s.micros)) {
-    return no("the payment isn't split the way the artist set it");
+  let shares: { address: string; micros: number }[];
+  if (expect.withdrawal) {
+    const [dest, artist] = payees.map((p) => p.address);
+    if (payees.length !== 2 || paid.size !== 2) return no("a withdrawal pays the destination and the fee, nothing else");
+    const out = paid.get(dest) ?? 0, fee = paid.get(artist) ?? 0;
+    if (fee < expect.withdrawal.fee) return no("the fee for sending isn't included");
+    if (out < expect.minMicros) return no("too small to send");
+    if (out > expect.maxMicros) return no("more than one transfer can be");
+    shares = [{ address: dest, micros: out }, { address: artist, micros: fee }];
+  } else {
+    if (micros < expect.minMicros) return no("too small to pay the network fee for");
+    if (micros > expect.maxMicros) return no("more than one payment can be");
+    shares = shareOut(micros, payees).map((s) => ({ address: s.address, micros: s.micros }));
+    if (shares.length !== paid.size || !shares.every((s) => paid.get(s.address) === s.micros)) {
+      return no("the payment isn't split the way the artist set it");
+    }
   }
 
   // ── last, the listener's signature ──

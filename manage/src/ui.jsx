@@ -44,6 +44,7 @@ import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, publ
 import { readTransaction, writeTransaction, base64, keyOf } from "../../node/src/solana-tx.ts";
 import { checkFeePayment } from "../../node/src/feepay.ts";
 import { SiteEditor } from "./site-editor.jsx";
+import { coinbaseSolPage } from "../../app/src/topup.js";
 
 export const MAX_UPLOAD = 90 * 1024 * 1024;
 
@@ -1090,6 +1091,8 @@ function Subscriptions({ manifest, update, api }) {
                     <tr><td>Customer portal</td><td>Write</td></tr>
                     <tr><td>Subscriptions</td><td>Read</td></tr>
                     <tr><td>Checkout Sessions</td><td>Read</td></tr>
+                    <tr><td>PaymentIntents</td><td>Read (recommended)</td></tr>
+                    <tr><td>Charges</td><td>Read (recommended)</td></tr>
                   </tbody>
                 </table>
               </li>
@@ -1248,6 +1251,32 @@ function FromPhantom({ onAddress }) {
  * makes the key again whenever money has to move, so cashing out asks for
  * Face ID once more. The passkey belongs to this service's own address.
  */
+const PASSKEY_WALLET_KEY = "amply.editor.passkey-wallet";
+const BACKUP_SAVED_KEY = "amply.editor.backup-saved";
+
+/**
+ * A Face ID payout wallet only opens at this editor's own address: the
+ * passkey belongs to it. If the address ever changed (a renamed Worker or
+ * Cloudflare subdomain), the backup key would be the only way back to the
+ * money. So until the artist says they've saved it, Earnings asks.
+ */
+function BackupReminder({ payees }) {
+  const read = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const made = read(PASSKEY_WALLET_KEY);
+  const [saved, setSaved] = useState(() => read(BACKUP_SAVED_KEY) === made);
+  if (!made || saved || !payees.some((p) => p.address === made)) return null;
+  const done = () => { try { localStorage.setItem(BACKUP_SAVED_KEY, made); } catch { /* asked again next time */ } setSaved(true); };
+  return (
+    <section class="card backup-reminder">
+      <h2>Save your wallet's backup key</h2>
+      <p class="muted">Your Face ID wallet only opens at this editor's address. If that address ever changed, this key
+        would be the only way back to your money. Save it in a password manager, and nowhere else.</p>
+      <ShowWalletKey payees={payees} />
+      <button class="btn ghost sm" onClick={done}>I've saved it</button>
+    </section>
+  );
+}
+
 function PasskeyWallet({ onAddress }) {
   const [offer, setOffer] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1261,6 +1290,9 @@ function PasskeyWallet({ onAddress }) {
       const seed = await seedFn({ name: "Amply payouts" });
       const address = await addressOf(seed);
       seed.fill(0);
+      // Remembered so Earnings can ask for its backup key to be saved
+      // (BackupReminder): the passkey only works at this editor's address.
+      try { localStorage.setItem(PASSKEY_WALLET_KEY, address); } catch { /* the reminder just won't show */ }
       onAddress(address);
       setSaid({ good: true, text: "Your payout wallet is ready and filled in below. Publish to start being paid into it." });
     } catch (e) {
@@ -1294,6 +1326,12 @@ function PasskeyWallet({ onAddress }) {
 function ShowWalletKey({ payees }) {
   const [state, setState] = useState(null);   // { key, address, ours } | { error }
   const [busy, setBusy] = useState(false);
+  // A key left on screen is a key someone else can read: it hides itself.
+  useEffect(() => {
+    if (!state?.key) return;
+    const t = setTimeout(() => setState(null), 2 * 60_000);
+    return () => clearTimeout(t);
+  }, [state?.key]);
 
   async function reveal() {
     setBusy(true); setState(null);
@@ -1332,7 +1370,7 @@ function ShowWalletKey({ payees }) {
         <button class="quiet-link" onClick={() => setState(null)}>Hide it</button>
       </div>
       <p class="warn"><b>Keep this private.</b> Anyone who has it can take your money, and Amply will never ask
-        for it. Paste it only into Phantom, then hide it.</p>
+        for it. Paste it only into Phantom. It hides itself after two minutes.</p>
     </div>
   );
 }
@@ -2044,6 +2082,34 @@ function Listeners({ api, paid, rate, settleAt }) {
  * so they never need any. It's a wallet of its own, separate from where
  * listeners pay: it holds SOL for fees and nothing else.
  */
+/** One tap to Coinbase, buying SOL straight into the fees account. */
+function BuySol({ api, label = "Add $5 with Coinbase" }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  if (!api?.feesOnramp) return null;
+  async function buy() {
+    // Opened during the tap, or phones block it; filled in once signed.
+    const tab = window.open("", "_blank");
+    if (tab) tab.opener = null;
+    setBusy(true); setErr(null);
+    try {
+      const signedAt = Date.now();
+      const { address, signature } = await api.feesOnramp(signedAt);
+      const href = coinbaseSolPage(address, 5, signedAt, signature);
+      if (tab) tab.location.href = href; else location.href = href;
+    } catch (e) {
+      tab?.close();
+      setErr(e.message);
+    } finally { setBusy(false); }
+  }
+  return (
+    <div class="buy-sol">
+      <button class="btn" disabled={busy} onClick={buy}>{busy ? "Opening Coinbase…" : label}</button>
+      {err && <p class="warn" role="alert">{err}</p>}
+    </div>
+  );
+}
+
 function FeesCard({ api, network, payees }) {
   const [fees, setFees] = useState(null);
   const [failed, setFailed] = useState(false);
@@ -2069,7 +2135,9 @@ function FeesCard({ api, network, payees }) {
         <summary><b>Fees account</b> <span class="pill-status on">On</span>
           <span class="muted small">{payments != null ? `about ${payments.toLocaleString()} payments left` : ""}</span></summary>
         <p class="muted small">Pays the tiny network fees on your fans' payments and your sends to the bank, so nobody
-          needs a coin called SOL. At most 0.01 SOL of fees a day (a dollar or two). Top it up with SOL at this address when it runs low:</p>
+          needs a coin called SOL. At most 0.01 SOL of fees a day (a dollar or two). Top it up when it runs low:</p>
+        {fees.network === "solana" && <BuySol api={api} label="Top up $5 with Coinbase" />}
+        <p class="muted small">Or send SOL to this address:</p>
         <div class="copy-row">
           <CopyButton text={fees.address} label="Copy the fees address" className="btn sm" />
           <code>{fees.address}</code>
@@ -2093,8 +2161,13 @@ function FeesCard({ api, network, payees }) {
         <Help about="why listeners need a coin">Every payment has a tiny processing fee, a fraction of a cent,
           charged by the payment network (Solana). It's paid in SOL, a coin used only for these fees. Without
           this, each new listener has to buy a little SOL first.</Help></p>
-      <details class="fee-how" open={!fees.offering}>
-        <summary>How to turn it on (about 5 minutes)</summary>
+      {fees.network === "solana" && <>
+        <BuySol api={api} />
+        <p class="muted small">Coinbase sells you $5 of SOL by card (plus their small fee) and sends it straight here.
+          It switches on by itself a few minutes after it arrives.</p>
+      </>}
+      <details class="fee-how" open={!fees.offering && fees.network !== "solana"}>
+        <summary>{fees.network === "solana" ? "Or do it by hand in the Coinbase app" : "How to turn it on (about 5 minutes)"}</summary>
         <ol>
           <li>Copy the address of your fees account. It's separate and small: your earnings never go here.
             <div class="copy-row">
@@ -2531,6 +2604,7 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
         {hasWallet && !liveAddresses.includes(payees.find((p) => p.address).address) && (
           <PayoutReady address={payees.find((p) => p.address).address} live={false} />
         )}
+        {hasWallet && <BackupReminder payees={payees} />}
         {hasWallet && <EarningsSummary paid={paid} payees={payees} />}
         {hasWallet && <Pricing wallet={wallet} onChange={setWallet} />}
         {subscribing && <Subscriptions manifest={manifest} update={update} api={api} />}

@@ -362,7 +362,7 @@ export function TopUp({ address, balance, network, pair, needsFee = true }) {
 }
 
 /** Getting money back out: dollars first, then the SOL that paid their fee. */
-export function SendBack({ pair, balance, onRefresh }) {
+export function SendBack({ pair, balance, onRefresh, nodes = [] }) {
   const [to, setTo] = useState("");
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState(null);
@@ -376,7 +376,11 @@ export function SendBack({ pair, balance, onRefresh }) {
     try {
       const { pay } = await machinery();
       const sent = [];
-      if (balance?.usdc > 0) { await pay.sendDollarsOut(pair, where, "all"); sent.push(money(balance.usdc)); }
+      if (balance?.usdc > 0) {
+        const r = await pay.sendDollarsOut(pair, where, "all", { nodes });
+        sent.push(money(r.micros / 1e6));
+        if (r.fee) sent.push(`${money(r.fee / 1e6)} fee to the artist who paid the network fee`);
+      }
       if (everything) { await pay.sendSolOut(pair, where); sent.push("SOL"); }
       setSaid({ text: sent.length ? `Sent ${sent.join(" + ")}` : "Nothing to send." });
       onRefresh?.();

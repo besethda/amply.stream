@@ -26,14 +26,15 @@ import {
 } from "./store";
 import { introduce, readToken, guardedKeys, masterKeys, proveOwnership } from "./listen";
 import { challenge } from "./identity";
-import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, claim, refresh, StripeError, setSales, claimSale } from "./stripe";
+import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, claim, refresh, StripeError, setSales, claimSale, refundedSale } from "./stripe";
 import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, itemFor, CHAINS, type Sale } from "./sales";
-import { settle, feeAddress, feeBalance, rpcAt, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS } from "./settle";
+import { settle, feeAddress, feeBalance, feeOnrampSignature, rpcAt, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS, WITHDRAW_FEE_MICROS, NEW_ACCOUNT_FEE_MICROS } from "./settle";
+import { tokenAccountOf, keyOf } from "./solana-tx";
 import { purchaseMemo } from "./payment-check";
 import { cleanSite } from "../../spec/site.mjs";
 import { cashOutProblem, draftCashOut, CASHOUT_MIN_MICROS, CASHOUT_MAX_MICROS } from "./cashout";
 import { base64 } from "./solana-tx";
-import { TOKEN_PROGRAM, SYSTEM_PROGRAM } from "./feepay";
+import { TOKEN_PROGRAM, SYSTEM_PROGRAM, ATA_PROGRAM } from "./feepay";
 import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf } from "../../spec/pricing.mjs";
 import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
 import { ICONS, MANIFEST_PATH, studioManifest } from "./studio";
@@ -412,6 +413,15 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
   }
 
+  // A signature for buying SOL into the fees account through Coinbase: the
+  // editor opens Amply's relay with it, which sends the artist to Coinbase.
+  if (request.method === "POST" && path === "/fees/onramp") {
+    const body = await jsonBody(request, 1_000);
+    const signed = body ? await feeOnrampSignature(env.DB, Number(body.signedAt)) : null;
+    if (!signed) return fail(400, "check this device's clock and try again");
+    return new Response(JSON.stringify(signed), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+
   // Cashing out from a Face ID payout wallet (cashout.ts): the node drafts
   // the transfer with its fee wallet paying the fee; the editor checks and
   // signs it; the node checks it again and sends it. Behind the sign-in above,
@@ -451,7 +461,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
     const result = await settle(env.DB, rpc, body.tx, {
       mint: chain.mint, payees: [{ address: to, split: 100 }], minMicros: micros, maxMicros: micros,
-    }, { from: payees, kind: "send" });
+    }, { from: payees, kind: "send", openOnce: [] });
     if (!result.ok) return fail(result.status, result.why);
     return json({ signature: result.signature, confirmed: result.confirmed });
   }
@@ -661,14 +671,17 @@ async function manifestNowOf(env: Env): Promise<unknown> {
 /** What this node offers to pay network fees for, or null. Only for an
  *  artist taking USDC on a network this node knows, and only while the fee
  *  wallet holds enough to be worth offering. */
-async function feeOffer(env: Env): Promise<{ feePayer: string; network: string; minMicros: number; maxMicros: number } | null> {
+async function feeOffer(env: Env): Promise<{ feePayer: string; network: string; minMicros: number; maxMicros: number; withdraw: { to: string; fee: number; newAccountFee: number } } | null> {
   const pay = walletOf(await manifestNowOf(env));
   const chain = pay && CHAINS[pay.network];
   if (!pay || !chain) return null;
   const feePayer = await feeAddress(env.DB);
   if (pay.recipients.some((r) => r.address === feePayer)) return null;
   if ((await feeBalance(rpcAt(chain.rpc), feePayer)) < OFFER_ABOVE_LAMPORTS) return null;
-  return { feePayer, network: pay.network, minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS };
+  return {
+    feePayer, network: pay.network, minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS,
+    withdraw: { to: pay.recipients[0].address, fee: WITHDRAW_FEE_MICROS, newAccountFee: NEW_ACCOUNT_FEE_MICROS },
+  };
 }
 
 async function handleListen(request: Request, env: Env, path: string): Promise<Response | null> {
@@ -742,6 +755,47 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
       // Per paying wallet, on top of the per-address count every listener
       // request already has.
       allowed: (who) => allow(env as never, RULES.wallet, `${host}|settle|${who}`),
+    });
+    if (!result.ok) return fail(result.status, result.why);
+    return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {
+      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
+    });
+  }
+
+  // A listener sending their own money out, with no SOL for the fee: this
+  // node pays it, and the listener pays the artist back in USDC in the same
+  // transfer (more if the destination's account has to be opened). Only for
+  // someone who has listened here, at the usual per-wallet pace.
+  if (path === "/withdraw" && request.method === "POST") {
+    if (Number(request.headers.get("Content-Length") || 0) > 4096) return fail(413, "too large");
+    const body = await jsonBody(request);
+    if (!body) return fail(400, "bad request");
+    const offer = await feeOffer(env).catch(() => null);
+    if (!offer) return fail(409, "this artist's node isn't paying network fees right now");
+    const pay = walletOf(await manifestNowOf(env))!;
+    const chain = CHAINS[pay.network];
+    const to = String(body.to || "").trim();
+    if (!keyOf(to)) return fail(400, "that isn't a Solana address");
+    if (to === offer.feePayer || pay.recipients.some((r) => r.address === to)) return fail(400, "that address can't be sent to this way");
+    const rpc = rpcAt(chain.rpc);
+    let fee = WITHDRAW_FEE_MICROS;
+    try {
+      const ata = await tokenAccountOf(to, chain.mint, TOKEN_PROGRAM, ATA_PROGRAM);
+      const info = await rpc("getAccountInfo", [ata, { encoding: "base64", commitment: "confirmed" }]);
+      if (!info?.value) fee += NEW_ACCOUNT_FEE_MICROS;
+    } catch {
+      return fail(502, "couldn't reach the network; nothing was sent");
+    }
+    const result = await settle(env.DB, rpc, body.tx, {
+      mint: chain.mint,
+      payees: [{ address: to }, { address: offer.withdraw.to }],
+      minMicros: 10_000, maxMicros: 10_000_000_000,
+      withdrawal: { fee },
+    }, {
+      allowed: async (who) => !!(await listener(env.DB, who)) && allow(env as never, RULES.wallet, `${host}|withdraw|${who}`),
+      // The destination's account is paid for by the listener's fee; only the
+      // artist's own is opened once at most.
+      openOnce: [offer.withdraw.to],
     });
     if (!result.ok) return fail(result.status, result.why);
     return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {
@@ -866,6 +920,10 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     if (!head) return fail(404, "that file is missing");
     const taken = await takeDownload(env.DB, manifest, proof.address, trackId);
     if (!taken) return fail(403, "you don't own this song here, or its downloads are used up");
+    // A card purchase refunded or disputed since buys no more downloads.
+    if (/^cs_/.test(taken.ref) && (await refundedSale(env.DB, taken.ref)) === true) {
+      return fail(403, "this purchase was refunded, so it can't be downloaded");
+    }
     const object = await media(env).get(key);
     if (!object || !("body" in object)) return fail(404, "that file is missing");
     const ext = key.split(".").pop() || "mp3";

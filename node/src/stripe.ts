@@ -594,6 +594,28 @@ export async function setSales(
   return next;
 }
 
+/**
+ * Whether a card purchase was refunded or disputed since, so its downloads
+ * stop. Needs the key to read charges ("Charges: Read", in the setup guide);
+ * a key without it, or Stripe not answering, gives null: unknown, and the
+ * download goes ahead as before rather than failing a buyer.
+ */
+export async function refundedSale(
+  db: D1Database, sessionId: string, { load }: { load?: (id: string) => Promise<Record<string, any>> } = {},
+): Promise<boolean | null> {
+  if (!SESSION.test(sessionId)) return null;
+  const c = await connectionOf(db);
+  if (!c) return null;
+  try {
+    const s = await (load ?? ((id) => call(c.key, "GET", `/checkout/sessions/${id}`, { expand: ["payment_intent.latest_charge"] })))(sessionId);
+    const charge = s?.payment_intent?.latest_charge;
+    if (!charge || typeof charge !== "object") return null;
+    return !!(charge.refunded || charge.amount_refunded > 0 || charge.disputed);
+  } catch {
+    return null;
+  }
+}
+
 export type SaleClaim = { outcome: "recorded"; ref: string; item: string } | { outcome: "pending" } | { outcome: "refused" };
 
 /**
