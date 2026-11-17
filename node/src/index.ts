@@ -22,7 +22,7 @@ import {
 import { renderPage, renderPrivacy, pageCsp, pageWebManifest } from "./page";
 import {
   setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale,
-  subscribedUntil, pruneSubscriptions, heard, songTotals,
+  subscribedUntil, pruneSubscriptions, heard, songTotals, playsToday,
 } from "./store";
 import { introduce, readToken, guardedKeys, masterKeys, proveOwnership } from "./listen";
 import { challenge } from "./identity";
@@ -41,7 +41,7 @@ import { ICONS, MANIFEST_PATH, studioManifest } from "./studio";
 
 import { VERSION, SPEC_VERSION, MANAGE_CSP } from "./constants";
 import { media, maxObject, MediaTooLarge, type MediaObject, type MediaObjectBody } from "./media";
-import { quotaFailure } from "./quota";
+import { quotaFailure, FREE_STREAMS_A_DAY, FREE_STORAGE } from "./quota";
 
 export interface Env {
   /** Where files live: R2, or KV for a node that started without it (media.ts). */
@@ -242,6 +242,24 @@ async function serveManifest(env: Env): Promise<Response> {
 }
 
 /**
+ * Bytes stored, for the editor's storage bar. Adding them up means listing
+ * every file, and on KV a listing counts against the same 1,000 a day as
+ * writes, so the total is kept in settings and taken again at most hourly.
+ */
+const STORAGE_KEY = "storage-used";   // { bytes, at }
+async function storageUsed(env: Env, now = Date.now()): Promise<number> {
+  try {
+    const kept = JSON.parse((await setting(env.DB, STORAGE_KEY)) || "null") as { bytes: number; at: number } | null;
+    if (kept && now - kept.at < 3_600_000) return kept.bytes;
+    const bytes = await media(env).used();
+    await putSetting(env.DB, STORAGE_KEY, JSON.stringify({ bytes, at: now }));
+    return bytes;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Read the Access configuration written at setup.
  *
  * `set` is whether there is one at all; `config` is it, if it can be used. Set
@@ -408,7 +426,11 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
   // Totals per song, for the editor's Home tab.
   if (request.method === "GET" && path === "/stats") {
-    return new Response(JSON.stringify({ songs: await songTotals(env.DB) }), {
+    const usage = {
+      streams: { used: await playsToday(env.DB), of: FREE_STREAMS_A_DAY },
+      storage: { used: await storageUsed(env), of: env.MEDIA ? FREE_STORAGE.r2 : FREE_STORAGE.kv },
+    };
+    return new Response(JSON.stringify({ songs: await songTotals(env.DB), usage }), {
       status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
     });
   }

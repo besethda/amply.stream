@@ -86,7 +86,7 @@ const api = {
   async sizeOf(url) { return url.endsWith("/a.mp3") ? 46101094 : 6_500_000; },
   async listeners() { return [{ pubkey: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", plays: 12, seconds: 2880, first_seen: Date.now() - 864e5 * 9, last_seen: Date.now() - 864e5, blocked: 0, subscribed_until: null }]; },
   async stripeStatus() { return { connected: false }; },
-  async stats() { return { songs: [] }; },
+  async stats() { return { songs: [], usage: { streams: { used: 4200, of: 16666 }, storage: { used: 610e6, of: 1e9 } } }; },
   async readSite() { return null; },
   async payout() { return null; },
   async savePayout(address, via) { return { address, via }; },

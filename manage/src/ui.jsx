@@ -2416,13 +2416,32 @@ function CashOut({ api, payees, network, via: chosen }) {
  * from its per-song counts (nothing about who), and what's been paid from the
  * public payment records, read here in the browser.
  */
+/**
+ * How much of Cloudflare's free plan is used: a label and a bar, nothing else.
+ * The node works the numbers out (quota.ts); full is past nine tenths.
+ */
+function Meter({ label, used, of }) {
+  const share = of > 0 ? Math.min(1, used / of) : 0;
+  return (
+    <div class={`meter${share >= 0.9 ? " full" : ""}`}>
+      <span class="label">{label}</span>
+      <div class="meter-bar" role="meter" aria-label={label} aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(share * 100)}>
+        <i style={{ width: `${share * 100}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function HomeTab({ api, manifest, payees, rate, network, live, onGo }) {
   const [rows, setRows] = useState(null);
   const [songs, setSongs] = useState(null);
+  const [usage, setUsage] = useState(null);
   const paid = usePayments(payees, network);
   useEffect(() => {
     api.listeners().then(setRows).catch(() => setRows([]));
-    (api.stats ? api.stats() : Promise.resolve({ songs: [] })).then((s) => setSongs(s.songs || [])).catch(() => setSongs([]));
+    (api.stats ? api.stats() : Promise.resolve({ songs: [] }))
+      .then((s) => { setSongs(s.songs || []); setUsage(s.usage || null); })
+      .catch(() => setSongs([]));
   }, []);
 
   const titles = new Map((manifest.releases || []).flatMap((r) => (r.tracks || []).map((t) => [t.id, t.title || "Untitled"])));
@@ -2459,6 +2478,13 @@ function HomeTab({ api, manifest, payees, rate, network, live, onGo }) {
             <b>{paid.at ? `$${((paid.total || 0) / 1_000_000).toFixed(2)}` : paid.busy ? "…" : "—"}</b>
             <span class="muted small">{paid.error ? "couldn't check just now" : "by listeners, all time"}</span></div>
         </div>
+
+        {usage && (
+          <section class="card meters">
+            <Meter label="Free streams" used={usage.streams.used} of={usage.streams.of} />
+            <Meter label="Free storage" used={usage.storage.used} of={usage.storage.of} />
+          </section>
+        )}
 
         <section class="card">
           <h2>Are listeners paying? <Help about="the paying rate">What listeners have paid you, compared with what their

@@ -37,6 +37,8 @@ export interface Media {
   head(key: string): Promise<MediaObject | null>;
   put(key: string, body: ReadableStream | ArrayBuffer | string | null, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
   delete(key: string): Promise<unknown>;
+  /** Bytes stored, all files together. Costs a listing, so callers cache it. */
+  used(): Promise<number>;
 }
 
 export interface MediaEnv {
@@ -72,6 +74,16 @@ function r2Media(bucket: R2Bucket): Media {
     head: (key) => bucket.head(key),
     put: (key, body, options) => bucket.put(key, body, options),
     delete: (key) => bucket.delete(key),
+    async used() {
+      let bytes = 0;
+      let cursor: string | undefined;
+      do {
+        const page = await bucket.list({ cursor, limit: 1000 });
+        for (const o of page.objects) bytes += o.size;
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
+      return bytes;
+    },
   };
 }
 
@@ -91,6 +103,7 @@ interface KV {
   getWithMetadata<M>(key: string, options: { type: "stream" }): Promise<{ value: ReadableStream | null; metadata: M | null }>;
   put(key: string, value: ArrayBuffer, options: { metadata: Meta }): Promise<void>;
   delete(key: string): Promise<void>;
+  list(options: { cursor?: string; limit?: number }): Promise<{ keys: { name: string; metadata?: unknown }[]; list_complete: boolean; cursor?: string }>;
 }
 
 async function etagOf(bytes: ArrayBuffer): Promise<string> {
@@ -197,6 +210,20 @@ export function kvMedia(kv: KVNamespace | KV): Media {
 
     async delete(key) {
       await store.delete(key);
+    },
+
+    async used() {
+      // Each value's size is in the metadata written beside it, so this reads
+      // the listing only. A value written without it (setup's copy of the
+      // editor) is a few hundred KB and isn't counted.
+      let bytes = 0;
+      let cursor: string | undefined;
+      do {
+        const page = await store.list({ cursor, limit: 1000 });
+        for (const k of page.keys) bytes += (k.metadata as Meta | undefined)?.size ?? 0;
+        cursor = page.list_complete ? undefined : page.cursor;
+      } while (cursor);
+      return bytes;
     },
   };
 }
