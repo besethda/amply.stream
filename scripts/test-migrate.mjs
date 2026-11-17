@@ -71,6 +71,11 @@ function cloudflare({ migrations, applied = null, breaks = null }) {
     }
 
     const body = path === "/accounts" ? ok([{ id: ACC, name: "Test" }])
+      // The service being rebuilt, and what it's wired to.
+      : path.endsWith("/settings") ? ok({ bindings: [
+        { type: "d1", name: "DB", id: "11111111-2222-3333-4444-555555555555" },
+        { type: "r2_bucket", name: "MEDIA", bucket_name: "test-media" },
+      ] })
       : path.endsWith("/r2/buckets") && method === "GET" ? ok({ buckets: [] })
       : path.includes("/d1/database") && method === "GET" ? ok([])
       : path.endsWith("/d1/database") && method === "POST" ? ok({ uuid: "11111111-2222-3333-4444-555555555555" })

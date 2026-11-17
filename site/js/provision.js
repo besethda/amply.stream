@@ -64,16 +64,30 @@ export const OPTIONAL_STEPS = new Set(["editor", "access"]);
 /**
  * Rebuilding an artist's node.
  *
- * The same steps, with one left out. Every step here already reads before it
- * writes, so running them again finds what exists and replaces only the code:
- * the Worker and the editor. Audio, artwork, the track list and the sign-in
- * settings are never touched.
+ * Setup's steps, less two, plus one, and labelled for what they do here. A
+ * rebuild replaces only the code, the Worker and the editor; audio, artwork,
+ * the track list and the sign-in settings stay as they are.
+ *
+ * It never creates storage. `service` reads which storage and database the
+ * existing Worker is wired to, and the rebuild reuses exactly those; if there
+ * is no such Worker it stops. Guessing them from the name instead could miss
+ * (an artist's own domain typed for the address, say), and a miss would make
+ * a new, empty track list and leave the page looking empty. So `bucket` is not
+ * here at all, and `database` only brings the existing one's tables up to date.
  *
  * `manifest` is excluded rather than made idempotent. It writes a starter page,
  * and a starter page written over somebody's actual music would be the worst
  * thing this repo could do.
  */
-export const REPAIR_STEPS = STEPS.filter((s) => s.id !== "manifest");
+export const REPAIR_STEPS = [
+  { id: "account", label: "Finding your Cloudflare account" },
+  { id: "service", label: "Finding your streaming service" },
+  { id: "database", label: "Checking your track list" },
+  { id: "worker", label: "Installing the latest version" },
+  { id: "subdomain", label: "Checking its address" },
+  { id: "editor", label: "Updating your editor" },
+  { id: "access", label: "Checking your editor's sign-in" },
+];
 
 /**
  * Raised with a machine-readable `kind` so the UI can offer the right fix.
@@ -261,6 +275,18 @@ async function stepAccount(ctx) {
   if (!accounts || accounts.length === 0) {
     throw new ProvisionError("no_account", "No Cloudflare account found on this login.");
   }
+  // A rebuild knows what it's looking for: the account its Worker is in.
+  if (ctx.repair && accounts.length > 1) {
+    for (const a of accounts) {
+      const has = await api(ctx, "GET", `/accounts/${a.id}/workers/scripts/${ctx.progress.workerName}/settings`)
+        .then(() => true, () => false);
+      if (has) {
+        ctx.progress.accountId = a.id;
+        saveProgress(ctx.progress);
+        return a.id;
+      }
+    }
+  }
   if (accounts.length > 1 && !ctx.chosenAccountId) {
     throw new ProvisionError(
       "choose_account",
@@ -340,21 +366,59 @@ async function makeKv(ctx) {
  * Found rather than created when it already exists, so a rebuild keeps the
  * artist's music and their listeners.
  */
-async function stepDatabase(ctx) {
-  const { accountId, dbName } = ctx.progress;
-  if (ctx.progress.dbId) return;
+/**
+ * A rebuild's first look: the artist's Worker, and what it is wired to.
+ *
+ * Its bindings say exactly which storage (R2 or KV) and which database hold
+ * this artist's music. Reusing those, and nothing guessed, is what makes a
+ * rebuild unable to swap the music for an empty store.
+ */
+async function stepService(ctx) {
+  const { accountId, workerName } = ctx.progress;
+  let settings;
+  try {
+    settings = await api(ctx, "GET", `/accounts/${accountId}/workers/scripts/${workerName}/settings`);
+  } catch (e) {
+    if (e instanceof ProvisionError && e.kind === "auth") throw e;
+    throw new ProvisionError(
+      "service_not_found",
+      `There's no streaming service called “${workerName}” in this Cloudflare account.`,
+      "Check the address is your page's .workers.dev address, and that you signed in to the Cloudflare account it's in. Nothing was changed.",
+      { fatal: true },
+    );
+  }
+  const bindings = settings?.bindings || [];
+  const db = bindings.find((b) => b.type === "d1" && b.name === "DB");
+  const r2 = bindings.find((b) => b.type === "r2_bucket" && b.name === "MEDIA");
+  const kv = bindings.find((b) => b.type === "kv_namespace" && b.name === "MEDIA_KV");
+  if (!db?.id || !(r2?.bucket_name || kv?.namespace_id)) {
+    throw new ProvisionError(
+      "service_unrecognised",
+      `“${workerName}” doesn't look like an Amply streaming service, so it was left alone.`,
+      "It isn't connected to a track list and storage the way Amply's are. Nothing was changed.",
+      { fatal: true },
+    );
+  }
+  ctx.progress.dbId = db.id;
+  if (kv) {
+    ctx.progress.storage = "kv";
+    ctx.progress.kvId = kv.namespace_id;
+  } else {
+    ctx.progress.storage = "r2";
+    ctx.progress.bucketName = r2.bucket_name;
+  }
+  ctx.progress.bucketDone = true;
+  saveProgress(ctx.progress);
+}
 
-  let db;
+async function findOrMakeDatabase(ctx, accountId, dbName) {
   try {
     const existing = await api(ctx, "GET", `/accounts/${accountId}/d1/database?per_page=100`);
-    db = (existing || []).find((d) => d.name === dbName);
-
-    if (!db) {
-      db = await api(ctx, "POST", `/accounts/${accountId}/d1/database`, {
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: dbName }),
-      });
-    }
+    const found = (existing || []).find((d) => d.name === dbName);
+    return found || await api(ctx, "POST", `/accounts/${accountId}/d1/database`, {
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: dbName }),
+    });
   } catch (e) {
     // A brand-new account may refuse until its dashboard page has been opened
     // once, as R2 and KV both did. Any Cloudflare-side refusal gets the fix
@@ -364,7 +428,18 @@ async function stepDatabase(ctx) {
     }
     throw e;
   }
+}
 
+async function stepDatabase(ctx) {
+  const { accountId, dbName } = ctx.progress;
+  // A rebuild found the database already (stepService), and only updates its
+  // tables; setup finds or makes one, once.
+  if (ctx.progress.dbId && !ctx.repair) return;
+  if (ctx.repair && !ctx.progress.dbId) {
+    throw new ProvisionError("service_not_found", "Couldn't find your track list.", "Nothing was changed.", { fatal: true });
+  }
+
+  const db = ctx.repair ? { uuid: ctx.progress.dbId } : await findOrMakeDatabase(ctx, accountId, dbName);
   ctx.progress.dbId = db.uuid || db.id;
   saveProgress(ctx.progress);
 
@@ -780,6 +855,7 @@ async function stepManifest(ctx) {
 
 const RUNNERS = {
   account: stepAccount,
+  service: stepService,
   bucket: stepBucket,
   database: stepDatabase,
   worker: stepWorker,
@@ -936,7 +1012,7 @@ export async function provision({
 
   const ctx = {
     token, relay, artistName, email, workerUrl, editorUrl, chosenAccountId, progress,
-    versionUrl,
+    versionUrl, repair: mode === "repair",
   };
 
   for (const step of (mode === "repair" ? REPAIR_STEPS : STEPS)) {

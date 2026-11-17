@@ -71,6 +71,9 @@ const call = (path, { method = "POST", body, headers = {}, origin = ORIGIN } = {
   const auth = { Authorization: "Bearer t" };
   const status = async (method, path) => (await call(`/api${path}`, { method, headers: auth, body: method === "GET" ? undefined : "x" })).status;
 
+  ok("a rebuild may read what a service is wired to", await status("GET", `/accounts/${acc}/workers/scripts/hollow/settings`) === 200);
+  ok("  but not change it", await status("PATCH", `/accounts/${acc}/workers/scripts/hollow/settings`) === 403
+    && await status("PUT", `/accounts/${acc}/workers/scripts/hollow/settings`) === 403);
   ok("KV namespaces can be listed", await status("GET", `/accounts/${acc}/storage/kv/namespaces`) === 200);
   ok("  and made", await status("POST", `/accounts/${acc}/storage/kv/namespaces`) === 200);
   ok("a file can be written, its key encoded", await status("PUT", `/accounts/${acc}/storage/kv/namespaces/${ns}/values/manage%2Findex.html`) === 200);

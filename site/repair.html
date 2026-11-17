@@ -171,6 +171,13 @@ $("#connect").addEventListener("click", async () => {
     fail("That address doesn't look right", "It should look like yourname.something.workers.dev.");
     return;
   }
+  // The rebuild finds the service by the name in its workers.dev address. An
+  // artist's own domain doesn't carry it.
+  if (!/^(https?:\/\/)?[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev(\/.*)?$/i.test(state.address)) {
+    fail("Use your .workers.dev address",
+      "It's the address your editor is on, like yourname.something.workers.dev, even if you share your own domain.");
+    return;
+  }
   // Without one there is nothing to attach a sign-in rule to, and the rebuild
   // finishes with an editor nobody can open — which reads, unhelpfully, as
   // "this node has no editor configured".
@@ -372,10 +379,16 @@ async function run(token) {
     show("done");
   } catch (err) {
     const known = err instanceof ProvisionError;
-    fail(
-      known && err.kind === "auth" ? "Cloudflare refused the request" : "The rebuild didn't finish",
-      `${err.message}${known && err.detail ? ` (${err.detail})` : ""}`,
-    );
+    // Couldn't find the service, or it isn't one of Amply's: nothing was
+    // touched, and the message is the whole story.
+    if (known && /^service_/.test(err.kind)) {
+      fail(err.message, err.detail);
+    } else {
+      fail(
+        known && err.kind === "auth" ? "Cloudflare refused the request" : "The rebuild didn't finish",
+        `${err.message}${known && err.detail ? ` (${err.detail})` : ""}`,
+      );
+    }
   } finally {
     // Same rule as setup: the permission ends with the job.
     await revoke({ relay: CONFIG.relay, clientId: CONFIG.clientId, token });
