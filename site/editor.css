@@ -980,6 +980,7 @@ select { max-width: 100%; text-overflow: ellipsis; }
 }
 .pay-choice b { font-size: 18px; }
 .pay-choice span { font-size: 14px; color: var(--ink3); }
+.pay-choice .fee { font-size: 13px; color: var(--ink2, var(--ink3)); border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; }
 .pay-choice[aria-pressed="true"] { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(246, 113, 30, .18); }
 .pay-next { display: grid; gap: 12px; margin-bottom: 10px; }
 .connect-coinbase { display: grid; gap: 8px; justify-items: start; }
