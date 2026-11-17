@@ -111,6 +111,20 @@ r = await rebuild({ policies: allowing([{ everyone: {} }]) });
 ok_("a rule admitting everybody stops the rebuild", r.kind === "zt_policy_open", String(r.kind));
 ok_("  and the node is not pointed at it", !r.settings.access);
 
+// Just as open, less obviously: anyone who can receive an email code, a whole
+// email domain, an IP range, a group, or a rule that skips sign-in altogether.
+for (const [what, policies] of [
+  ["any one-time-PIN user", allowing([{ login_method: { id: "otp" } }])],
+  ["a whole email domain", allowing([{ email_domain: { domain: "gmail.com" } }])],
+  ["every IP address", allowing([{ ip: { ip: "0.0.0.0/0" } }])],
+  ["a group", allowing([{ group: { id: "g" } }])],
+  ["the artist and anyone else", allowing([{ email: { email: EMAIL } }, { email_domain: { domain: "gmail.com" } }])],
+  ["no sign-in at all (bypass)", [{ decision: "bypass", include: [{ everyone: {} }] }]],
+]) {
+  r = await rebuild({ policies });
+  ok_(`a rule admitting ${what} stops the rebuild`, r.kind === "zt_policy_open" && !r.settings.access, String(r.kind));
+}
+
 // A lockout, not a risk: fix it instead of refusing.
 r = await rebuild({ policies: allowing([{ email: { email: "someone-else@example.com" } }]) });
 ok_("a rule that admits somebody else gets one added for the artist",

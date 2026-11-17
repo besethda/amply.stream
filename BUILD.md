@@ -4,7 +4,8 @@
 npm run build        # every artifact the site serves
 npm run check        # build, validate the spec, typecheck both Workers
 npm run deploy:site  # build, then publish site/ to Cloudflare Pages
-npm run deploy:relay # publish the CORS relay
+npm run deploy:relay    # publish the CORS relay
+npm run deploy:accounts # publish accounts/ to Vercel: temporary accounts, which Cloudflare won't make for a Worker
 ```
 
 ## Why one command

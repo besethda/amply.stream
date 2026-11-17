@@ -126,6 +126,41 @@ export function claimLink() {
 }
 
 /**
+ * The link that opens the editor before signup, while this tab still has its
+ * key (node/src/preview-key.ts). The key is in the fragment, so it is never
+ * sent to a server; it lives only in this tab.
+ */
+export function editorLink() {
+  const p = loadPreview();
+  const { url } = loadProgress();
+  return p?.editorKey && url ? `${url}/manage/open#${p.editorKey}` : null;
+}
+
+/**
+ * Make the key that opens a temporary node's editor, and give the node its
+ * hash. It opens the editor until the temporary account would expire; after
+ * that, or once the editor is locked to the artist, it opens nothing. The
+ * claim link goes with it, so the editor can offer "keep it" from any tab,
+ * and the temporary token, so the node can see when the claim has happened.
+ * Both are for this same account and both are dead after the claim.
+ */
+async function makeEditorKey(ctx, preview) {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  const key = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)));
+  const hash = [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
+  await putSetting(ctx, "preview-key", JSON.stringify({
+    hash,
+    until: Date.parse(preview.expiresAt),
+    claim: preview.claimUrl,
+    claimUntil: Date.parse(preview.claimExpiresAt),
+    // So the node can tell when the account has been claimed: claiming ends it.
+    token: preview.token,
+  }));
+  return key;
+}
+
+/**
  * Whether the temporary account still looks unclaimed.
  *
  * Claiming it ends its token, so a token that still works means the claim
@@ -588,11 +623,17 @@ async function stepAccess(ctx) {
     const admits = (rule) => (rule.decision === "allow" ? rule.include || [] : []);
     const rules = (policies || []).flatMap(admits);
 
-    if (rules.some((r) => "everyone" in r || "certificate" in r || "any_valid_service_token" in r)) {
+    // Only named email addresses are something setup can vouch for. Anything
+    // else could be anybody: everyone, any one-time-PIN user, a whole email
+    // domain, an IP range, a group. A bypass rule lets people in with no
+    // sign-in at all. Either way, stop rather than adopt it.
+    const vouched = (r) => Object.keys(r).length === 1 && typeof r.email?.email === "string";
+    const bypass = (policies || []).some((p) => p.decision === "bypass" || p.decision === "non_identity");
+    if (bypass || !rules.every(vouched)) {
       throw new ProvisionError(
         "zt_policy_open",
-        "The sign-in rule protecting your editor lets anyone in.",
-        "There is already an Access application for this address that admits everybody. Delete it in Zero Trust → Access → Applications and run this again, and Amply will make one that admits only you.",
+        "The sign-in rule protecting your editor could let other people in.",
+        "There is already an Access application for this address that admits more than named email addresses. Delete it in Zero Trust → Access → Applications and run this again, and Amply will make one that admits only you.",
         { fatal: true },
       );
     }
@@ -612,9 +653,13 @@ async function stepAccess(ctx) {
     }
   }
 
-  // 4. Tell the node what to verify against. Without this it refuses every
-  //    write — an unverifiable guard is a closed one.
+  // 4. Tell the node what to verify against. From now on Access is the only
+  //    way into the editor; if this setting were ever damaged, the editor
+  //    stays closed rather than falling back to anything else.
   await putSetting(ctx, "access", JSON.stringify({ team: org.auth_domain, aud: app.aud }));
+  // The node ignores the key from before signup once Access is set; this
+  // makes sure it isn't there to ignore.
+  await query(ctx, "DELETE FROM settings WHERE key = ?", ["preview-key"]);
 
   ctx.progress.editorUrl = `${url}/manage`;
   ctx.progress.accessDone = true;
@@ -944,10 +989,11 @@ export async function provision({
  * The steps of a node set up before the artist has a Cloudflare account.
  *
  * The same steps as setup, in a temporary account, with storage in KV and no
- * Access: temporary accounts can't use either R2 or Access. The node is live
- * and read-only (it refuses every edit without Access) until the artist
- * claims the account and finishes setup with their own login, which runs
- * `provision` over the same progress and adds only what is missing.
+ * Access: temporary accounts can't use either R2 or Access. Until the artist
+ * claims the account and finishes setup with their own login (which runs
+ * `provision` over the same progress and adds only what is missing), the
+ * editor opens for whoever holds the key made below (makeEditorKey), and for
+ * nobody once that key's hour is up.
  */
 export const INSTANT_STEPS = [
   { id: "preview", label: "Making your account" },
@@ -955,20 +1001,29 @@ export const INSTANT_STEPS = [
 ];
 
 /**
- * Ask Cloudflare for a temporary account, through the relay.
+ * Ask Cloudflare for a temporary account, through accounts/.
  *
  * Two calls with no credential: a proof-of-work challenge, solved here in
  * the browser, and the account itself, made with the artist's acceptance of
  * Cloudflare's terms. Back comes the account, a token for it, and a claim
  * link. Claiming the account ends the token.
+ *
+ * Not through the relay: Cloudflare refuses to make these accounts for a
+ * Worker (`worker_subrequest_blocked`), so accounts/ runs somewhere else.
  */
-export async function createTemporaryAccount({ relay, onProgress = () => {} }) {
-  const post = async (path, body) => {
+/** Turnstile's token, if the page has one, in the header accounts/ checks. */
+async function humanHeader(human) {
+  const token = await human();
+  return token ? { "X-Turnstile": token } : {};
+}
+
+export async function createTemporaryAccount({ accounts, human = async () => null, onProgress = () => {} }) {
+  const post = async (path, body, headers = {}) => {
     let res;
     try {
-      res = await fetch(`${relay}${path}`, {
+      res = await fetch(`${accounts}${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify(body),
       });
     } catch (e) {
@@ -977,6 +1032,10 @@ export async function createTemporaryAccount({ relay, onProgress = () => {} }) {
     const json = await res.json().catch(() => null);
     if (!res.ok || !json || json.success === false) {
       const why = json?.errors?.[0]?.message || json?.error || `HTTP ${res.status}`;
+      // Too many trial accounts: from this address (accounts/), or from all
+      // of Amply's (Cloudflare's own limit, which it doesn't publish).
+      if (res.status === 429) throw new ProvisionError("preview_busy", "Too many new pages right now.", why);
+      if (res.status === 403 && /person/.test(why)) throw new ProvisionError("not_human", "The check that you're a person didn't pass.", why);
       throw new ProvisionError("preview_failed", "Cloudflare couldn't make the account.", why);
     }
     return json.result;
@@ -993,7 +1052,7 @@ export async function createTemporaryAccount({ relay, onProgress = () => {} }) {
     acceptTermsOfService: "yes",
     challengeToken: challenge.challengeToken,
     solution: { checkpoints },
-  });
+  }, await humanHeader(human));
   const { account, claim } = made || {};
   if (!account?.id || !account?.apiToken || !account?.expiresAt || !claim?.url || !claim?.expiresAt) {
     throw new ProvisionError("preview_failed", "Cloudflare's answer was missing something.", "no account, token or claim link");
@@ -1014,8 +1073,28 @@ export async function createTemporaryAccount({ relay, onProgress = () => {} }) {
  * the account is made in their name. Returns the node's address and the link
  * that makes the account theirs.
  */
+/**
+ * Wait for a new temporary account's token to start working.
+ *
+ * Cloudflare hands the token back before it is usable: for the first few
+ * seconds every call with it is `10000 Authentication error`, from anywhere,
+ * and then it works. Ask with the cheapest call the first step makes anyway,
+ * until it is answered or long enough has passed that it is really refused.
+ */
+async function tokenReady(ctx, { tries = 30, every = 2000 } = {}) {
+  for (let i = 1; ; i++) {
+    try {
+      await api(ctx, "GET", `/accounts/${ctx.progress.accountId}/storage/kv/namespaces?per_page=1`);
+      return;
+    } catch (e) {
+      if (e.kind !== "auth" || i >= tries) throw e;
+    }
+    await new Promise((r) => setTimeout(r, every));
+  }
+}
+
 export async function provisionInstant({
-  relay, artistName, slug,
+  relay, accounts, human, artistName, slug,
   workerUrl = "/node-worker.js",
   editorUrl = "/node-manage",
   versionUrl = "/node-version.json",
@@ -1045,17 +1124,22 @@ export async function provisionInstant({
     onStep(step.id, "running");
     if (step.id === "preview") {
       if (!preview) {
-        preview = await createTemporaryAccount({ relay, onProgress: onProof });
+        preview = await createTemporaryAccount({ accounts, human, onProgress: onProof });
         try { sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(preview)); } catch { /* resumes only within this page */ }
       }
       ctx.token = preview.token;
       progress.accountId = preview.accountId;
       saveProgress(progress);
+      await tokenReady(ctx);
     } else {
       await RUNNERS[step.id](ctx);
     }
     onStep(step.id, "done");
   }
+
+  // So the artist can add their music now, before they've signed up.
+  preview.editorKey = await makeEditorKey(ctx, preview);
+  try { sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(preview)); } catch { /* the editor then waits for the claim */ }
 
   return {
     url: progress.url,
