@@ -247,8 +247,10 @@ footer { border-top: 1px solid var(--line); }
 .prose details { border: 1px solid var(--line, rgba(0,0,0,.12)); border-radius: var(--r, 14px); padding: 14px 18px; margin: 18px 0; }
 .prose details > summary { cursor: pointer; font-weight: 600; list-style: none; }
 .prose details > summary::-webkit-details-marker { display: none; }
-.prose details > summary::before { content: "+ "; color: var(--orange); font-weight: 700; }
-.prose details[open] > summary::before { content: "\2212 "; }
+/* The sign sits in a box of its own, so + and − line up and the text doesn't
+   move. A trailing space wouldn't do: CSS swallows the space after "\2212". */
+.prose details > summary::before { content: "+"; display: inline-block; width: 1em; color: var(--orange); font-weight: 700; }
+.prose details[open] > summary::before { content: "\2212"; }
 .prose details[open] > summary { margin-bottom: 10px; }
 .prose .note ul { margin: 6px 0 0; }
 .prose .note p:first-child { margin-top: 0; }
@@ -951,8 +953,9 @@ details.advanced > summary {
   background: var(--bg2); font-weight: 700; font-size: 18px;
 }
 details.advanced > summary::-webkit-details-marker { display: none; }
-details.advanced > summary::before { content: "+ "; color: var(--orange); }
-details.advanced[open] > summary::before { content: "\2212 "; }
+/* In a box of its own, so + and − line up (CSS swallows a space after "\2212"). */
+details.advanced > summary::before { content: "+"; display: inline-block; width: 1em; color: var(--orange); }
+details.advanced[open] > summary::before { content: "\2212"; }
 details.advanced > summary .note { display: block; font-weight: 400; font-size: 15px; color: var(--ink3); margin-top: 4px; }
 details.advanced > .stack { margin-top: 26px; }
 .steps .step-btn { display: block; margin-top: 10px; font-size: 15px; padding: 9px 18px; }
