@@ -354,6 +354,31 @@ export async function onrampUrl(token: string, address: string, amount: number):
   return `${COINBASE_PAY}?${q}`;
 }
 
+/** An artist's node on workers.dev: `<worker>.<subdomain>.workers.dev`, nothing else. */
+export const NODE_HOST = /^[a-z0-9-]{1,63}\.[a-z0-9-]{1,63}\.workers\.dev$/;
+
+/**
+ * Whether an editor's Cloudflare sign-in is ready for the artist: its
+ * /manage sends to an Access login page, and that page is there.
+ */
+export async function signInReady(host: string | null): Promise<{ ready: boolean }> {
+  if (!host || !NODE_HOST.test(host)) return { ready: false };
+  try {
+    const gate = await fetch(`https://${host}/manage`, { redirect: "manual" });
+    const to = gate.status >= 300 && gate.status < 400 ? gate.headers.get("Location") : null;
+    if (!to) return { ready: false };
+    const login = new URL(to);
+    if (login.protocol !== "https:" || !/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(login.hostname)
+        || login.pathname !== `/cdn-cgi/access/login/${host}`) {
+      return { ready: false };
+    }
+    const page = await fetch(login.toString(), { redirect: "manual" });
+    return { ready: page.status === 200 };
+  } catch {
+    return { ready: false };
+  }
+}
+
 function allowedOrigin(req: Request, env: Env): string | null {
   const origin = req.headers.get("Origin");
   if (!origin) return null;
@@ -512,6 +537,18 @@ export default {
     }
 
     // ── a temporary account ───────────────────────────────────────────────
+    // ── is a new editor's sign-in working yet? ────────────────────────────
+    // Setup adds Cloudflare Access to the editor, and for a few minutes after,
+    // Cloudflare's login page for it answers "Unable to find your Access
+    // application". Setup waits for it before sending the artist there, and
+    // can't look itself: both pages are other sites. Read-only and narrow:
+    // only an editor on workers.dev, and only the Access login it sends to.
+    if (url.pathname === "/ready" && request.method === "GET") {
+      return new Response(JSON.stringify(await signInReady(url.searchParams.get("host"))), {
+        headers: cors(origin, { "Content-Type": "application/json", "Cache-Control": "no-store" }),
+      });
+    }
+
     // ── Cloudflare API ────────────────────────────────────────────────────
     if (url.pathname.startsWith("/api/")) {
       const path = url.pathname.slice("/api".length);

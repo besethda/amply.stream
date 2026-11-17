@@ -30,6 +30,40 @@ const call = (path, { method = "POST", body, headers = {}, origin = ORIGIN } = {
   }), env);
 };
 
+// ── is a new editor's sign-in working yet? ──────────────────────────────────
+{
+  const HOST = "hollow.coast.workers.dev";
+  const LOGIN = `https://hollow-x1.cloudflareaccess.com/cdn-cgi/access/login/${HOST}?kid=k&redirect_url=%2Fmanage`;
+  const real = globalThis.fetch;
+  const world = (gate, login) => {
+    globalThis.fetch = async (u) => {
+      sent.push({ url: String(u) });
+      if (String(u) === `https://${HOST}/manage`) return new Response(null, gate);
+      return new Response("", { status: login });
+    };
+  };
+  const ready = async (host = HOST, origin = ORIGIN) => {
+    sent = [];
+    const res = await relay.fetch(new Request(`https://relay.test/ready?host=${encodeURIComponent(host)}`, { headers: origin ? { Origin: origin } : {} }), env);
+    return res.status === 200 ? (await res.json()).ready : `HTTP ${res.status}`;
+  };
+  world({ status: 302, headers: { Location: LOGIN } }, 200);
+  ok("ready once the editor sends to a login page that's there", await ready() === true);
+  ok("  having asked only the editor and its login page", sent.length === 2 && sent[1].url === LOGIN);
+  world({ status: 302, headers: { Location: LOGIN } }, 404);
+  ok("not while Cloudflare can't find the application yet", await ready() === false);
+  world({ status: 503 }, 200);
+  ok("not while the editor isn't behind a sign-in yet", await ready() === false);
+  world({ status: 302, headers: { Location: `https://evil.test/cdn-cgi/access/login/${HOST}` } }, 200);
+  ok("a redirect anywhere but Cloudflare Access isn't followed", await ready() === false && sent.length === 1);
+  world({ status: 302, headers: { Location: "https://hollow-x1.cloudflareaccess.com/cdn-cgi/access/login/other.host.workers.dev" } }, 200);
+  ok("  nor a login page for some other host", await ready() === false && sent.length === 1);
+  ok("only a node on workers.dev is asked about", await ready("example.com") === false && sent.length === 0);
+  ok("  not one dressed up as one", await ready("a.b.workers.dev.evil.test") === false && sent.length === 0);
+  ok("another site may not ask", await ready(HOST, "https://evil.test") === "HTTP 403");
+  globalThis.fetch = real;
+}
+
 // ── KV, for a node with no R2 ───────────────────────────────────────────────
 {
   const acc = "0123456789abcdef0123456789abcdef";

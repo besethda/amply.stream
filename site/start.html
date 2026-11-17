@@ -339,6 +339,7 @@
 
   <div class="actions" style="margin-bottom:26px">
     <a class="btn" id="edit-link" href="/start">Open my streaming service</a>
+    <p class="muted" id="signin-wait" hidden style="margin:0">Turning on your sign-in. Usually a minute or two.</p>
   </div>
 
   <p class="lead" style="margin-bottom:0">You're now hosting your own streaming service, and
@@ -866,6 +867,7 @@ async function runProvision(token, chosenAccountId = null) {
 
     setTimeout(() => show("done"), 400);
     watchCertificate(url);
+    if (editorUrl) waitForSignIn(url);
   } catch (err) {
     if (err instanceof ProvisionError && err.kind === "choose_account") {
       renderAccountChooser(JSON.parse(err.detail), token);
@@ -908,6 +910,29 @@ async function reachable(url) {
   } catch {
     return false;
   }
+}
+
+/**
+ * A new editor's Cloudflare sign-in takes a few minutes to start working: its
+ * login page says "Unable to find your Access application" until then. Hold
+ * the button back until the relay sees the login page answer, and after five
+ * minutes offer it anyway.
+ */
+async function waitForSignIn(url) {
+  const edit = $("#edit-link");
+  const wait = $("#signin-wait");
+  const host = new URL(url).host;
+  edit.hidden = true;
+  wait.hidden = false;
+  for (let i = 0; i < 60; i++) {
+    try {
+      const res = await fetch(`${CONFIG.relay}/ready?host=${encodeURIComponent(host)}`, { cache: "no-store" });
+      if ((await res.json()).ready) break;
+    } catch { /* ask again */ }
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  wait.hidden = true;
+  edit.hidden = false;
 }
 
 async function watchCertificate(url) {
