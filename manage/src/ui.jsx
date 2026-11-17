@@ -2516,10 +2516,11 @@ function HomeTab({ api, manifest, payees, rate, network, live, onGo }) {
 const VIA_KEY = "amply.editor.payout-via";
 const readVia = () => { try { return localStorage.getItem(VIA_KEY); } catch { return null; } };
 
+// The fee line under each is what that company keeps, checked November 2026.
 const WAYS = [
-  ["coinbase", "Coinbase", "Recommended · payments go straight in"],
-  ["cashapp", "Cash App", "US · fans pay by the minute"],
-  ["stripe", "Card subscriptions", "Stripe · fans subscribe by card"],
+  ["coinbase", "Coinbase", "Recommended · payments go straight in", "No fees to receive, turn into dollars or move to your bank"],
+  ["cashapp", "Cash App", "US · fans pay by the minute", "No fees for now · turns into dollars by itself"],
+  ["stripe", "Card subscriptions", "Stripe · fans subscribe by card", "Stripe keeps about 3.6% + 30¢ a payment (US cards)"],
 ];
 
 /**
@@ -2612,12 +2613,14 @@ function GetPaid({ via, onVia, payees, setPayees, manifest, update, api, only })
     <section class="card">
       <h2>{only ? "Also take payments by the minute" : "How do you want to get paid?"}</h2>
       <div class="pay-choices">
-        {ways.map(([k, label, sub]) => (
+        {ways.map(([k, label, sub, fee]) => (
           <button key={k} type="button" class="pay-choice" aria-pressed={via === k} onClick={() => onVia(k)}>
-            <b>{label}</b><span>{sub}</span>
+            <b>{label}</b><span>{sub}</span><span class="fee">{fee}</span>
           </button>
         ))}
       </div>
+      <p class="muted small">Amply takes nothing. Each by-the-minute payment also has a network fee of about a tenth of
+        a cent, paid from your fees account so fans don't need anything extra.</p>
       {via === "coinbase" && (
         <div class="pay-next">
           {CONNECT_OFFERED ? <ConnectCoinbase onAddress={setAddress} /> : <PasteCoinbase onAddress={setAddress} />}
