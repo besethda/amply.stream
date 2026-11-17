@@ -971,12 +971,31 @@ async function updateSubscription(db, subscription, until, now = Date.now()) {
 async function pruneSubscriptions(db, now = Date.now()) {
   await db.prepare("DELETE FROM subscriptions WHERE until < ?").bind(now - KEEP_FOR).run();
 }
-async function heard(db, track, seconds) {
+var dayOf = (now) => new Date(now).toISOString().slice(0, 10);
+async function heard(db, track, seconds, now = Date.now()) {
   const clean = Math.max(0, Math.min(Math.round(seconds), 3600));
   await db.prepare(
     `INSERT INTO track_plays (track, plays, seconds) VALUES (?, 1, ?)
      ON CONFLICT(track) DO UPDATE SET plays = plays + 1, seconds = seconds + excluded.seconds`
   ).bind(track, clean).run();
+  try {
+    await db.prepare(
+      `INSERT INTO play_days (day, plays) VALUES (?, 1)
+       ON CONFLICT(day) DO UPDATE SET plays = plays + 1`
+    ).bind(dayOf(now)).run();
+    if (Math.random() < 0.01) {
+      await db.prepare("DELETE FROM play_days WHERE day < ?").bind(dayOf(now - 30 * 864e5)).run();
+    }
+  } catch {
+  }
+}
+async function playsToday(db, now = Date.now()) {
+  try {
+    const row = await db.prepare("SELECT plays FROM play_days WHERE day = ?").bind(dayOf(now)).first();
+    return row?.plays ?? 0;
+  } catch {
+    return 0;
+  }
 }
 async function songTotals(db) {
   try {
@@ -2413,7 +2432,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.24";
+var VERSION = "3.19.26";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
@@ -2471,7 +2490,17 @@ function r2Media(bucket) {
     get: (key, options) => bucket.get(key, options ?? {}),
     head: (key) => bucket.head(key),
     put: (key, body, options) => bucket.put(key, body, options),
-    delete: (key) => bucket.delete(key)
+    delete: (key) => bucket.delete(key),
+    async used() {
+      let bytes = 0;
+      let cursor;
+      do {
+        const page = await bucket.list({ cursor, limit: 1e3 });
+        for (const o of page.objects) bytes += o.size;
+        cursor = page.truncated ? page.cursor : void 0;
+      } while (cursor);
+      return bytes;
+    }
   };
 }
 function maxObject(env) {
@@ -2557,11 +2586,25 @@ function kvMedia(kv) {
     },
     async delete(key) {
       await store.delete(key);
+    },
+    async used() {
+      let bytes = 0;
+      let cursor;
+      do {
+        const page = await store.list({ cursor, limit: 1e3 });
+        for (const k of page.keys) bytes += k.metadata?.size ?? 0;
+        cursor = page.list_complete ? void 0 : page.cursor;
+      } while (cursor);
+      return bytes;
     }
   };
 }
 
 // src/quota.ts
+var FREE_REQUESTS_A_DAY = 1e5;
+var REQUESTS_PER_PLAY = 6;
+var FREE_STREAMS_A_DAY = Math.floor(FREE_REQUESTS_A_DAY / REQUESTS_PER_PLAY);
+var FREE_STORAGE = { kv: 1e9, r2: 1e10 };
 function hoursToReset(now = Date.now()) {
   const next = new Date(now);
   next.setUTCHours(24, 0, 0, 0);
@@ -2717,6 +2760,18 @@ async function serveManifest(env) {
   );
   return new Response(body, { status: 200, headers });
 }
+var STORAGE_KEY = "storage-used";
+async function storageUsed(env, now = Date.now()) {
+  try {
+    const kept = JSON.parse(await setting(env.DB, STORAGE_KEY) || "null");
+    if (kept && now - kept.at < 36e5) return kept.bytes;
+    const bytes = await media(env).used();
+    await putSetting(env.DB, STORAGE_KEY, JSON.stringify({ bytes, at: now }));
+    return bytes;
+  } catch {
+    return 0;
+  }
+}
 async function accessConfig(env) {
   const raw = await setting(env.DB, ACCESS_KEY);
   if (raw === null) return { set: false, config: null };
@@ -2825,7 +2880,11 @@ async function handleManage(request, env, path) {
     return new Response(JSON.stringify({ site: clean }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
   }
   if (request.method === "GET" && path === "/stats") {
-    return new Response(JSON.stringify({ songs: await songTotals(env.DB) }), {
+    const usage = {
+      streams: { used: await playsToday(env.DB), of: FREE_STREAMS_A_DAY },
+      storage: { used: await storageUsed(env), of: env.MEDIA ? FREE_STORAGE.r2 : FREE_STORAGE.kv }
+    };
+    return new Response(JSON.stringify({ songs: await songTotals(env.DB), usage }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
     });

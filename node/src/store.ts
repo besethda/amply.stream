@@ -68,6 +68,12 @@ export const SCHEMA = [
      plays INTEGER NOT NULL DEFAULT 0,
      seconds INTEGER NOT NULL DEFAULT 0
    )`,
+  // How many songs were played each day, by everyone together: a number per
+  // day, for the editor's "free streams" bar (quota.ts). The last 30 days.
+  `CREATE TABLE IF NOT EXISTS play_days (
+     day TEXT PRIMARY KEY,
+     plays INTEGER NOT NULL DEFAULT 0
+   )`,
   // How many listeners' network fees the node paid each day (settle.ts): a
   // number per day, to cap what the fee wallet can spend. Not who, not what.
   `CREATE TABLE IF NOT EXISTS fee_days (
@@ -356,13 +362,34 @@ export async function pruneSubscriptions(db: D1Database, now = Date.now()): Prom
   await db.prepare("DELETE FROM subscriptions WHERE until < ?").bind(now - KEEP_FOR).run();
 }
 
-/** One more finished play of a song, by nobody in particular. */
-export async function heard(db: D1Database, track: string, seconds: number): Promise<void> {
+const dayOf = (now: number) => new Date(now).toISOString().slice(0, 10);   // UTC, as Cloudflare's limits reset
+
+/** One more finished play of a song, by nobody in particular, and of today. */
+export async function heard(db: D1Database, track: string, seconds: number, now = Date.now()): Promise<void> {
   const clean = Math.max(0, Math.min(Math.round(seconds), 3600));
   await db.prepare(
     `INSERT INTO track_plays (track, plays, seconds) VALUES (?, 1, ?)
      ON CONFLICT(track) DO UPDATE SET plays = plays + 1, seconds = seconds + excluded.seconds`,
   ).bind(track, clean).run();
+  try {
+    await db.prepare(
+      `INSERT INTO play_days (day, plays) VALUES (?, 1)
+       ON CONFLICT(day) DO UPDATE SET plays = plays + 1`,
+    ).bind(dayOf(now)).run();
+    if (Math.random() < 0.01) {
+      await db.prepare("DELETE FROM play_days WHERE day < ?").bind(dayOf(now - 30 * 86_400_000)).run();
+    }
+  } catch { /* a database from before play_days: counted per song all the same */ }
+}
+
+/** Songs played today (UTC). Nothing on a database from before play_days. */
+export async function playsToday(db: D1Database, now = Date.now()): Promise<number> {
+  try {
+    const row = await db.prepare("SELECT plays FROM play_days WHERE day = ?").bind(dayOf(now)).first<{ plays: number }>();
+    return row?.plays ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** Every song's totals, most played first. Empty on a database built before
