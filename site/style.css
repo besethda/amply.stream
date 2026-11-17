@@ -96,23 +96,51 @@ strong { font-weight: 600; color: var(--ink); }
 
 /* ── buttons ──────────────────────────────────────────────────────── */
 
+/* One lit look for every button: a light line on the top inner edge, a darker
+   bottom inner edge, a tight drop shadow, and a soft glow in the button's own
+   colour. A button sets --glow (its fill colour) and, if it wants, --glow-a
+   (how strong); the layers below are shared. Quiet buttons (ghost, white) set
+   --glow-a near zero and soften the edges. Pressed: the glow shrinks and the
+   bottom edge goes. Disabled: flat. */
+:root {
+  --lit-hi:   rgba(255, 255, 255, .35);   /* inner top edge */
+  --lit-lo:   rgba(0, 0, 0, .2);          /* inner bottom edge */
+  --lit-drop: rgba(0, 0, 0, .4);          /* tight drop shadow */
+  --lit-sheen: linear-gradient(180deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, 0) 70%);
+  /* the quiet version, for white and outlined buttons: same layers, no glow */
+  --lit-quiet: inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -2px 0 rgba(19, 17, 16, .07), 0 1px 2px rgba(19, 17, 16, .14);
+  --lit-quiet-down: inset 0 1px 0 rgba(255, 255, 255, .9), 0 1px 1px rgba(19, 17, 16, .12);
+}
 .btn {
+  --glow: var(--orange); --glow-a: 60%;
+  --lit: inset 0 1px 0 var(--lit-hi), inset 0 -2px 0 var(--lit-lo), 0 1px 2px var(--lit-drop),
+         0 8px 24px -6px color-mix(in srgb, var(--glow) var(--glow-a), transparent);
   display: inline-flex; align-items: center; justify-content: center; gap: 10px;
   font: inherit; font-weight: 700; font-size: 19px; letter-spacing: -0.01em;
-  background: var(--orange); color: var(--on-orange);
+  background: var(--lit-sheen), var(--orange); color: var(--on-orange);
   border: 0; padding: 19px 34px; border-radius: var(--pill);
   cursor: pointer; text-decoration: none;
-  transition: filter .12s ease, transform .08s ease;
+  box-shadow: var(--lit);
+  transition: filter .12s ease, transform .08s ease, box-shadow .15s ease;
 }
-.btn:hover { filter: brightness(1.06); }
-.btn:active { transform: translateY(1px); }
+.btn:hover { filter: brightness(1.06); --glow-a: 80%; }
+.btn:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 0 var(--lit-hi), 0 1px 2px var(--lit-drop),
+              0 3px 10px -5px color-mix(in srgb, var(--glow) var(--glow-a), transparent);
+}
 .btn:focus-visible { outline: 2.5px solid var(--ink); outline-offset: 3px; }
-.btn[disabled] { opacity: .35; cursor: not-allowed; filter: none; transform: none; }
+.btn[disabled] { opacity: .35; cursor: not-allowed; filter: none; transform: none; box-shadow: none; background-image: none; }
 .btn.ghost {
+  --glow: var(--ink); --glow-a: 7%;
+  --lit-hi: rgba(255, 255, 255, .9); --lit-lo: rgba(19, 17, 16, .07); --lit-drop: rgba(19, 17, 16, .14);
   background: transparent; color: var(--ink); border: 1.5px solid var(--line);
   font-family: var(--mono); font-weight: 400; font-size: 15px; padding: 11px 22px;
 }
+.btn.ghost:hover { --glow-a: 11%; }
+.btn.dark { --glow: var(--ink); --glow-a: 40%; }
 .btn.sm { font-size: 16px; padding: 13px 24px; }
+@media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
 .link {
   background: none; border: 0; font: inherit; font-size: 16px; color: var(--ink3);
   cursor: pointer; padding: 6px 0; text-decoration: underline; text-underline-offset: 3px;
