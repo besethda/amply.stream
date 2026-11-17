@@ -2553,22 +2553,52 @@ function ConnectCoinbase({ onAddress }) {
   );
 }
 
-/** Coinbase's deposit address, copied from the Coinbase app: payments go straight in. */
+/** The Coinbase app in this phone's store (it offers "Open" when installed), or the website. */
+function coinbaseAppLink(ua = typeof navigator === "undefined" ? "" : navigator.userAgent) {
+  if (/iPhone|iPad|iPod/.test(ua)) return "https://apps.apple.com/app/id886427730";
+  if (/Android/.test(ua)) return "https://play.google.com/store/apps/details?id=com.coinbase.android";
+  return "https://www.coinbase.com/";
+}
+
+/**
+ * Coinbase's deposit address, copied from the Coinbase app: payments go
+ * straight in. No link can fill it in (only Connect Coinbase, once Coinbase
+ * approves it), so it's one trip to the app and one tap on Paste.
+ */
 function PasteCoinbase({ onAddress }) {
   const [text, setText] = useState("");
+  const [said, setSaid] = useState(null);
   const value = text.trim();
   const good = !!keyOf(value);
+  const save = (a) => { rememberCoinbaseAddress(a); onAddress(a); };
+  const canPaste = typeof navigator !== "undefined" && !!navigator.clipboard?.readText;
+  async function paste() {
+    setSaid(null);
+    try {
+      const got = (await navigator.clipboard.readText()).trim();
+      setText(got);
+      if (keyOf(got)) save(got);
+      else setSaid("That isn't a Solana address. In Coinbase, check the network says Solana, then copy again.");
+    } catch {
+      setSaid("Couldn't read what you copied. Long-press the box below and choose Paste.");
+    }
+  }
   return (
     <div class="connect-coinbase">
       <ol class="cash-steps">
-        <li>In the <b>Coinbase</b> app (free to join), tap <b>Receive</b> and choose <b>USDC</b>.</li>
-        <li>Choose the <b>Solana</b> network, then tap <b>Copy</b>.</li>
-        <li>Paste it here:</li>
+        <li><a class="btn ghost sm" href={coinbaseAppLink()} target="_blank" rel="noopener noreferrer">Open Coinbase</a>{" "}
+          <span class="muted small">free to join</span></li>
+        <li>Tap <b>Receive</b> → <b>USDC</b> → network <b>Solana</b> → <b>Copy</b>.</li>
+        <li>Come back and paste it:</li>
       </ol>
-      <input type="text" class="mono" value={text} placeholder="Your Coinbase USDC address (Solana)" aria-label="Your Coinbase USDC address"
-        autocomplete="off" spellcheck={false} onInput={(e) => setText(e.target.value)} />
-      {value && !good && <p class="warn small">That isn't a Solana address. Check you chose the <b>Solana</b> network in Coinbase.</p>}
-      <button class="btn" disabled={!good} onClick={() => { rememberCoinbaseAddress(value); onAddress(value); }}>Get paid into Coinbase</button>
+      {canPaste && <button class="btn" onClick={paste}>Paste my Coinbase address</button>}
+      {said && <p class="warn small" role="alert">{said}</p>}
+      <div class="paste-row">
+        <input type="text" class="mono" value={text} placeholder="Or paste it here" aria-label="Your Coinbase USDC address (Solana)"
+          autocomplete="off" spellcheck={false} onInput={(e) => setText(e.target.value)} />
+        <button class="btn ghost sm" disabled={!good} onClick={() => save(value)}>Save</button>
+      </div>
+      {value && !good && !said && <p class="warn small">That isn't a Solana address. Check you chose the <b>Solana</b> network in Coinbase.</p>}
       <p class="muted small">Fans' payments go straight into your Coinbase account as USDC (digital dollars, one for one).</p>
     </div>
   );
