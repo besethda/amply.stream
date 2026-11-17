@@ -982,6 +982,10 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .pay-choice span { font-size: 14px; color: var(--ink3); }
 .pay-choice[aria-pressed="true"] { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(246, 113, 30, .18); }
 .pay-next { display: grid; gap: 12px; margin-bottom: 10px; }
+.connect-coinbase { display: grid; gap: 8px; justify-items: start; }
+.connect-coinbase input { width: 100%; }
+.connect-coinbase .cash-steps { margin: 0; }
+.connect-coinbase p { margin: 0; }
 .pay-next p { margin: 0; }
 .pricing .price-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .pricing .price-input {

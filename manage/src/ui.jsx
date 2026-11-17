@@ -45,6 +45,7 @@ import { readTransaction, writeTransaction, base64, keyOf } from "../../node/src
 import { checkFeePayment } from "../../node/src/feepay.ts";
 import { SiteEditor } from "./site-editor.jsx";
 import { coinbaseSolPage } from "../../app/src/topup.js";
+import { startCoinbaseConnect, readCoinbaseAnswer, isCoinbaseAddress, rememberCoinbaseAddress, ANSWER_KEY, CONNECT_OFFERED } from "./coinbase.js";
 
 export const MAX_UPLOAD = 90 * 1024 * 1024;
 
@@ -1397,6 +1398,14 @@ function PayoutReady({ address, live }) {
       else setCheck({ error: e?.message || "Couldn't check just now." });
     }
   }
+  if (isCoinbaseAddress(address)) {
+    return (
+      <div class="payout-ready" role="status">
+        <p><b>✓ Coinbase is connected</b> <span class="mono muted small">{address.slice(0, 4)}…{address.slice(-4)}</span></p>
+        {!live && <p class="warn small">Press <b>Publish</b> at the top so listeners can start paying you.</p>}
+      </div>
+    );
+  }
   return (
     <div class="payout-ready" role="status">
       <p><b>✓ Your payout wallet is set up</b> <span class="mono muted small">{address.slice(0, 4)}…{address.slice(-4)}</span></p>
@@ -2219,11 +2228,16 @@ function EarningsSummary({ paid, payees }) {
           : paid.at ? <>Checked at {new Date(paid.at).toLocaleTimeString()}. <button class="link" onClick={paid.look}>Check again</button></>
           : <button class="link" onClick={paid.look}>Check payments</button>}
       </p>
+      {isCoinbaseAddress(payees.find((p) => p.address)?.address) ? (
+        <p class="payout-where muted small">It goes straight into your Coinbase account. To move it to your bank: in
+          Coinbase, sell the USDC for dollars (one for one), then withdraw.</p>
+      ) : <>
       <p class="payout-where muted small">In your payout wallet{" "}
         <Help about="your payout wallet">Where fans' payments land. Only you can move money out of it.</Help>{" "}
         <code title={payees.find((p) => p.address)?.address}>{short(payees.find((p) => p.address)?.address)}</code>{" "}
         <CopyButton text={payees.find((p) => p.address)?.address} label="Copy" /></p>
       <a class="btn sm" href="#cash-out" onClick={(e) => { e.preventDefault(); const c = document.getElementById("cash-out"); c?.scrollIntoView({ behavior: "smooth", block: "start" }); c?.querySelector("button.choice")?.focus({ preventScroll: true }); }}>Move it to your bank</a>
+      </>}
     </section>
   );
 }
@@ -2503,10 +2517,62 @@ const VIA_KEY = "amply.editor.payout-via";
 const readVia = () => { try { return localStorage.getItem(VIA_KEY); } catch { return null; } };
 
 const WAYS = [
+  ["coinbase", "Coinbase", "Recommended · payments go straight in"],
   ["cashapp", "Cash App", "US · fans pay by the minute"],
-  ["coinbase", "Coinbase", "Most countries · fans pay by the minute"],
   ["stripe", "Card subscriptions", "Stripe · fans subscribe by card"],
 ];
+
+/**
+ * Connect Coinbase: sign in and approve, and fans' payments go straight into
+ * the artist's Coinbase account. The answer arrives through the window it
+ * opened (coinbase.js), so this page keeps any unpublished changes.
+ */
+function ConnectCoinbase({ onAddress }) {
+  const [said, setSaid] = useState(null);
+  const apply = useRef(null);
+  apply.current = (a) => {
+    if (a.address) {
+      onAddress(a.address);
+      setSaid({ good: true, text: "Coinbase is connected. Publish, and fans' payments go straight into your Coinbase account." });
+    } else setSaid({ good: false, text: `${a.error}.` });
+  };
+  useEffect(() => {
+    const check = () => { const a = readCoinbaseAnswer(); if (a) apply.current(a); };
+    check();
+    const onStorage = (e) => { if (e.key === ANSWER_KEY && e.newValue) check(); };
+    addEventListener("storage", onStorage);
+    return () => removeEventListener("storage", onStorage);
+  }, []);
+  return (
+    <div class="connect-coinbase">
+      <button class="btn" onClick={() => { setSaid(null); startCoinbaseConnect(); }}>Connect Coinbase</button>
+      <p class="muted small">Sign in to Coinbase (or join, it's free) and approve. Amply only makes an address for
+        your payments, then lets go of the connection. It can never move your money.</p>
+      {said && <p class={said.good ? "good" : "warn"} role="status">{said.text}</p>}
+    </div>
+  );
+}
+
+/** Coinbase's deposit address, copied from the Coinbase app: payments go straight in. */
+function PasteCoinbase({ onAddress }) {
+  const [text, setText] = useState("");
+  const value = text.trim();
+  const good = !!keyOf(value);
+  return (
+    <div class="connect-coinbase">
+      <ol class="cash-steps">
+        <li>In the <b>Coinbase</b> app (free to join), tap <b>Receive</b> and choose <b>USDC</b>.</li>
+        <li>Choose the <b>Solana</b> network, then tap <b>Copy</b>.</li>
+        <li>Paste it here:</li>
+      </ol>
+      <input type="text" class="mono" value={text} placeholder="Your Coinbase USDC address (Solana)" aria-label="Your Coinbase USDC address"
+        autocomplete="off" spellcheck={false} onInput={(e) => setText(e.target.value)} />
+      {value && !good && <p class="warn small">That isn't a Solana address. Check you chose the <b>Solana</b> network in Coinbase.</p>}
+      <button class="btn" disabled={!good} onClick={() => { rememberCoinbaseAddress(value); onAddress(value); }}>Get paid into Coinbase</button>
+      <p class="muted small">Fans' payments go straight into your Coinbase account as USDC (digital dollars, one for one).</p>
+    </div>
+  );
+}
 
 /** Before anything is set up: only the ways to be paid, and the one step each needs. */
 function GetPaid({ via, onVia, payees, setPayees, manifest, update, api, only }) {
@@ -2523,7 +2589,20 @@ function GetPaid({ via, onVia, payees, setPayees, manifest, update, api, only })
           </button>
         ))}
       </div>
-      {(via === "cashapp" || via === "coinbase") && (
+      {via === "coinbase" && (
+        <div class="pay-next">
+          {CONNECT_OFFERED ? <ConnectCoinbase onAddress={setAddress} /> : <PasteCoinbase onAddress={setAddress} />}
+          <details class="more">
+            <summary>Rather keep it in your own wallet first?</summary>
+            <p>One tap makes a payout wallet with Face ID; you send it on to Coinbase whenever you like.</p>
+            <PasskeyWallet onAddress={setAddress} />
+            <Field label="Or paste a Solana wallet address">
+              <Text value={payees[0]?.address || ""} class="mono" placeholder="Your wallet address" onInput={(v) => setAddress(v.trim())} />
+            </Field>
+          </details>
+        </div>
+      )}
+      {via === "cashapp" && (
         <div class="pay-next">
           <p>One tap makes your payout wallet. Fans' payments land there; you send them on to {name} whenever you like.</p>
           <PasskeyWallet onAddress={setAddress} />
@@ -2609,9 +2688,9 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
         {hasWallet && <Pricing wallet={wallet} onChange={setWallet} />}
         {subscribing && <Subscriptions manifest={manifest} update={update} api={api} />}
         <Listeners api={api} paid={paid} rate={rate} settleAt={settleAt} />
-        {hasWallet && <CashOut api={api} payees={payees} network={network} via={via} />}
+        {hasWallet && !isCoinbaseAddress(payees.find((p) => p.address)?.address) && <CashOut api={api} payees={payees} network={network} via={via} />}
         {hasWallet && <FeesCard api={api} network={network} payees={payees} />}
-        {!hasWallet && <GetPaid via={via} onVia={setVia} payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} only={["cashapp", "coinbase"]} />}
+        {!hasWallet && <GetPaid via={via} onVia={setVia} payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} only={["coinbase", "cashapp"]} />}
         <details class="advanced">
           <summary>More <span class="note">{[!subscribing && "card subscriptions", hasWallet && "split with bandmates", hasWallet && "test mode"].filter(Boolean).join(", ")}</span></summary>
           <div class="stack">
