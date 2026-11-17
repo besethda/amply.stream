@@ -1678,6 +1678,7 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
               />
             </Field>
 
+            <div class="links">
             <span class="field-label">Links</span>
             {links.map((l, i) => (
               <div class="link-row" key={i}>
@@ -1700,6 +1701,7 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
             <button class="btn ghost" onClick={() => setLinks([...links, { label: "", url: "" }])}>
               + Add a link
             </button>
+            </div>
 
             <Field
               label="Email for GDPR compliance"
