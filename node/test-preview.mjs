@@ -4,7 +4,7 @@
  *
  *   node --experimental-strip-types node/test-preview.mjs
  */
-import { hashKey, readPreviewKey, previewSession, openPreview } from "./src/preview-key.ts";
+import { hashKey, readPreviewKey, previewSession, openPreview, previewNotice } from "./src/preview-key.ts";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -45,6 +45,19 @@ ok("the cookie is a session", await previewSession(withCookie(`x=1; amply_previe
 ok("  until the hour is up", !(await previewSession(withCookie(`amply_preview=${KEY}`), stored, stored.until)));
 ok("  and not with someone else's key", !(await previewSession(withCookie(`amply_preview=${"C".repeat(43)}`), stored, NOW)));
 ok("  and not with none", !(await previewSession(new Request("https://a.b.workers.dev/manage"), stored, NOW)));
+
+// ── what the editor is told ─────────────────────────────────────────────────
+{
+  const CLAIM = "https://dash.cloudflare.com/claim-preview/abc?claimToken=t";
+  const withClaim = readPreviewKey(JSON.stringify({ ...stored, claim: CLAIM, claimUntil: NOW + 20 * 60_000 }));
+  ok("the editor is told when the hour ends", previewNotice(withClaim, NOW).until === new Date(stored.until).toISOString());
+  ok("  and given the claim link while it works", previewNotice(withClaim, NOW).claim === CLAIM);
+  ok("  but not after", previewNotice(withClaim, NOW + 20 * 60_000).claim === null);
+  const elsewhere = readPreviewKey(JSON.stringify({ ...stored, claim: "https://evil.test/claim", claimUntil: NOW + 1e6 }));
+  ok("a claim link that isn't Cloudflare's is dropped", elsewhere?.hash === stored.hash && previewNotice(elsewhere, NOW).claim === null);
+  const script = readPreviewKey(JSON.stringify({ ...stored, claim: "javascript:alert(1)", claimUntil: NOW + 1e6 }));
+  ok("  and so is anything that isn't a link at all", previewNotice(script, NOW).claim === null);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

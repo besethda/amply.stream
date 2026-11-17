@@ -939,7 +939,10 @@ async function watchCertificate(url) {
     // "Try it free" links (/start#try) go straight to naming the page,
     // unless a setup is already under way in this browser.
     const trying = location.hash === "#try" && state.step === "intro";
-    show(trying ? "instant" : ["working", "error", "choose"].includes(state.step) ? back : state.step);
+    // The editor's "Lock your editor" (/start#lock), after the page is claimed:
+    // straight to locking it, if this browser made it.
+    const locking = location.hash === "#lock" && !!pendingPreview();
+    show(locking ? "connect" : trying ? "instant" : ["working", "error", "choose"].includes(state.step) ? back : state.step);
     return;
   }
 

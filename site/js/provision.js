@@ -139,14 +139,20 @@ export function editorLink() {
 /**
  * Make the key that opens a temporary node's editor, and give the node its
  * hash. It opens the editor until the temporary account would expire; after
- * that, or once the editor is locked to the artist, it opens nothing.
+ * that, or once the editor is locked to the artist, it opens nothing. The
+ * claim link goes with it, so the editor can offer "keep it" from any tab.
  */
-async function makeEditorKey(ctx, until) {
+async function makeEditorKey(ctx, preview) {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
   const key = btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key)));
   const hash = [...digest].map((b) => b.toString(16).padStart(2, "0")).join("");
-  await putSetting(ctx, "preview-key", JSON.stringify({ hash, until: Date.parse(until) }));
+  await putSetting(ctx, "preview-key", JSON.stringify({
+    hash,
+    until: Date.parse(preview.expiresAt),
+    claim: preview.claimUrl,
+    claimUntil: Date.parse(preview.claimExpiresAt),
+  }));
   return key;
 }
 
@@ -1110,7 +1116,7 @@ export async function provisionInstant({
   }
 
   // So the artist can add their music now, before they've signed up.
-  preview.editorKey = await makeEditorKey(ctx, preview.expiresAt);
+  preview.editorKey = await makeEditorKey(ctx, preview);
   try { sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(preview)); } catch { /* the editor then waits for the claim */ }
 
   return {

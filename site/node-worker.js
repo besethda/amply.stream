@@ -85,14 +85,23 @@ async function verifyAccess(request, config) {
 // src/preview-key.ts
 var PREVIEW_KEY = "preview-key";
 var COOKIE = "amply_preview";
+var CLAIM = /^https:\/\/dash\.cloudflare\.com\/[^\s"<>]+$/;
 function readPreviewKey(raw) {
   if (!raw) return null;
   try {
     const k = JSON.parse(raw);
-    return k && /^[0-9a-f]{64}$/.test(k.hash) && Number.isFinite(k.until) ? k : null;
+    if (!k || !/^[0-9a-f]{64}$/.test(k.hash) || !Number.isFinite(k.until)) return null;
+    const claimOk = typeof k.claim === "string" && CLAIM.test(k.claim) && Number.isFinite(k.claimUntil);
+    return claimOk ? k : { hash: k.hash, until: k.until };
   } catch {
     return null;
   }
+}
+function previewNotice(k, now = Date.now()) {
+  return {
+    until: new Date(k.until).toISOString(),
+    claim: k.claim && k.claimUntil > now ? k.claim : null
+  };
 }
 async function hashKey(key) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
@@ -2261,7 +2270,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.7";
+var VERSION = "3.19.8";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
@@ -2605,7 +2614,8 @@ async function handleManage(request, env, path) {
   }
   if (request.method === "GET" && path === "/whoami") {
     const home = await setting(env.DB, "home");
-    return new Response(JSON.stringify({ email, version: VERSION, home }), {
+    const temporary = config ? null : previewNotice(preview);
+    return new Response(JSON.stringify({ email, version: VERSION, home, temporary }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
     });

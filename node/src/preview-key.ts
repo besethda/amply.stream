@@ -15,19 +15,36 @@
  * only way in, as on every other node.
  */
 
-export const PREVIEW_KEY = "preview-key";   // { hash, until } in settings, written at setup
+export const PREVIEW_KEY = "preview-key";   // { hash, until, claim?, claimUntil? } in settings, written at setup
 const COOKIE = "amply_preview";
+const CLAIM = /^https:\/\/dash\.cloudflare\.com\/[^\s"<>]+$/;
 
-export interface PreviewKey { hash: string; until: number }
+/**
+ * The claim link rides along, so the editor can offer "keep it" from any tab,
+ * not only the setup tab that made it. It is shown only to a request that
+ * already holds the key, which can edit the page anyway, and it goes with the
+ * key when setup finishes.
+ */
+export interface PreviewKey { hash: string; until: number; claim?: string; claimUntil?: number }
 
 export function readPreviewKey(raw: string | null): PreviewKey | null {
   if (!raw) return null;
   try {
     const k = JSON.parse(raw) as PreviewKey;
-    return k && /^[0-9a-f]{64}$/.test(k.hash) && Number.isFinite(k.until) ? k : null;
+    if (!k || !/^[0-9a-f]{64}$/.test(k.hash) || !Number.isFinite(k.until)) return null;
+    const claimOk = typeof k.claim === "string" && CLAIM.test(k.claim) && Number.isFinite(k.claimUntil);
+    return claimOk ? k : { hash: k.hash, until: k.until };
   } catch {
     return null;
   }
+}
+
+/** What the editor tells an artist who opened it with the key. */
+export function previewNotice(k: PreviewKey, now = Date.now()) {
+  return {
+    until: new Date(k.until).toISOString(),
+    claim: k.claim && k.claimUntil! > now ? k.claim : null,
+  };
 }
 
 export async function hashKey(key: string): Promise<string> {

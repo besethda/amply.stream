@@ -198,6 +198,9 @@ textarea { resize: vertical; line-height: 1.5; min-height: 110px; }
    artist's music is working fine. */
 .banner.update { background: var(--bg2); color: var(--ink2); border: 1px solid var(--line); }
 .banner.update .link { white-space: nowrap; }
+/* A page from before signup, with its hour running out: always there, not a toast. */
+.banner.temp { background: rgba(246, 113, 30, .13); color: var(--ink); flex-wrap: wrap; }
+.banner.temp .temp-steps { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ── music tab: releases ──────────────────────────────────────────── */
 

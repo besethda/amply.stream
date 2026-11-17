@@ -2792,7 +2792,31 @@ export function isNewer(latest, mine) {
   return false;
 }
 
-export function Editor({ api, node, initial, published = true, initialTab = "home", version = null, onSignOut }) {
+/**
+ * Opened with the key from before signup (node/src/preview-key.ts): the page
+ * is in a temporary account that Cloudflare deletes after an hour, and this
+ * editor stops opening then too. Two steps keep it: claim the account on
+ * Cloudflare, then lock the editor to the artist at amply.stream.
+ */
+function Temporary({ until, claim }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 20_000);
+    return () => clearInterval(t);
+  }, []);
+  const left = Math.max(0, Math.ceil((Date.parse(until) - now) / 60_000));
+  return (
+    <div class="banner temp" role="status">
+      <span>{left > 0 ? <>Temporary: <b>{left} min</b> left. Keep it, then lock your editor.</> : "Time's up. Kept it? Lock your editor to keep editing."}</span>
+      <span class="temp-steps">
+        {claim && left > 0 && <a class="btn sm" href={claim} target="_blank" rel="noopener noreferrer">Keep it ↗</a>}
+        <a class="btn sm ghost" href="https://amply.stream/start#lock" target="_blank" rel="noopener">Lock editor ↗</a>
+      </span>
+    </div>
+  );
+}
+
+export function Editor({ api, node, initial, published = true, initialTab = "home", version = null, onSignOut, temporary = null }) {
   const [manifest, setManifest] = useState(initial);
   const [payees, setPayees] = useState(() => readPayees(initial));
   // What the page is actually serving. null on a node that has never published.
@@ -3058,6 +3082,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
       <main class="page">
         {/* On a phone the header has no room for these. */}
         <div class="page-links">{links}</div>
+        {temporary && <Temporary until={temporary.until} claim={temporary.claim} />}
         <div class="toasts">
           {jobs.map((j) => <JobCard key={j.id} job={j} />)}
           <Banner kind={msg?.kind} action={msg?.action} onDismiss={() => setMsg(null)}>{msg?.text}</Banner>

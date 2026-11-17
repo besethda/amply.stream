@@ -65,7 +65,9 @@ function App() {
       initial={state.manifest}
       published={state.published}
       version={state.who?.version || null}
-      onSignOut={() => location.assign("/cdn-cgi/access/logout")}
+      // Opened with the key from before signup: no Cloudflare sign-in to leave.
+      temporary={state.who?.temporary || null}
+      onSignOut={state.who?.temporary ? undefined : () => location.assign("/cdn-cgi/access/logout")}
     />
   );
 }
