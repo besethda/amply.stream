@@ -2129,7 +2129,7 @@ function FeesCard({ api, network, payees }) {
   useEffect(load, [load]);
 
   if (!api?.fees || !network || !payees?.length) return null;
-  const head = <h2>Your fees account <span class="note">needed to send to your bank</span></h2>;
+  const head = <h2>Fees account</h2>;
   if (failed) return (
     <section class="card">{head}
       <p class="muted">Couldn't check this just now. <button class="link" onClick={load}>Try again</button></p></section>
@@ -2138,66 +2138,38 @@ function FeesCard({ api, network, payees }) {
 
   // 10,000 lamports a payment; what's held back keeps the account itself open.
   const payments = fees.lamports == null ? null : Math.max(0, Math.floor((fees.lamports - (fees.offerAbove || 3_000_000)) / 10_000));
+  const real = fees.network === "solana";
+  const byHand = (
+    <details class="fee-how">
+      <summary>{real ? "Or send SOL yourself" : "Send test SOL to it"}</summary>
+      <p class="muted small">Send SOL (not USDC) on the Solana network to:</p>
+      <div class="copy-row">
+        <CopyButton text={fees.address} label="Copy" className="btn sm" />
+        <code>{fees.address}</code>
+      </div>
+    </details>
+  );
   if (fees.offering) {
     return (
       <details class="card fees-on" id="fees">
         <summary><b>Fees account</b> <span class="pill-status on">On</span>
           <span class="muted small">{payments != null ? `about ${payments.toLocaleString()} payments left` : ""}</span></summary>
-        <p class="muted small">Pays the tiny network fees on your fans' payments and your sends to the bank, so nobody
-          needs a coin called SOL. At most 0.01 SOL of fees a day (a dollar or two). Top it up when it runs low:</p>
-        {fees.network === "solana" && <BuySol api={api} label="Top up $5 with Coinbase" />}
-        <p class="muted small">Or send SOL to this address:</p>
-        <div class="copy-row">
-          <CopyButton text={fees.address} label="Copy the fees address" className="btn sm" />
-          <code>{fees.address}</code>
-        </div>
+        {real && <BuySol api={api} label="Top up $5 with Coinbase" />}
+        {byHand}
         <button class="btn ghost sm" onClick={load}>Refresh</button>
       </details>
     );
   }
   return (
     <section class="card" id="fees">
-      {head}
-      <p class="lead"><b>Add about $5 once.</b> It pays the tiny network fees when you send money to your bank, and lets
-        new listeners pay you without buying a coin first.</p>
-      <p class={`fee-status ${fees.offering ? "on" : "off"}`}>
-        <span class={`pill-status ${fees.offering ? "on" : "off"}`}>{fees.offering ? "On" : "Off"}</span>
-        {fees.offering
-          ? <> Paying network fees for you and your listeners.{payments != null && <> Enough left for about {payments.toLocaleString()} payments or sends to your bank.</>}</>
-          : <> Empty. Add SOL to send to your bank; until then, listeners pay their own tiny fees.</>}
-      </p>
-      <p class="muted">$5 lasts thousands of payments, usually months.{" "}
-        <Help about="why listeners need a coin">Every payment has a tiny processing fee, a fraction of a cent,
-          charged by the payment network (Solana). It's paid in SOL, a coin used only for these fees. Without
-          this, each new listener has to buy a little SOL first.</Help></p>
-      {fees.network === "solana" && <>
-        <BuySol api={api} />
-        <p class="muted small">Coinbase sells you $5 of SOL by card (plus their small fee) and sends it straight here.
-          It switches on by itself a few minutes after it arrives.</p>
-      </>}
-      <details class="fee-how" open={!fees.offering && fees.network !== "solana"}>
-        <summary>{fees.network === "solana" ? "Or do it by hand in the Coinbase app" : "How to turn it on (about 5 minutes)"}</summary>
-        <ol>
-          <li>Copy the address of your fees account. It's separate and small: your earnings never go here.
-            <div class="copy-row">
-              <CopyButton text={fees.address} label="Copy the fees address" className="btn sm" />
-              <code>{fees.address}</code>
-            </div></li>
-          <li>In the <b>Coinbase</b> app (free to join): tap <b>Buy</b>, search for <b>Solana (SOL)</b>, buy $5
-            (Coinbase adds a small fee, under a dollar). Then open SOL, tap <b>Send</b>, paste the address, and send
-            all of the SOL you just bought.
-            If it asks for a network, choose <b>Solana</b>.</li>
-          <li>Come back here. It switches on by itself within a few minutes of the SOL arriving. Buy with a debit card:
-            SOL bought by bank transfer can be held for a few days before Coinbase lets you send it.</li>
-        </ol>
-        <p class="muted small">Cash App can't send SOL, so use Coinbase for this one step. Send SOL, not dollars
-          (USDC): this account only pays fees.</p>
-      </details>
-      <p class="muted small">
-        {fees.paidToday ? `Covered ${fees.paidToday} payment${fees.paidToday === 1 ? "" : "s"} today. ` : ""}
-        It only pays for payments to you, and at most 0.01 SOL of fees a day (a dollar or two).
-        {fees.network !== "solana" ? ` Test network (${fees.network}).` : ""}</p>
-      <button class="btn ghost sm" onClick={load}>{fees.offering ? "Refresh" : "I've sent it: check now"}</button>
+      <h2>Fees account <span class="pill-status off">Off</span></h2>
+      <p>Add $5 once. It pays the tiny network fee on each of your fans' payments, so they don't need anything
+        extra. It lasts months.</p>
+      {real && <BuySol api={api} />}
+      {byHand}
+      <p class="muted small">It switches on a few minutes after the money arrives.
+        {real ? "" : ` Test network (${fees.network}).`}{" "}
+        <button class="link" onClick={load}>Check now</button></p>
     </section>
   );
 }
