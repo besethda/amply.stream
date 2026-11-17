@@ -9,7 +9,7 @@
  * Run via `npm --prefix manage run test`.
  */
 import { fromSlider, toSlider, cents, RATE_MAX, SLIDER_STEPS, sizeAdvice,
-  settleFor, batchOf, withPrice, BATCHES, DEFAULT_BATCH } from "./src/ui.jsx";
+  settleFor, batchOf, withPrice, BATCHES, DEFAULT_BATCH, payoutFee, NETWORK_FEE_USD } from "./src/ui.jsx";
 import { validate } from "../spec/manifest-rules.mjs";
 
 let pass = 0, fail = 0;
@@ -85,6 +85,10 @@ is("every 5 songs at a cent a minute is 20c", settleFor(5, 0.01), 0.2);
 is("every song at a cent a minute is 4c", settleFor(1, 0.01), 0.04);
 is("every song at the cheapest price still sends at least a cent", settleFor(1, 0.0001), 0.01);
 is("every 10 songs at the cap is $2", settleFor(10, RATE_MAX), 2);
+is("at 2c a song, every 10 songs is a 20c payment", payoutFee(10, 0.005).payment, 0.2);
+is("  whose network fee is half a percent", payoutFee(10, 0.005).share, NETWORK_FEE_USD / 0.2);
+is("every song at 2c: the fee is 5%", Math.round(payoutFee(1, 0.005).share * 100), 5);
+is("the fee is a tenth of a cent", NETWORK_FEE_USD, 0.001);
 is("a stored 20c at a cent a minute reads back as every 5 songs", batchOf({ ratePerMinute: 0.01, settleAt: 0.2 }), 5);
 is("an old $20 threshold reads back as the largest batch", batchOf({ ratePerMinute: 0.01, settleAt: 20 }), 10);
 is("no threshold yet defaults to every 5 songs", batchOf({ ratePerMinute: 0.01 }), DEFAULT_BATCH);

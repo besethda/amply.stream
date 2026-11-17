@@ -891,6 +891,19 @@ export function settleFor(songs, rate) {
   return Math.min(Math.max(usd, SETTLE_MIN), SETTLE_MAX);
 }
 
+/**
+ * What one payment's network fee costs, in dollars: about 10,000 lamports (two
+ * signatures), which is roughly a tenth of a cent at SOL's late-2026 price of
+ * about $90–145. It's paid from the fees account, never from the payment.
+ */
+export const NETWORK_FEE_USD = 0.001;
+
+/** One payment's size at `songs` a payment, and the fee's share of it. */
+export function payoutFee(songs, rate) {
+  const payment = settleFor(songs, rate);
+  return { payment, share: NETWORK_FEE_USD / payment };
+}
+
 /** Which choice a stored threshold corresponds to, nearest wins. */
 export function batchOf(wallet) {
   const perSong = (wallet.ratePerMinute ?? 0) * TYPICAL_SONG_MIN;
@@ -2650,10 +2663,20 @@ function Pricing({ wallet, onChange }) {
           <select value={batch} onChange={(e) => onChange({ ...wallet, settleAt: settleFor(Number(e.target.value), rate) })}>
             {BATCHES.map((b) => <option key={b} value={b}>{b}</option>)}
           </select>{" "}{batch === 1 ? "song" : "songs"}{" "}
-          <Help at="batching" about="how often">Fewer, bigger payments cost less in network fees. Anything smaller is
-            paid within a week.</Help>
+          <Help at="batching" about="how often">Each payment has a network fee of about a tenth of a cent, paid from
+            your fees account. Fewer, bigger payments waste less of it. Whatever a fan owes below this is paid within a
+            week, so nothing is lost.</Help>
         </label>
       )}
+      {rate > 0 && (() => {
+        const { payment, share } = payoutFee(batch, rate);
+        const pct = share * 100 < 1 ? Number((share * 100).toFixed(1)) : Math.round(share * 100);
+        return (
+          <p class={`small ${share > 0.02 ? "warn" : "muted"}`}>
+            About {cents(payment)} a payment · network fee about 0.1¢, {pct}% of it
+            {share > 0.02 ? ". Pay every few more songs to waste less." : "."}</p>
+        );
+      })()}
     </section>
   );
 }
