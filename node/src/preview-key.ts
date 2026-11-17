@@ -24,26 +24,62 @@ const CLAIM = /^https:\/\/dash\.cloudflare\.com\/[^\s"<>]+$/;
  * not only the setup tab that made it. It is shown only to a request that
  * already holds the key, which can edit the page anyway, and it goes with the
  * key when setup finishes.
+ *
+ * So does the temporary account's own token, never shown to anyone: it is
+ * how this node learns the account has been claimed, because claiming ends
+ * it. Once it has, the token and the claim link are dropped (`claimed`).
  */
-export interface PreviewKey { hash: string; until: number; claim?: string; claimUntil?: number }
+export interface PreviewKey {
+  hash: string; until: number;
+  claim?: string; claimUntil?: number;
+  token?: string; claimed?: boolean;
+}
 
 export function readPreviewKey(raw: string | null): PreviewKey | null {
   if (!raw) return null;
   try {
     const k = JSON.parse(raw) as PreviewKey;
     if (!k || !/^[0-9a-f]{64}$/.test(k.hash) || !Number.isFinite(k.until)) return null;
-    const claimOk = typeof k.claim === "string" && CLAIM.test(k.claim) && Number.isFinite(k.claimUntil);
-    return claimOk ? k : { hash: k.hash, until: k.until };
+    const out: PreviewKey = { hash: k.hash, until: k.until };
+    if (k.claimed === true) return { ...out, claimed: true };
+    if (typeof k.claim === "string" && CLAIM.test(k.claim) && Number.isFinite(k.claimUntil)) {
+      out.claim = k.claim;
+      out.claimUntil = k.claimUntil;
+    }
+    if (typeof k.token === "string" && /^[A-Za-z0-9._-]{20,512}$/.test(k.token)) out.token = k.token;
+    return out;
   } catch {
     return null;
   }
 }
 
+/**
+ * Whether the temporary account has been claimed: true once its token is
+ * refused, false while it works, null when Cloudflare can't say.
+ */
+export async function claimedYet(k: PreviewKey): Promise<boolean | null> {
+  if (k.claimed) return true;
+  if (!k.token) return null;
+  try {
+    const res = await fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", {
+      headers: { Authorization: `Bearer ${k.token}` },
+    });
+    if (res.status === 401 || res.status === 403) return true;
+    return res.ok ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The same key, after the claim: nothing left that only mattered before it. */
+export const afterClaim = (k: PreviewKey): PreviewKey => ({ hash: k.hash, until: k.until, claimed: true });
+
 /** What the editor tells an artist who opened it with the key. */
-export function previewNotice(k: PreviewKey, now = Date.now()) {
+export function previewNotice(k: PreviewKey, claimed: boolean | null, now = Date.now()) {
   return {
     until: new Date(k.until).toISOString(),
-    claim: k.claim && k.claimUntil! > now ? k.claim : null,
+    claimed: claimed === true,
+    claim: claimed !== true && k.claim && k.claimUntil! > now ? k.claim : null,
   };
 }
 

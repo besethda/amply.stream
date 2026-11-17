@@ -107,7 +107,7 @@
   <ul class="rows stack">
     <li><span class="n">1</span><span class="t">Try it: name your page and watch it go up. No sign-up, no card.</span></li>
     <li><span class="n">2</span><span class="t">Like it? Keep it: sign up with Cloudflare, the free hosting it runs on. Google or Apple sign-in works.</span></li>
-    <li><span class="n">3</span><span class="t">Make your editor private to you, then add your music.</span></li>
+    <li><span class="n">3</span><span class="t">Protect your editor, so only you can sign in.</span></li>
   </ul>
 
   <p class="lead" style="margin-bottom:30px">It's a trial page. You can open it, look around and send it to a friend.
@@ -179,7 +179,7 @@
     <li><span class="n">1</span><span class="t">Press <strong>Make it mine</strong>. Cloudflare opens in a new tab.</span></li>
     <li><span class="n">2</span><span class="t">Sign up, or sign in if you already have an account. Google or Apple works.</span></li>
     <li><span class="n">3</span><span class="t">Cloudflare asks whether to claim the account. Say yes.</span></li>
-    <li><span class="n">4</span><span class="t">Come back to this tab and press <strong>I've claimed it</strong>.</span></li>
+    <li><span class="n">4</span><span class="t">Come back to this tab.</span></li>
   </ul>
 
   <div class="actions" style="margin-bottom:26px">
@@ -641,6 +641,13 @@ $("#claimed-btn").addEventListener("click", async () => {
   show("connect");
 });
 
+// Coming back from Cloudflare's tab: once the account is claimed, go straight
+// on to protecting the editor rather than waiting for "I've claimed it".
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible" || state.step !== "claim" || !claimLink()) return;
+  if (await stillTemporary({ relay: CONFIG.relay }) === false) { $("#claim-said").hidden = true; show("connect"); }
+});
+
 // The claim link is only in this tab. While it's needed, closing or
 // reloading away from it asks first.
 window.addEventListener("beforeunload", (e) => {
@@ -656,17 +663,17 @@ $("#claim-link").addEventListener("click", () => {
 /** The connect step reads differently when it finishes a page that's already live. */
 function paintConnect() {
   const finishing = !!pendingPreview();
-  $("#connect-title").textContent = finishing ? "Make your editor private." : "Connect it.";
+  $("#connect-title").textContent = finishing ? "Protect your editor." : "Connect it.";
   // A claimed page already has everything on that list, and a name: only the
   // lock is new, and the email is all it needs.
   $("#connect-makes").hidden = finishing;
   document.querySelector('label[for="artist-name"]').hidden = finishing;
   $("#slug-preview").hidden = finishing;
-  connectBtn.textContent = finishing ? "Make my editor private" : "Set up my streaming service";
+  connectBtn.textContent = finishing ? "Protect my editor" : "Set up my streaming service";
   // Back from here is back to claiming, for a page that's already live.
   document.querySelector('[data-panel="connect"] .back .link').dataset.go = finishing ? "claim" : "cloudflare";
   $("#connect-lead").textContent = finishing
-    ? "Sign in with the Cloudflare account you just claimed. Cloudflare then shows a list of what Amply is asking to do: approve it. We'll set your editor so only your email can open it, then remove our own access. That's the last step."
+    ? "Approve Amply on Cloudflare, with the account you just claimed. After that only your email opens your editor, and Amply's access ends."
     : "We set your streaming up for you, then remove our own access. Cloudflare will show a list of what Amply is asking to do: approve it.";
 }
 paintConnect();

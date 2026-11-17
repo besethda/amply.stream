@@ -160,6 +160,7 @@ ok("this browser remembers there's one to finish", pendingPreview()?.accountId =
   ok("  for as long as the temporary account lasts", Math.abs(stored.until - (Date.now() + 3600e3)) < 60e3);
   ok("  with the claim link, so the editor can offer to keep it", stored.claim === "https://dash.cloudflare.com/claim/abc"
     && Math.abs(stored.claimUntil - (Date.now() + 3600e3)) < 60e3);
+  ok("  and the temporary token, so the node can tell when it's kept", stored.token === "temporary-token");
 }
 
 // ── running it again in the same tab ────────────────────────────────────────

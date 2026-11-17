@@ -16,7 +16,7 @@
  */
 
 import { verifyAccess, type AccessConfig } from "./access";
-import { PREVIEW_KEY, OPEN_PAGE, readPreviewKey, previewSession, openPreview, previewNotice } from "./preview-key";
+import { PREVIEW_KEY, OPEN_PAGE, readPreviewKey, previewSession, openPreview, previewNotice, claimedYet, afterClaim } from "./preview-key";
 import { renderPage, renderPrivacy, pageCsp, pageWebManifest } from "./page";
 import {
   setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale,
@@ -337,9 +337,14 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     // `home` is a domain of the artist's own, if one was attached at
     // amply.stream/domain, so the editor shares that address instead.
     const home = await setting(env.DB, "home");
-    // Opened with the key from before signup: how long is left, and the link
-    // that keeps the page, so the editor can say both.
-    const temporary = config ? null : previewNotice(preview!);
+    // Opened with the key from before signup: how long is left, whether the
+    // page has been kept yet, and if not, the link that keeps it.
+    let temporary = null;
+    if (!config) {
+      const claimed = await claimedYet(preview!);
+      if (claimed && !preview!.claimed) await putSetting(env.DB, PREVIEW_KEY, JSON.stringify(afterClaim(preview!)));
+      temporary = previewNotice(preview!, claimed);
+    }
     return new Response(JSON.stringify({ email, version: VERSION, home, temporary }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),

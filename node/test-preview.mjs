@@ -4,7 +4,7 @@
  *
  *   node --experimental-strip-types node/test-preview.mjs
  */
-import { hashKey, readPreviewKey, previewSession, openPreview, previewNotice } from "./src/preview-key.ts";
+import { hashKey, readPreviewKey, previewSession, openPreview, previewNotice, claimedYet, afterClaim } from "./src/preview-key.ts";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -50,13 +50,41 @@ ok("  and not with none", !(await previewSession(new Request("https://a.b.worker
 {
   const CLAIM = "https://dash.cloudflare.com/claim-preview/abc?claimToken=t";
   const withClaim = readPreviewKey(JSON.stringify({ ...stored, claim: CLAIM, claimUntil: NOW + 20 * 60_000 }));
-  ok("the editor is told when the hour ends", previewNotice(withClaim, NOW).until === new Date(stored.until).toISOString());
-  ok("  and given the claim link while it works", previewNotice(withClaim, NOW).claim === CLAIM);
-  ok("  but not after", previewNotice(withClaim, NOW + 20 * 60_000).claim === null);
+  ok("the editor is told when the hour ends", previewNotice(withClaim, false, NOW).until === new Date(stored.until).toISOString());
+  ok("  and given the claim link while it works", previewNotice(withClaim, false, NOW).claim === CLAIM);
+  ok("  but not after", previewNotice(withClaim, false, NOW + 20 * 60_000).claim === null);
   const elsewhere = readPreviewKey(JSON.stringify({ ...stored, claim: "https://evil.test/claim", claimUntil: NOW + 1e6 }));
-  ok("a claim link that isn't Cloudflare's is dropped", elsewhere?.hash === stored.hash && previewNotice(elsewhere, NOW).claim === null);
+  ok("a claim link that isn't Cloudflare's is dropped", elsewhere?.hash === stored.hash && previewNotice(elsewhere, false, NOW).claim === null);
   const script = readPreviewKey(JSON.stringify({ ...stored, claim: "javascript:alert(1)", claimUntil: NOW + 1e6 }));
-  ok("  and so is anything that isn't a link at all", previewNotice(script, NOW).claim === null);
+  ok("  and so is anything that isn't a link at all", previewNotice(script, false, NOW).claim === null);
+}
+
+// ── telling when the page has been kept ─────────────────────────────────────
+{
+  const TOKEN = "temporary.token_" + "x".repeat(30);
+  const k = readPreviewKey(JSON.stringify({ ...stored, claim: "https://dash.cloudflare.com/claim-preview/a?claimToken=b", claimUntil: NOW + 1e6, token: TOKEN }));
+  ok("the temporary token is read back", k?.token === TOKEN);
+  ok("  but not one of the wrong shape", readPreviewKey(JSON.stringify({ ...stored, token: "a b" }))?.token === undefined);
+
+  const real = globalThis.fetch;
+  const answer = (status) => { globalThis.fetch = async (url, init) => { answer.sent = { url: String(url), auth: new Headers(init?.headers).get("Authorization") }; return new Response("{}", { status }); }; };
+  answer(200);
+  ok("a token that still works: not kept yet", (await claimedYet(k)) === false);
+  ok("  asked of Cloudflare's API, with that token", answer.sent?.url.startsWith("https://api.cloudflare.com/client/v4/") && answer.sent?.auth === `Bearer ${TOKEN}`);
+  answer(401);
+  ok("a refused token: kept", (await claimedYet(k)) === true);
+  answer(500);
+  ok("Cloudflare having trouble: can't say", (await claimedYet(k)) === null);
+  globalThis.fetch = async () => { throw new Error("offline"); };
+  ok("no connection: can't say", (await claimedYet(k)) === null);
+  globalThis.fetch = real;
+
+  const after = readPreviewKey(JSON.stringify(afterClaim(k)));
+  ok("once kept, the token and claim link are dropped", after.claimed === true && !after.token && !after.claim);
+  ok("  the key still opens the editor until the hour is up", after.hash === k.hash && after.until === k.until);
+  ok("  and it's known without asking again", (await claimedYet(after)) === true);
+  ok("the editor is told it's kept, and given no claim link", previewNotice(k, true, NOW).claimed === true && previewNotice(k, true, NOW).claim === null);
+  ok("  and before, that it isn't", previewNotice(k, false, NOW).claimed === false);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

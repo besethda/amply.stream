@@ -2795,23 +2795,36 @@ export function isNewer(latest, mine) {
 /**
  * Opened with the key from before signup (node/src/preview-key.ts): the page
  * is in a temporary account that Cloudflare deletes after an hour, and this
- * editor stops opening then too. Two steps keep it: claim the account on
- * Cloudflare, then lock the editor to the artist at amply.stream.
+ * editor stops opening then too. One step at a time: keep it (claim the
+ * account on Cloudflare), and once that's done, protect the editor (put it
+ * behind Cloudflare's sign-in, at amply.stream). The node says when the claim
+ * has happened; asked again every so often, and on coming back to this tab
+ * from Cloudflare's.
  */
-function Temporary({ until, claim }) {
+function Temporary({ api, initial }) {
+  const [t, setT] = useState(initial);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 20_000);
-    return () => clearInterval(t);
-  }, []);
-  const left = Math.max(0, Math.ceil((Date.parse(until) - now) / 60_000));
+    const ask = () => api.whoami().then((w) => w?.temporary && setT(w.temporary)).catch(() => {});
+    const tick = setInterval(() => { setNow(Date.now()); if (!t.claimed) ask(); }, 30_000);
+    const back = () => { if (document.visibilityState === "visible") { setNow(Date.now()); ask(); } };
+    document.addEventListener("visibilitychange", back);
+    return () => { clearInterval(tick); document.removeEventListener("visibilitychange", back); };
+  }, [t.claimed]);
+  const left = Math.max(0, Math.ceil((Date.parse(t.until) - now) / 60_000));
+
+  if (t.claimed) {
+    return (
+      <div class="banner temp" role="status">
+        <span>It's yours. Now protect your editor{left > 0 ? <>: <b>{left} min</b> until it locks.</> : "."}</span>
+        <a class="btn sm" href="https://amply.stream/start#lock" target="_blank" rel="noopener">Protect it ↗</a>
+      </div>
+    );
+  }
   return (
     <div class="banner temp" role="status">
-      <span>{left > 0 ? <>Temporary: <b>{left} min</b> left. Keep it, then lock your editor.</> : "Time's up. Kept it? Lock your editor to keep editing."}</span>
-      <span class="temp-steps">
-        {claim && left > 0 && <a class="btn sm" href={claim} target="_blank" rel="noopener noreferrer">Keep it ↗</a>}
-        <a class="btn sm ghost" href="https://amply.stream/start#lock" target="_blank" rel="noopener">Lock editor ↗</a>
-      </span>
+      <span>{left > 0 ? <>Temporary page: <b>{left} min</b> left.</> : "Time's up."}</span>
+      {t.claim && left > 0 && <a class="btn sm" href={t.claim} target="_blank" rel="noopener noreferrer">Keep it ↗</a>}
     </div>
   );
 }
@@ -3082,7 +3095,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
       <main class="page">
         {/* On a phone the header has no room for these. */}
         <div class="page-links">{links}</div>
-        {temporary && <Temporary until={temporary.until} claim={temporary.claim} />}
+        {temporary && <Temporary api={api} initial={temporary} />}
         <div class="toasts">
           {jobs.map((j) => <JobCard key={j.id} job={j} />)}
           <Banner kind={msg?.kind} action={msg?.action} onDismiss={() => setMsg(null)}>{msg?.text}</Banner>

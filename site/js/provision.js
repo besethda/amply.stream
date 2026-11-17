@@ -140,7 +140,9 @@ export function editorLink() {
  * Make the key that opens a temporary node's editor, and give the node its
  * hash. It opens the editor until the temporary account would expire; after
  * that, or once the editor is locked to the artist, it opens nothing. The
- * claim link goes with it, so the editor can offer "keep it" from any tab.
+ * claim link goes with it, so the editor can offer "keep it" from any tab,
+ * and the temporary token, so the node can see when the claim has happened.
+ * Both are for this same account and both are dead after the claim.
  */
 async function makeEditorKey(ctx, preview) {
   const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -152,6 +154,8 @@ async function makeEditorKey(ctx, preview) {
     until: Date.parse(preview.expiresAt),
     claim: preview.claimUrl,
     claimUntil: Date.parse(preview.claimExpiresAt),
+    // So the node can tell when the account has been claimed: claiming ends it.
+    token: preview.token,
   }));
   return key;
 }

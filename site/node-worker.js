@@ -91,16 +91,37 @@ function readPreviewKey(raw) {
   try {
     const k = JSON.parse(raw);
     if (!k || !/^[0-9a-f]{64}$/.test(k.hash) || !Number.isFinite(k.until)) return null;
-    const claimOk = typeof k.claim === "string" && CLAIM.test(k.claim) && Number.isFinite(k.claimUntil);
-    return claimOk ? k : { hash: k.hash, until: k.until };
+    const out = { hash: k.hash, until: k.until };
+    if (k.claimed === true) return { ...out, claimed: true };
+    if (typeof k.claim === "string" && CLAIM.test(k.claim) && Number.isFinite(k.claimUntil)) {
+      out.claim = k.claim;
+      out.claimUntil = k.claimUntil;
+    }
+    if (typeof k.token === "string" && /^[A-Za-z0-9._-]{20,512}$/.test(k.token)) out.token = k.token;
+    return out;
   } catch {
     return null;
   }
 }
-function previewNotice(k, now = Date.now()) {
+async function claimedYet(k) {
+  if (k.claimed) return true;
+  if (!k.token) return null;
+  try {
+    const res = await fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", {
+      headers: { Authorization: `Bearer ${k.token}` }
+    });
+    if (res.status === 401 || res.status === 403) return true;
+    return res.ok ? false : null;
+  } catch {
+    return null;
+  }
+}
+var afterClaim = (k) => ({ hash: k.hash, until: k.until, claimed: true });
+function previewNotice(k, claimed, now = Date.now()) {
   return {
     until: new Date(k.until).toISOString(),
-    claim: k.claim && k.claimUntil > now ? k.claim : null
+    claimed: claimed === true,
+    claim: claimed !== true && k.claim && k.claimUntil > now ? k.claim : null
   };
 }
 async function hashKey(key) {
@@ -2270,7 +2291,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.8";
+var VERSION = "3.19.9";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
@@ -2614,7 +2635,12 @@ async function handleManage(request, env, path) {
   }
   if (request.method === "GET" && path === "/whoami") {
     const home = await setting(env.DB, "home");
-    const temporary = config ? null : previewNotice(preview);
+    let temporary = null;
+    if (!config) {
+      const claimed = await claimedYet(preview);
+      if (claimed && !preview.claimed) await putSetting(env.DB, PREVIEW_KEY, JSON.stringify(afterClaim(preview)));
+      temporary = previewNotice(preview, claimed);
+    }
     return new Response(JSON.stringify({ email, version: VERSION, home, temporary }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
