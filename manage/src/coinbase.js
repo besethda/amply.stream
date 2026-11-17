@@ -8,6 +8,13 @@
  */
 import { RELAY } from "../../app/src/topup.js";
 
+/**
+ * Whether the one-tap Connect Coinbase is offered. Off until Coinbase approves
+ * Amply's OAuth app (it's limited to approved partners); until then the artist
+ * pastes their Coinbase deposit address, with the same result.
+ */
+export const CONNECT_OFFERED = false;
+
 const PENDING_KEY = "amply.editor.coinbase-pending";
 export const ANSWER_KEY = "amply.editor.coinbase-answer";
 const CONNECTED_KEY = "amply.editor.coinbase-address";
@@ -59,6 +66,11 @@ export function readCoinbaseAnswer({ store, now = Date.now() } = {}) {
   if (!a) return null;
   store.removeItem(ANSWER_KEY);
   return now - (a.at || 0) > FRESH_MS ? null : a;
+}
+
+/** A pasted Coinbase deposit address, remembered as Coinbase's on this device. */
+export function rememberCoinbaseAddress(address, { store } = {}) {
+  try { (store ?? localStorage).setItem(CONNECTED_KEY, address); } catch { /* the cards just say "payout wallet" */ }
 }
 
 /** Whether this address came from Connect Coinbase on this device. */

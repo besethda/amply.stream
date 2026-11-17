@@ -45,7 +45,7 @@ import { readTransaction, writeTransaction, base64, keyOf } from "../../node/src
 import { checkFeePayment } from "../../node/src/feepay.ts";
 import { SiteEditor } from "./site-editor.jsx";
 import { coinbaseSolPage } from "../../app/src/topup.js";
-import { startCoinbaseConnect, readCoinbaseAnswer, isCoinbaseAddress, ANSWER_KEY } from "./coinbase.js";
+import { startCoinbaseConnect, readCoinbaseAnswer, isCoinbaseAddress, rememberCoinbaseAddress, ANSWER_KEY, CONNECT_OFFERED } from "./coinbase.js";
 
 export const MAX_UPLOAD = 90 * 1024 * 1024;
 
@@ -2553,6 +2553,27 @@ function ConnectCoinbase({ onAddress }) {
   );
 }
 
+/** Coinbase's deposit address, copied from the Coinbase app: payments go straight in. */
+function PasteCoinbase({ onAddress }) {
+  const [text, setText] = useState("");
+  const value = text.trim();
+  const good = !!keyOf(value);
+  return (
+    <div class="connect-coinbase">
+      <ol class="cash-steps">
+        <li>In the <b>Coinbase</b> app (free to join), tap <b>Receive</b> and choose <b>USDC</b>.</li>
+        <li>Choose the <b>Solana</b> network, then tap <b>Copy</b>.</li>
+        <li>Paste it here:</li>
+      </ol>
+      <input type="text" class="mono" value={text} placeholder="Your Coinbase USDC address (Solana)" aria-label="Your Coinbase USDC address"
+        autocomplete="off" spellcheck={false} onInput={(e) => setText(e.target.value)} />
+      {value && !good && <p class="warn small">That isn't a Solana address. Check you chose the <b>Solana</b> network in Coinbase.</p>}
+      <button class="btn" disabled={!good} onClick={() => { rememberCoinbaseAddress(value); onAddress(value); }}>Get paid into Coinbase</button>
+      <p class="muted small">Fans' payments go straight into your Coinbase account as USDC (digital dollars, one for one).</p>
+    </div>
+  );
+}
+
 /** Before anything is set up: only the ways to be paid, and the one step each needs. */
 function GetPaid({ via, onVia, payees, setPayees, manifest, update, api, only }) {
   const ways = WAYS.filter(([k]) => !only || only.includes(k));
@@ -2570,7 +2591,7 @@ function GetPaid({ via, onVia, payees, setPayees, manifest, update, api, only })
       </div>
       {via === "coinbase" && (
         <div class="pay-next">
-          <ConnectCoinbase onAddress={setAddress} />
+          {CONNECT_OFFERED ? <ConnectCoinbase onAddress={setAddress} /> : <PasteCoinbase onAddress={setAddress} />}
           <details class="more">
             <summary>Rather keep it in your own wallet first?</summary>
             <p>One tap makes a payout wallet with Face ID; you send it on to Coinbase whenever you like.</p>
