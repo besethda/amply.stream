@@ -11,7 +11,7 @@
  */
 import { Connection, Keypair, Transaction } from "@solana/web3.js";
 import { DatabaseSync } from "node:sqlite";
-import { payArtist } from "./src/pay.js";
+import { payArtist, sendDollarsOut } from "./src/pay.js";
 import { networkName, network } from "./src/networks.js";
 import { SCHEMA } from "../node/src/store.ts";
 import { settle, feeAddress } from "../node/src/settle.ts";
@@ -49,6 +49,7 @@ const nodeRpc = async (method, params) => {
   if (method === "simulateTransaction") return { value: { err: null, logs: [] } };
   if (method === "sendTransaction") { sentByNode.push(params[0]); return "ok"; }
   if (method === "getSignatureStatuses") return { value: [{ confirmationStatus: "confirmed", err: null }] };
+  if (method === "getMultipleAccounts") return { value: params[0].map(() => ({ lamports: 2039280 })) };
   throw new Error(method);
 };
 const json = (v, status = 200) => new Response(JSON.stringify(v), { status, headers: { "Content-Type": "application/json" } });
@@ -57,6 +58,15 @@ globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url);
   if (u.origin !== ORIGIN) throw new Error(`unexpected fetch ${url}`);
   if (u.pathname === "/listen/fees") return json(node.offer);
+  if (u.pathname === "/listen/withdraw") {
+    const body = JSON.parse(init.body);
+    node.body = body;
+    const fee = 50_000 + (node.destExists ? 0 : 500_000);
+    const r = await settle(DB, nodeRpc, body.tx, {
+      mint: network().usdc, payees: [{ address: body.to }, { address: artist }], minMicros: 10_000, maxMicros: 10_000_000_000, withdrawal: { fee },
+    }, { wait: async () => {}, confirmWithinMs: 20 });
+    return r.ok ? json({ signature: r.signature, confirmed: r.confirmed }) : json({ error: r.why }, r.status);
+  }
   if (u.pathname === "/listen/settle") {
     node.asked = (node.asked || 0) + 1;
     if (node.unreachable) throw new TypeError("Failed to fetch");
@@ -169,6 +179,37 @@ const reset = (n) => { node = n; selfSent.length = 0; sentByNode.length = 0; };
   let threw = null;
   try { await payArtist(listener, payees, 100_000, { node: { origin: ORIGIN } }); } catch (e) { threw = e; }
   ok("a bare server error: also stop, without paying twice", threw?.kind === "unconfirmed" && selfSent.length === 0);
+}
+
+// ── sending money out with no SOL, through a node that pays fees ──
+{
+  const withdrawOffer = { ...offering().offer, withdraw: { to: artist, fee: 50_000, newAccountFee: 500_000 } };
+  const origGetBalance = Connection.prototype.getBalance, origInfo = Connection.prototype.getAccountInfo, origTok = Connection.prototype.getTokenAccountBalance;
+  Connection.prototype.getBalance = async () => 0;
+  Connection.prototype.getTokenAccountBalance = async () => ({ value: { amount: "3000000" } });
+  const dest = Keypair.generate().publicKey.toBase58();
+
+  reset({ offer: withdrawOffer, destExists: false });
+  Connection.prototype.getAccountInfo = async () => null;
+  const r = await sendDollarsOut(listener, dest, "all", { nodes: [ORIGIN] });
+  ok("no SOL: the dollars go out through the artist's node", sentByNode.length === 1 && selfSent.length === 0);
+  ok("  the new account's cost and the fee come off: $3.00 → $2.45 sent", r.micros === 2_450_000 && r.fee === 550_000, JSON.stringify(r));
+  ok("  and the node was told where to", node.body.to === dest);
+
+  reset({ offer: withdrawOffer, destExists: true });
+  Connection.prototype.getAccountInfo = async () => ({ lamports: 2039280 });
+  const r2 = await sendDollarsOut(listener, dest, "all", { nodes: [ORIGIN] });
+  ok("to an account that already exists, just the 5 cent fee", r2.micros === 2_950_000 && r2.fee === 50_000, JSON.stringify(r2));
+
+  reset({ offer: { ...withdrawOffer, withdraw: { ...withdrawOffer.withdraw, fee: 5_000_000 } } });
+  let threw = null;
+  const realSend = Connection.prototype.sendTransaction;
+  Connection.prototype.sendTransaction = async () => { throw new Error("needs SOL: insufficient lamports"); };
+  try { await sendDollarsOut(listener, dest, "all", { nodes: [ORIGIN] }); } catch (e) { threw = e; }
+  ok("a node asking an unreasonable fee isn't used", sentByNode.length === 0 && threw?.kind === "fee", threw?.message);
+  Connection.prototype.sendTransaction = realSend;
+
+  Connection.prototype.getBalance = origGetBalance; Connection.prototype.getAccountInfo = origInfo; Connection.prototype.getTokenAccountBalance = origTok;
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

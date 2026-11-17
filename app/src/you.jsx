@@ -59,7 +59,8 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
     return <Sub title="First, save your key" onBack={back}><SaveBackup pair={pair} onSaved={() => setView("topup")} cta="Saved. Now add money" /></Sub>;
   }
   if (view === "topup" && pair) return <Sub title="Top up" onBack={back}><TopUp address={pair.publicKey.toBase58()} balance={balance} network={network} pair={pair} needsFee={feesNeeded(entries, charges)} /></Sub>;
-  if (view === "send" && pair) return <Sub title="Send back" onBack={back}><SendBack pair={pair} balance={balance} onRefresh={onRefresh} /></Sub>;
+  if (view === "send" && pair) return <Sub title="Send back" onBack={back}><SendBack pair={pair} balance={balance} onRefresh={onRefresh}
+    nodes={(entries || []).filter((e) => e.feesPaid).map((e) => originOf(e.url))} /></Sub>;
   if (view === "backup" && pair) return <Sub title="Backup key" onBack={back}><SaveBackup pair={pair} onSaved={back} /></Sub>;
   if (view === "subs") {
     return (

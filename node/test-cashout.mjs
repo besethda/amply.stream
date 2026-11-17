@@ -106,6 +106,7 @@ const rpc = async (method, params) => {
   if (method === "simulateTransaction") return { value: { err: null, logs: [] } };
   if (method === "sendTransaction") { sent.push(params[0]); return "ok"; }
   if (method === "getSignatureStatuses") return { value: [{ confirmationStatus: "confirmed", err: null }] };
+  if (method === "getMultipleAccounts") return { value: params[0].map(() => ({ lamports: 2039280 })) };
   throw new Error(method);
 };
 const quick = { wait: async () => {}, confirmWithinMs: 20 };
