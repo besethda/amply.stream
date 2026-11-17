@@ -1352,6 +1352,19 @@ async function setSales(db, { key, items, artist, returnTo }) {
   await putSetting(db, STRIPE_KEY, JSON.stringify({ ...c, sales: next, retired: retired.slice(-500) }));
   return next;
 }
+async function refundedSale(db, sessionId, { load: load2 } = {}) {
+  if (!SESSION.test(sessionId)) return null;
+  const c = await connectionOf(db);
+  if (!c) return null;
+  try {
+    const s = await (load2 ?? ((id) => call(c.key, "GET", `/checkout/sessions/${id}`, { expand: ["payment_intent.latest_charge"] })))(sessionId);
+    const charge = s?.payment_intent?.latest_charge;
+    if (!charge || typeof charge !== "object") return null;
+    return !!(charge.refunded || charge.amount_refunded > 0 || charge.disputed);
+  } catch {
+    return null;
+  }
+}
 async function claimSale(db, wallet, sessionId, { loadSession } = {}) {
   const c = await connectionOf(db);
   const links = [...c?.sales || [], ...c?.retired || []];
@@ -1903,11 +1916,22 @@ async function checkFeePayment(tx, expect) {
   if (paid.size !== created.size) return no("a USDC account is created without being paid");
   const micros = [...paid.values()].reduce((a, b) => a + b, 0);
   if (!Number.isSafeInteger(micros)) return no("the amount is impossibly large");
-  if (micros < expect.minMicros) return no("too small to pay the network fee for");
-  if (micros > expect.maxMicros) return no("more than one payment can be");
-  const shares = shareOut(micros, payees).map((s) => ({ address: s.address, micros: s.micros }));
-  if (shares.length !== paid.size || !shares.every((s) => paid.get(s.address) === s.micros)) {
-    return no("the payment isn't split the way the artist set it");
+  let shares;
+  if (expect.withdrawal) {
+    const [dest, artist] = payees.map((p) => p.address);
+    if (payees.length !== 2 || paid.size !== 2) return no("a withdrawal pays the destination and the fee, nothing else");
+    const out = paid.get(dest) ?? 0, fee = paid.get(artist) ?? 0;
+    if (fee < expect.withdrawal.fee) return no("the fee for sending isn't included");
+    if (out < expect.minMicros) return no("too small to send");
+    if (out > expect.maxMicros) return no("more than one transfer can be");
+    shares = [{ address: dest, micros: out }, { address: artist, micros: fee }];
+  } else {
+    if (micros < expect.minMicros) return no("too small to pay the network fee for");
+    if (micros > expect.maxMicros) return no("more than one payment can be");
+    shares = shareOut(micros, payees).map((s) => ({ address: s.address, micros: s.micros }));
+    if (shares.length !== paid.size || !shares.every((s) => paid.get(s.address) === s.micros)) {
+      return no("the payment isn't split the way the artist set it");
+    }
   }
   if (!await verifySignature3(listener2, tx.signatures[1], tx.message)) return no("the listener's signature doesn't check out");
   return { ok: true, listener: listener2, micros, shares };
@@ -1924,6 +1948,8 @@ var dayKey = (kind, now) => {
 };
 var capOf = (kind) => kind === "send" ? DAILY_SENDS : DAILY_PAYMENTS;
 var OFFER_ABOVE_LAMPORTS = 3e6;
+var WITHDRAW_FEE_MICROS = 5e4;
+var NEW_ACCOUNT_FEE_MICROS = 5e5;
 var FEE_KEY = "fee-wallet";
 var RPC_TIMEOUT_MS = 1e4;
 var CONFIRM_WITHIN_MS = 25e3;
@@ -1954,6 +1980,13 @@ async function feeKey(db) {
 }
 async function feeAddress(db) {
   return (await feeKey(db)).address;
+}
+var onrampMessage = (address, signedAt) => `Amply: add money to ${address} through Coinbase (${signedAt})`;
+async function feeOnrampSignature(db, signedAt, now = Date.now()) {
+  if (!Number.isSafeInteger(signedAt) || Math.abs(now - signedAt) > 3e4) return null;
+  const key = await feeKey(db);
+  const sig = await key.sign(new TextEncoder().encode(onrampMessage(key.address, signedAt)));
+  return { address: key.address, signature: base58(sig) };
 }
 var RpcError = class extends Error {
 };
@@ -2011,8 +2044,15 @@ async function countFee(db, now = Date.now(), kind = "pay") {
     return false;
   }
 }
+async function openedBefore(db, owner) {
+  const row = await db.prepare("SELECT count FROM fee_days WHERE day = ?").bind(`opened:${owner}`).first();
+  return !!row;
+}
+async function noteOpened(db, owner) {
+  await db.prepare("INSERT INTO fee_days (day, count) VALUES (?, 1) ON CONFLICT(day) DO UPDATE SET count = count + 1").bind(`opened:${owner}`).run();
+}
 var refuse = (status, why) => ({ ok: false, status, why });
-async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) => true, now = Date.now(), wait = (ms) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS, from, kind = "pay" } = {}) {
+async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) => true, now = Date.now(), wait = (ms) => new Promise((r) => setTimeout(r, ms)), confirmWithinMs = CONFIRM_WITHIN_MS, from, kind = "pay", openOnce } = {}) {
   const bytes = base64.decode(String(txBase64 ?? ""));
   if (!bytes) return refuse(400, "that isn't a transaction");
   let tx;
@@ -2028,6 +2068,24 @@ async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) =
   if (!await allowed(verdict.listener)) return refuse(429, "too many payments from this wallet; try again in a minute");
   const full = refuse(503, kind === "send" ? "that's the most sends to the bank in one day; try again tomorrow" : "this artist's node has paid all the fees it will today; try again tomorrow");
   if (!await feeRoom(db, kind, now)) return full;
+  const once = openOnce ?? verdict.shares.map((s) => s.address);
+  const opening = [];
+  if (once.length) {
+    try {
+      const accounts = await Promise.all(once.map((o) => tokenAccountOf(o, expect.mint, TOKEN_PROGRAM, ATA_PROGRAM)));
+      const found = await rpc("getMultipleAccounts", [accounts, { encoding: "base64", commitment: "confirmed" }]);
+      once.forEach((o, i) => {
+        if (!found?.value?.[i]) opening.push(o);
+      });
+    } catch (e) {
+      return refuse(502, e instanceof RpcError ? e.message : "couldn't reach the network");
+    }
+    for (const o of opening) {
+      if (await openedBefore(db, o).catch(() => true)) {
+        return refuse(403, "a payee closed their USDC account after this server opened it; they need to open it again themselves");
+      }
+    }
+  }
   tx.signatures[0] = await key.sign(tx.message);
   const signed = base64.encode(writeTransaction(tx));
   const signature = base58(tx.signatures[0]);
@@ -2038,6 +2096,8 @@ async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) =
     return refuse(502, e instanceof RpcError ? e.message : "couldn't reach the network");
   }
   if (!await countFee(db, now, kind)) return full;
+  for (const o of opening) await noteOpened(db, o).catch(() => {
+  });
   try {
     await rpc("sendTransaction", [signed, { encoding: "base64", skipPreflight: true, maxRetries: 5 }]);
   } catch {
@@ -2151,7 +2211,7 @@ async function allow(env, rule, key, now = Date.now()) {
 }
 function ruleFor(method, pathname) {
   if (pathname === "/manage" || pathname.startsWith("/manage/")) return null;
-  if (pathname === "/stripe/webhook") return null;
+  if (pathname === "/stripe/webhook") return RULES.listen;
   if (method === "OPTIONS") return null;
   if (pathname === "/listen/challenge") return RULES.media;
   if (pathname.startsWith("/listen/")) return RULES.listen;
@@ -2197,7 +2257,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.6";
+var VERSION = "3.19.7";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
@@ -2572,6 +2632,12 @@ async function handleManage(request, env, path) {
       dailyCap: DAILY_PAYMENTS
     }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
   }
+  if (request.method === "POST" && path === "/fees/onramp") {
+    const body = await jsonBody(request, 1e3);
+    const signed = body ? await feeOnrampSignature(env.DB, Number(body.signedAt)) : null;
+    if (!signed) return fail(400, "check this device's clock and try again");
+    return new Response(JSON.stringify(signed), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
   if (request.method === "POST" && (path === "/send/prepare" || path === "/send")) {
     const body = await jsonBody(request);
     if (!body) return fail(400, "bad request");
@@ -2606,7 +2672,7 @@ async function handleManage(request, env, path) {
       payees: [{ address: to, split: 100 }],
       minMicros: micros,
       maxMicros: micros
-    }, { from: payees, kind: "send" });
+    }, { from: payees, kind: "send", openOnce: [] });
     if (!result.ok) return fail(result.status, result.why);
     return json({ signature: result.signature, confirmed: result.confirmed });
   }
@@ -2791,7 +2857,13 @@ async function feeOffer(env) {
   const feePayer = await feeAddress(env.DB);
   if (pay.recipients.some((r) => r.address === feePayer)) return null;
   if (await feeBalance(rpcAt(chain.rpc), feePayer) < OFFER_ABOVE_LAMPORTS) return null;
-  return { feePayer, network: pay.network, minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS };
+  return {
+    feePayer,
+    network: pay.network,
+    minMicros: LISTEN_MIN_MICROS,
+    maxMicros: LISTEN_MAX_MICROS,
+    withdraw: { to: pay.recipients[0].address, fee: WITHDRAW_FEE_MICROS, newAccountFee: NEW_ACCOUNT_FEE_MICROS }
+  };
 }
 async function handleListen(request, env, path) {
   const host = new URL(request.url).host;
@@ -2854,6 +2926,44 @@ async function handleListen(request, env, path) {
       // Per paying wallet, on top of the per-address count every listener
       // request already has.
       allowed: (who) => allow(env, RULES.wallet, `${host}|settle|${who}`)
+    });
+    if (!result.ok) return fail(result.status, result.why);
+    return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {
+      status: 200,
+      headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
+    });
+  }
+  if (path === "/withdraw" && request.method === "POST") {
+    if (Number(request.headers.get("Content-Length") || 0) > 4096) return fail(413, "too large");
+    const body = await jsonBody(request);
+    if (!body) return fail(400, "bad request");
+    const offer = await feeOffer(env).catch(() => null);
+    if (!offer) return fail(409, "this artist's node isn't paying network fees right now");
+    const pay = walletOf(await manifestNowOf(env));
+    const chain = CHAINS[pay.network];
+    const to = String(body.to || "").trim();
+    if (!keyOf(to)) return fail(400, "that isn't a Solana address");
+    if (to === offer.feePayer || pay.recipients.some((r) => r.address === to)) return fail(400, "that address can't be sent to this way");
+    const rpc = rpcAt(chain.rpc);
+    let fee = WITHDRAW_FEE_MICROS;
+    try {
+      const ata = await tokenAccountOf(to, chain.mint, TOKEN_PROGRAM, ATA_PROGRAM);
+      const info = await rpc("getAccountInfo", [ata, { encoding: "base64", commitment: "confirmed" }]);
+      if (!info?.value) fee += NEW_ACCOUNT_FEE_MICROS;
+    } catch {
+      return fail(502, "couldn't reach the network; nothing was sent");
+    }
+    const result = await settle(env.DB, rpc, body.tx, {
+      mint: chain.mint,
+      payees: [{ address: to }, { address: offer.withdraw.to }],
+      minMicros: 1e4,
+      maxMicros: 1e10,
+      withdrawal: { fee }
+    }, {
+      allowed: async (who) => !!await listener(env.DB, who) && allow(env, RULES.wallet, `${host}|withdraw|${who}`),
+      // The destination's account is paid for by the listener's fee; only the
+      // artist's own is opened once at most.
+      openOnce: [offer.withdraw.to]
     });
     if (!result.ok) return fail(result.status, result.why);
     return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {
@@ -2971,6 +3081,9 @@ async function handleListen(request, env, path) {
     if (!head) return fail(404, "that file is missing");
     const taken = await takeDownload(env.DB, manifest, proof.address, trackId);
     if (!taken) return fail(403, "you don't own this song here, or its downloads are used up");
+    if (/^cs_/.test(taken.ref) && await refundedSale(env.DB, taken.ref) === true) {
+      return fail(403, "this purchase was refunded, so it can't be downloaded");
+    }
     const object = await media(env).get(key);
     if (!object || !("body" in object)) return fail(404, "that file is missing");
     const ext = key.split(".").pop() || "mp3";

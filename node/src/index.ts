@@ -23,9 +23,9 @@ import {
 } from "./store";
 import { introduce, readToken, guardedKeys, masterKeys, proveOwnership } from "./listen";
 import { challenge } from "./identity";
-import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, claim, refresh, StripeError, setSales, claimSale } from "./stripe";
+import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, claim, refresh, StripeError, setSales, claimSale, refundedSale } from "./stripe";
 import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, itemFor, CHAINS, type Sale } from "./sales";
-import { settle, feeAddress, feeBalance, rpcAt, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS, WITHDRAW_FEE_MICROS, NEW_ACCOUNT_FEE_MICROS } from "./settle";
+import { settle, feeAddress, feeBalance, feeOnrampSignature, rpcAt, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS, WITHDRAW_FEE_MICROS, NEW_ACCOUNT_FEE_MICROS } from "./settle";
 import { tokenAccountOf, keyOf } from "./solana-tx";
 import { purchaseMemo } from "./payment-check";
 import { cleanSite } from "../../spec/site.mjs";
@@ -363,6 +363,15 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       address, network, lamports, offering: lamports !== null && lamports >= OFFER_ABOVE_LAMPORTS,
       offerAbove: OFFER_ABOVE_LAMPORTS, paidToday: today?.count ?? 0, dailyCap: DAILY_PAYMENTS,
     }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+
+  // A signature for buying SOL into the fees account through Coinbase: the
+  // editor opens Amply's relay with it, which sends the artist to Coinbase.
+  if (request.method === "POST" && path === "/fees/onramp") {
+    const body = await jsonBody(request, 1_000);
+    const signed = body ? await feeOnrampSignature(env.DB, Number(body.signedAt)) : null;
+    if (!signed) return fail(400, "check this device's clock and try again");
+    return new Response(JSON.stringify(signed), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
   }
 
   // Cashing out from a Face ID payout wallet (cashout.ts): the node drafts
@@ -863,6 +872,10 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     if (!head) return fail(404, "that file is missing");
     const taken = await takeDownload(env.DB, manifest, proof.address, trackId);
     if (!taken) return fail(403, "you don't own this song here, or its downloads are used up");
+    // A card purchase refunded or disputed since buys no more downloads.
+    if (/^cs_/.test(taken.ref) && (await refundedSale(env.DB, taken.ref)) === true) {
+      return fail(403, "this purchase was refunded, so it can't be downloaded");
+    }
     const object = await media(env).get(key);
     if (!object || !("body" in object)) return fail(404, "that file is missing");
     const ext = key.split(".").pop() || "mp3";

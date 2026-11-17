@@ -67,7 +67,9 @@ export async function allow(env: Record<string, unknown>, rule: Rule, key: strin
  *  behind their sign-in; Stripe's notices are signed. */
 export function ruleFor(method: string, pathname: string): Rule | null {
   if (pathname === "/manage" || pathname.startsWith("/manage/")) return null;
-  if (pathname === "/stripe/webhook") return null;
+  // Stripe's notices are signed, but checking a signature still costs a read:
+  // counted per address like everything else, which Stripe never comes near.
+  if (pathname === "/stripe/webhook") return RULES.listen;
   if (method === "OPTIONS") return null;
   if (pathname === "/listen/challenge") return RULES.media;   // costs nothing but a random number
   if (pathname.startsWith("/listen/")) return RULES.listen;

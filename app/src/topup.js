@@ -73,6 +73,12 @@ export function topupUrl(address, { currency = "usdc", amount = null } = {}) {
 /** The relay that serves the card page and asks Coinbase for sessions. */
 export const RELAY = new URL(TOPUP_PAGE).origin;
 export const COINBASE_AMOUNTS = [20, 30, 60];
+export const COINBASE_SOL_AMOUNTS = [5, 10];
+
+/** The page that sends an artist to Coinbase to buy SOL for their node's
+ *  fees account, signed by the node (a page, so the editor fetches nothing). */
+export const coinbaseSolPage = (address, amount, signedAt, signature) =>
+  `${RELAY}/coinbase/sol?${new URLSearchParams({ address, amount: String(amount), signedAt: String(signedAt), signature })}`;
 
 /** Exactly what the relay checks the signature against. */
 export const onrampMessage = (address, signedAt) =>

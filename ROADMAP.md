@@ -37,8 +37,12 @@ Nothing here is promised. It's the direction, roughly in order.
 - **No SOL for listeners.** *Built:* the artist's node pays the network fee
   on each payment as fee payer (about $0.001), after checking the transaction
   only pays this artist's split (node/src/feepay.ts, settle.ts). The artist
-  adds a few dollars of SOL to the fee wallet once, from the Earnings tab.
-  Still to do: fund the fee wallet through Coinbase's onramp in one tap.
+  adds $5 of SOL to the fee wallet once, from the Earnings tab, in one tap:
+  the node signs for its fee wallet and Amply's relay opens Coinbase to buy
+  SOL straight into it (relay `/coinbase/sol`). A listener with no SOL can
+  also send their money out through such an artist (`/listen/withdraw`): 5¢,
+  or 55¢ when the destination's USDC account must be opened, comes out of the
+  amount sent.
 - **Cashing out with Face ID.** *Built:* the editor sends from a passkey payout
   wallet to a Cash App or Coinbase deposit address, with the node paying the
   network fee (node/src/cashout.ts). The editor checks the drafted transfer

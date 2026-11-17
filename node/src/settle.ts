@@ -94,6 +94,23 @@ export async function feeAddress(db: D1Database): Promise<string> {
   return (await feeKey(db)).address;
 }
 
+/** The words Amply's relay checks before opening Coinbase for a wallet
+ *  (relay/src/index.ts, onrampMessage); test-coinbase.mjs keeps them equal. */
+export const onrampMessage = (address: string, signedAt: number) =>
+  `Amply: add money to ${address} through Coinbase (${signedAt})`;
+
+/**
+ * The fees account's signature for a Coinbase purchase of SOL into itself,
+ * so the artist can top it up in one tap. All it can start is a purchase
+ * into this account; the time must be now, so it's soon useless if copied.
+ */
+export async function feeOnrampSignature(db: D1Database, signedAt: number, now = Date.now()): Promise<{ address: string; signature: string } | null> {
+  if (!Number.isSafeInteger(signedAt) || Math.abs(now - signedAt) > 30_000) return null;
+  const key = await feeKey(db);
+  const sig = await key.sign(new TextEncoder().encode(onrampMessage(key.address, signedAt)));
+  return { address: key.address, signature: base58(sig) };
+}
+
 /** Forget the loaded key (tests). */
 export function forgetFeeKey(): void { cached = null; }
 

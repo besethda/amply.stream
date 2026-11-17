@@ -298,6 +298,9 @@ const COINBASE_TOKEN_PATH = "/onramp/v1/token";
 const COINBASE_PAY = "https://pay.coinbase.com/buy/select-asset";
 const COINBASE_RETURN = "https://amply.stream/app/?added=coinbase";
 export const COINBASE_AMOUNTS = [20, 30, 60];
+// SOL for an artist's fees account: a few dollars lasts months.
+export const COINBASE_SOL_AMOUNTS = [5, 10];
+export type OnrampAsset = "USDC" | "SOL";
 // Long enough for a slow phone, short enough that a copied request is soon useless.
 const SIGNED_WITHIN_MS = 90_000;
 
@@ -332,12 +335,14 @@ export function unbase58(s: string): Uint8Array | null {
 export async function onrampProblem(body: unknown, now = Date.now()): Promise<string | null> {
   if (!body || typeof body !== "object" || Array.isArray(body)) return "body must be an object";
   const b = body as Record<string, unknown>;
-  const extra = Object.keys(b).filter((k) => !["address", "amount", "signedAt", "signature"].includes(k));
+  const extra = Object.keys(b).filter((k) => !["address", "amount", "signedAt", "signature", "asset"].includes(k));
   if (extra.length) return `unexpected field: ${extra[0]}`;
   const address = typeof b.address === "string" ? b.address : "";
   const key = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address) ? unbase58(address) : null;
   if (!key || key.length !== 32) return "not a Solana address";
-  if (!COINBASE_AMOUNTS.includes(b.amount as number)) return "not an amount offered";
+  const asset = b.asset ?? "USDC";
+  if (asset !== "USDC" && asset !== "SOL") return "only USDC or SOL";
+  if (!(asset === "SOL" ? COINBASE_SOL_AMOUNTS : COINBASE_AMOUNTS).includes(b.amount as number)) return "not an amount offered";
   const signedAt = b.signedAt;
   if (typeof signedAt !== "number" || Math.abs(now - signedAt) > SIGNED_WITHIN_MS) return "the signature is too old";
   const sig = typeof b.signature === "string" ? unbase58(b.signature) : null;
@@ -381,7 +386,7 @@ export async function coinbaseJwt(keyId: string, keySecret: string, method: stri
 }
 
 /** Coinbase's page for this session: USDC on Solana, the amount, and the way back. */
-export async function onrampUrl(token: string, address: string, amount: number): Promise<string> {
+export async function onrampUrl(token: string, address: string, amount: number, asset: OnrampAsset = "USDC"): Promise<string> {
   // Coinbase's reference for the person, for looking up the transaction
   // later: a hash of the wallet, not the wallet itself, and nothing else.
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address)));
@@ -389,13 +394,45 @@ export async function onrampUrl(token: string, address: string, amount: number):
   const q = new URLSearchParams({
     sessionToken: token,
     defaultNetwork: "solana",
-    defaultAsset: "USDC",
+    defaultAsset: asset,
     presetFiatAmount: String(amount),
     fiatCurrency: "USD",
     partnerUserRef: ref,
-    redirectUrl: COINBASE_RETURN,
+    // An artist's editor lives at its own address, which Coinbase can't
+    // know in advance: Coinbase shows its own "done" page instead.
+    ...(asset === "USDC" ? { redirectUrl: COINBASE_RETURN } : {}),
   });
   return `${COINBASE_PAY}?${q}`;
+}
+
+/** A Coinbase session for a signed request, or why not. */
+async function startOnramp(env: Env, body: unknown, clientIp: string | null): Promise<{ url: string } | { status: number; error: string }> {
+  if (!env.CDP_KEY_ID || !env.CDP_KEY_SECRET) return { status: 503, error: "Coinbase isn't set up here yet" };
+  const problem = await onrampProblem(body);
+  if (problem) return { status: 403, error: problem };
+  const { address, amount, asset = "USDC" } = body as { address: string; amount: number; asset?: OnrampAsset };
+  // Per connection and per wallet, so neither many wallets from one place
+  // nor one wallet from many places can mint sessions without end.
+  if (!(await onrampAllowed(env, `ip:${clientIp || "unknown"}`)) || !(await onrampAllowed(env, `addr:${address}`))) {
+    return { status: 429, error: "too many requests; try again in a minute" };
+  }
+  const jwt = await coinbaseJwt(env.CDP_KEY_ID, env.CDP_KEY_SECRET, "POST", COINBASE_TOKEN_PATH);
+  // Coinbase ties the session to the person's connection. Cloudflare sets
+  // CF-Connecting-IP itself, so it can't be supplied by the caller.
+  const upstream = await fetch(`https://${COINBASE_HOST}${COINBASE_TOKEN_PATH}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      addresses: [{ address, blockchains: ["solana"] }],
+      assets: [asset],
+      ...(clientIp ? { clientIp } : {}),
+    }),
+  });
+  const json = (await upstream.json().catch(() => null)) as { token?: string; message?: string } | null;
+  if (!upstream.ok || !json?.token) {
+    return { status: 502, error: `Coinbase didn't start a session${json?.message ? `: ${json.message}` : ""}` };
+  }
+  return { url: await onrampUrl(json.token, address, amount, asset) };
 }
 
 function allowedOrigin(req: Request, env: Env): string | null {
@@ -426,8 +463,8 @@ function refuse(status: number, message: string, origin: string | null): Respons
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const origin = allowedOrigin(request, env);
     const url = new URL(request.url);
+    const origin = allowedOrigin(request, env);
 
     // The top-up page is opened as a page, not called by one, so it carries
     // no Origin and is served to anyone: it holds and receives nothing.
@@ -451,6 +488,24 @@ export default {
       });
     }
 
+    // SOL for an artist's fees account. The editor opens this as a page (its
+    // own policy lets it reach nothing but its node), with the node's
+    // signature for the fees account; the answer is a redirect to Coinbase.
+    if (request.method === "GET" && url.pathname === "/coinbase/sol") {
+      const page = (status: number, text: string) => new Response(
+        `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><p>${escapeHtml(text)}.</p>`,
+        { status, headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } },
+      );
+      const q = url.searchParams;
+      const body = {
+        address: q.get("address") ?? "", amount: Number(q.get("amount")), signedAt: Number(q.get("signedAt")),
+        signature: q.get("signature") ?? "", asset: "SOL",
+      };
+      const started = await startOnramp(env, body, request.headers.get("CF-Connecting-IP"));
+      if ("error" in started) return page(started.status, started.error);
+      return new Response(null, { status: 303, headers: { Location: started.url, "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+    }
+
     if (request.method === "OPTIONS") {
       if (!origin) return new Response(null, { status: 403 });
       return new Response(null, { status: 204, headers: cors(origin) });
@@ -467,37 +522,11 @@ export default {
       });
     }
     if (url.pathname === "/coinbase/onramp" && request.method === "POST") {
-      if (!coinbaseReady) return refuse(503, "Coinbase isn't set up here yet", origin);
       let body: unknown;
       try { body = JSON.parse(await request.text()); } catch { return refuse(400, "body must be JSON", origin); }
-      const problem = await onrampProblem(body);
-      if (problem) return refuse(403, problem, origin);
-      const { address, amount } = body as { address: string; amount: number };
-      // Per connection and per wallet, so neither many wallets from one place
-      // nor one wallet from many places can mint sessions without end.
-      const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-      if (!(await onrampAllowed(env, `ip:${ip}`)) || !(await onrampAllowed(env, `addr:${address}`))) {
-        return refuse(429, "too many requests; try again in a minute", origin);
-      }
-
-      const jwt = await coinbaseJwt(env.CDP_KEY_ID!, env.CDP_KEY_SECRET!, "POST", COINBASE_TOKEN_PATH);
-      // Coinbase ties the session to the listener's connection. Cloudflare
-      // sets this header itself, so it can't be supplied by the caller.
-      const clientIp = request.headers.get("CF-Connecting-IP");
-      const upstream = await fetch(`https://${COINBASE_HOST}${COINBASE_TOKEN_PATH}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          addresses: [{ address, blockchains: ["solana"] }],
-          assets: ["USDC"],
-          ...(clientIp ? { clientIp } : {}),
-        }),
-      });
-      const json = (await upstream.json().catch(() => null)) as { token?: string; message?: string } | null;
-      if (!upstream.ok || !json?.token) {
-        return refuse(502, `Coinbase didn't start a session${json?.message ? `: ${json.message}` : ""}`, origin);
-      }
-      return new Response(JSON.stringify({ url: await onrampUrl(json.token, address, amount) }), {
+      const started = await startOnramp(env, body, request.headers.get("CF-Connecting-IP"));
+      if ("error" in started) return refuse(started.status, started.error, origin);
+      return new Response(JSON.stringify({ url: started.url }), {
         headers: cors(origin, { "Content-Type": "application/json", "Cache-Control": "no-store" }),
       });
     }
