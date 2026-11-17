@@ -367,12 +367,25 @@ table.listeners th {
 }
 table.listeners td { padding: 12px 12px 12px 0; border-bottom: 1px solid var(--line); }
 table.listeners td:first-child { font-size: 14px; }
+table.listeners .code { display: block; }
 table.listeners tr.blocked td { color: var(--ink3); text-decoration: line-through; }
-table.listeners tr.blocked td:last-child { text-decoration: none; }
+table.listeners tr.blocked td.row-open, table.listeners tr.row-more td { text-decoration: none; }
 table.listeners .link { font-size: 15px; }
+/* A row opens on a tap, anywhere on it, to the rest of what's known and what
+   can be done. */
+table.listeners tr.row { cursor: pointer; }
+table.listeners td.row-open { width: 32px; padding-right: 0; text-align: right; }
+table.listeners .chevron {
+  display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0;
+  border: 0; border-radius: 50%; background: none; color: var(--ink3); cursor: pointer;
+}
+table.listeners tr.open .chevron { transform: rotate(180deg); color: var(--ink); }
+table.listeners tr.open td { border-bottom-color: transparent; }
+table.listeners tr.row-more td { padding-top: 0; }
+table.listeners dl.narrow { display: none; }
 /* The row's actions: the one that matters most first, the two for handling a
-   request about someone's data quieter beside it. Wraps on a phone. */
-table.listeners td.row-do { display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; }
+   request about someone's data quieter beside it. */
+table.listeners .row-do { display: flex; gap: 14px; flex-wrap: wrap; align-items: baseline; }
 table.listeners .link.quiet { color: var(--ink3); font-size: 14px; }
 table.listeners .link.quiet:hover { color: var(--ink); }
 table.listeners .link.danger:hover { color: var(--bad); }
@@ -676,13 +689,13 @@ input[type=range] {
   }
   .release-price input { width: 110px; }
 
-  /* Listeners as cards: a table this wide can't be read on a phone. */
-  table.listeners, table.listeners tbody, table.listeners tr, table.listeners td { display: block; width: 100%; }
-  table.listeners thead { display: none; }
-  table.listeners tr { border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; margin-bottom: 10px; }
-  table.listeners td { border: 0; padding: 3px 0; display: flex; justify-content: space-between; gap: 12px; }
-  table.listeners td[data-k]::before { content: attr(data-k); color: var(--ink3); font-size: 13px; font-family: var(--mono); }
-  table.listeners td.row-do { justify-content: flex-start; padding-top: 8px; }
+  /* Listeners on a phone: who, plays and paid; the rest inside the row. */
+  table.listeners .wide { display: none; }
+  table.listeners dl.narrow {
+    display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0 0 12px;
+  }
+  table.listeners dl.narrow dt { color: var(--ink3); font-size: 13px; font-family: var(--mono); }
+  table.listeners dl.narrow dd { margin: 0; }
 }
 
 /* The DNS record to copy: three labelled lines, the value allowed to wrap. */

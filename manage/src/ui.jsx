@@ -11,7 +11,7 @@
  * Talks to an injected `api` adapter rather than fetching directly, so the
  * interface stays testable without a live node.
  */
-import { createContext } from "preact";
+import { createContext, Fragment } from "preact";
 import { useState, useEffect, useCallback, useRef, useMemo, useContext } from "preact/hooks";
 
 /**
@@ -1937,10 +1937,14 @@ export function rank(a, b) {
  * record of which track anyone played or when, so there is nothing here to
  * leak and nothing to be subpoenaed.
  */
+const LISTENERS_PAGE = 10;
+
 function Listeners({ api, paid, rate, settleAt }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
+  const [open, setOpen] = useState(null);                  // the listener whose row is open
+  const [shown, setShown] = useState(LISTENERS_PAGE);
 
   const load = () => api.listeners().then(setRows).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
@@ -2061,22 +2065,32 @@ function Listeners({ api, paid, rate, settleAt }) {
         </span>
       </div>
 
+      {/* A row each: who, plays, paid, and the rest on opening it. Listened
+          and last heard are columns where there's room, and inside the row on
+          a phone. A page at a time, those falling short first. */}
       <table class="listeners">
         <thead>
           <tr>
-            <th>Listener</th><th>Plays</th><th>Listened</th>
-            <th>Paid</th>
-            <th>Last heard</th><th />
+            <th>Listener</th><th>Plays</th><th class="wide">Listened</th>
+            <th>Paid</th><th class="wide">Last heard</th><th />
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => standing(r, paid, rate, settleAt)).sort(rank).map(({ r, got, owed, subscribed, short, overdue: late }) => {
+          {rows.map((r) => standing(r, paid, rate, settleAt)).sort(rank).slice(0, shown).map(({ r, got, owed, subscribed, short, overdue: late }) => {
+            const listened = `${Math.round((r.seconds || 0) / 60)} min`;
+            const heard = new Date(r.last_seen).toLocaleDateString();
+            const isOpen = open === r.pubkey;
+            const toggle = () => setOpen(isOpen ? null : r.pubkey);
             return (
-            <tr key={r.pubkey} class={`${r.blocked ? "blocked" : ""}${late ? " late" : ""}`}>
-              <td data-k="Listener" title={`Their wallet code: ${r.pubkey}`}>Listener {numberOf.get(r.pubkey)} <span class="mono muted small">{r.pubkey.slice(0, 4)}…{r.pubkey.slice(-4)}</span></td>
-              <td data-k="Plays">{r.plays}</td>
-              <td data-k="Listened">{Math.round((r.seconds || 0) / 60)} min</td>
-              <td data-k="Paid" class={short ? "short" : ""} title={got?.payments ? `${got.payments} payments, last ${new Date(got.last).toLocaleDateString()}` : ""}>
+            <Fragment key={r.pubkey}>
+            <tr class={`row${r.blocked ? " blocked" : ""}${late ? " late" : ""}${isOpen ? " open" : ""}`} onClick={toggle}>
+              <td title={`Their wallet code: ${r.pubkey}`}>
+                Listener {numberOf.get(r.pubkey)}
+                <span class="code mono muted small">{r.pubkey.slice(0, 4)}…{r.pubkey.slice(-4)}</span>
+              </td>
+              <td>{r.plays}</td>
+              <td class="wide">{listened}</td>
+              <td class={short ? "short" : ""} title={got?.payments ? `${got.payments} payments, last ${new Date(got.last).toLocaleDateString()}` : ""}>
                 {subscribed
                   ? `subscriber to ${new Date(r.subscribed_until).toLocaleDateString()}`
                   : !paid.at ? "not checked" : got ? fromMicros(got.micros) : "$0.00"}
@@ -2086,22 +2100,43 @@ function Listeners({ api, paid, rate, settleAt }) {
                   </span>
                 )}
               </td>
-              <td data-k="Last heard">{new Date(r.last_seen).toLocaleDateString()}</td>
-              <td class="row-do">
-                <button
-                  class="link" disabled={busy === r.pubkey}
-                  onClick={() => block(r, !r.blocked)}
-                >{r.blocked ? "Unblock" : "Block"}</button>
-                <button class="link quiet" onClick={() => exportRow(r)}
-                  title="Download everything held about this listener, to send them if they ask">Export data</button>
-                <button class="link quiet danger" disabled={busy === r.pubkey}
-                  onClick={() => removeRow(r)}
-                  title="Delete this listener's record, if they ask you to">Delete</button>
+              <td class="wide">{heard}</td>
+              <td class="row-open">
+                <button class="chevron" aria-expanded={isOpen} aria-label={`More about Listener ${numberOf.get(r.pubkey)}`}
+                  onClick={(e) => { e.stopPropagation(); toggle(); }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                </button>
               </td>
             </tr>
+            {isOpen && (
+              <tr class={`row-more${r.blocked ? " blocked" : ""}`}>
+                <td colSpan={6}>
+                  <dl class="narrow">
+                    <dt>Listened</dt><dd>{listened}</dd>
+                    <dt>Last heard</dt><dd>{heard}</dd>
+                  </dl>
+                  <div class="row-do">
+                    <button
+                      class="link" disabled={busy === r.pubkey}
+                      onClick={() => block(r, !r.blocked)}
+                    >{r.blocked ? "Unblock" : "Block"}</button>
+                    <button class="link quiet" onClick={() => exportRow(r)}
+                      title="Download everything held about this listener, to send them if they ask">Export data</button>
+                    <button class="link quiet danger" disabled={busy === r.pubkey}
+                      onClick={() => removeRow(r)}
+                      title="Delete this listener's record, if they ask you to">Delete</button>
+                  </div>
+                </td>
+              </tr>
+            )}
+            </Fragment>
           );})}
         </tbody>
       </table>
+      {rows.length > shown && (
+        <button class="btn ghost sm" onClick={() => setShown((n) => n + LISTENERS_PAGE)}>Show more</button>
+      )}
     </section>
   );
 }
