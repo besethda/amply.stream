@@ -67,6 +67,10 @@ function cloudflare({ policies, readFails = false }) {
       return send(ok([{ results: [] }]));
     }
     if (path === "/accounts") return send(ok([{ id: ACC, name: "Test" }]));
+    // The service being rebuilt, and what it's wired to.
+    if (path.endsWith("/workers/scripts/test/settings")) {
+      return send(ok({ bindings: [{ type: "d1", name: "DB", id: APP }, { type: "r2_bucket", name: "MEDIA", bucket_name: "test-media" }] }));
+    }
     if (path.endsWith("/r2/buckets") && method === "GET") return send(ok({ buckets: [] }));
     if (path.includes("/d1/database") && method === "GET") return send(ok([]));
     if (path.endsWith("/d1/database") && method === "POST") return send(ok({ uuid: APP }));

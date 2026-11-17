@@ -118,6 +118,9 @@ const ALLOWED: Array<{ method: string; pattern: RegExp }> = [
   // The streaming service itself.
   { method: "PUT", pattern: /^\/accounts\/[0-9a-f]{32}\/workers\/scripts\/[a-z0-9-]{1,63}$/ },
   { method: "GET", pattern: /^\/accounts\/[0-9a-f]{32}\/workers\/scripts\/[a-z0-9-]{1,63}$/ },
+  // A rebuild reads which storage and database the service is already wired
+  // to, and reuses exactly those, rather than guessing them from its name.
+  { method: "GET", pattern: /^\/accounts\/[0-9a-f]{32}\/workers\/scripts\/[a-z0-9-]{1,63}\/settings$/ },
   // Give it a public URL.
   { method: "GET", pattern: /^\/accounts\/[0-9a-f]{32}\/workers\/subdomain$/ },
   // Claim the account's workers.dev name. A new account has none, and
