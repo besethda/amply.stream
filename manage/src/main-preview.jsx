@@ -84,7 +84,14 @@ const api = {
   async deleteObject() { await wait(200); },
   // The first track is a 46MB WAV, like a real first upload tends to be.
   async sizeOf(url) { return url.endsWith("/a.mp3") ? 46101094 : 6_500_000; },
-  async listeners() { return [{ pubkey: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", plays: 12, seconds: 2880, first_seen: Date.now() - 864e5 * 9, last_seen: Date.now() - 864e5, blocked: 0, subscribed_until: null }]; },
+  // Enough of them to need a second page.
+  async listeners() {
+    return Array.from({ length: 14 }, (_, i) => ({
+      pubkey: `${"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosg".slice(0, 40)}${String(i).padStart(4, "A")}`,
+      plays: 12 - (i % 9), seconds: 2880 - i * 120, first_seen: Date.now() - 864e5 * (9 + i),
+      last_seen: Date.now() - 864e5 * (1 + (i % 4)), blocked: i === 5 ? 1 : 0, subscribed_until: null,
+    }));
+  },
   async stripeStatus() { return { connected: false }; },
   async stats() { return { songs: [], usage: { streams: { used: 4200, of: 16666 }, storage: { used: 610e6, of: 1e9 } } }; },
   async readSite() { return null; },

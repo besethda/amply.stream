@@ -2432,7 +2432,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.27";
+var VERSION = "3.19.28";
 var SPEC_VERSION = 1;
 var MANAGE_CSP = [
   "default-src 'none'",
