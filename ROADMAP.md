@@ -106,11 +106,14 @@ Nothing here is promised. It's the direction, roughly in order.
 - **Get paid with Face ID.** The editor makes the artist's wallet from a
   passkey on the node's own address: no wallet app, no address to paste. A
   Phantom address stays possible for artists who want it.
-- **Cash out in one step.** Coinbase's offramp from the editor: the artist
-  picks an amount, the editor reads Coinbase's deposit address and signs the
-  transfer with their passkey, and Coinbase pays out to a bank (ACH in the
-  US, PayPal in some countries) or their Coinbase balance. Elsewhere, guide
-  them through an exchange with low fees (for example Bitvavo in the EU).
+- **Cash out in one step.** *Built:* Coinbase's offramp from the editor.
+  Face ID signs that the artist owns the wallet, Coinbase's page takes the
+  amount and destination, the relay reads where Coinbase is waiting for the
+  USDC (`/coinbase/sell/status`, through the node), and Face ID sends exactly
+  that. Fans always pay into the artist's own wallet: an EU exchange must ask
+  who sent every deposit from a personal wallet (the Travel Rule), so paying
+  fans straight into Coinbase can't work everywhere. Still to do: Cash App as
+  a one-tap destination (address saved once), not just pasted each time.
 - **Automatic stopping of non-payers.** With the node as fee payer (now
   built), it signs every payment to its artist and could record it, so it knows exactly who has
   paid without reading the chain, and refuses a listening token to a wallet

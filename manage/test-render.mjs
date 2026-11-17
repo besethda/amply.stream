@@ -197,13 +197,15 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
     initial: manifest, published: true, initialTab: tab, onSignOut() {} }));
   const check = (name, cond) => { cond ? pass++ : fail++; console.log(`${cond ? "ok  " : "FAIL"}  ${name}`); };
   const fresh = show(empty, "earnings");
-  check("not set up: Earnings shows only the ways to be paid", fresh.includes("How do you want to get paid?")
-    && fresh.includes("Cash App") && fresh.includes("Coinbase") && fresh.includes("Card subscriptions"));
+  check("not set up: Earnings shows getting paid into your own wallet, or card subscriptions", fresh.includes(">Get paid<")
+    && fresh.includes("your own wallet") && fresh.includes("Card subscriptions"));
+  check("  and no exchange is needed to be paid", !/Paste my Coinbase address|Connect Coinbase/.test(fresh));
   check("  and no price yet", !fresh.includes("Your price") && !fresh.includes("Pays you every"));
   const paid = show(full, "earnings");
   check("set up: Earnings shows the price per minute and per song", paid.includes("¢/min") && paid.includes("per song)"));
   check("  and how often, in songs", paid.includes("Pays you every"));
-  check("  not the setup choices", !paid.includes("How do you want to get paid?"));
+  check("  not the setup choices", !paid.includes(">Get paid<"));
+  check("  and cashing out to Coinbase or Cash App", paid.includes(">Cash out<") && paid.includes("Coinbase") && paid.includes("Cash App"));
   const profile = show(full, "settings");
   check("Profile holds the profile, without prices", profile.includes(">Profile<") && !profile.includes("¢/min"));
   check("  the email is for GDPR compliance", profile.includes("Email for GDPR compliance"));

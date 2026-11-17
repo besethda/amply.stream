@@ -105,16 +105,22 @@ export function nodeApi() {
     },
 
     /** The website, as last published, or null if there isn't one. */
-    /** Where the artist chose to be paid ({ address, via }), or null. */
+    /** The payout wallet made but maybe not yet published ({ address }), or null. */
     async payout() {
       return (await req("GET", "/payout")).json();
     },
 
-    async savePayout(address, via) {
+    async savePayout(address) {
       return (await req("POST", "/payout", {
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address, via }),
+        body: JSON.stringify({ address }),
       })).json();
+    },
+
+    /** Where Coinbase is waiting for a cash-out: { waiting } | { send: { to, micros } } | { last }. */
+    async cashoutStatus(address, signedAt, signature) {
+      const q = new URLSearchParams({ address, signedAt: String(signedAt), signature });
+      return (await req("GET", `/cashout/coinbase?${q}`)).json();
     },
 
     async readSite() {

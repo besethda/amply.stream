@@ -44,8 +44,7 @@ import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, publ
 import { readTransaction, writeTransaction, base64, keyOf } from "../../node/src/solana-tx.ts";
 import { checkFeePayment } from "../../node/src/feepay.ts";
 import { SiteEditor } from "./site-editor.jsx";
-import { coinbaseSolPage } from "../../app/src/topup.js";
-import { startCoinbaseConnect, readCoinbaseAnswer, isCoinbaseAddress, rememberCoinbaseAddress, ANSWER_KEY, CONNECT_OFFERED } from "./coinbase.js";
+import { coinbaseSolPage, coinbaseCashoutPage, sellMessage } from "../../app/src/topup.js";
 
 export const MAX_UPLOAD = 90 * 1024 * 1024;
 
@@ -668,8 +667,8 @@ function FirstSteps({ hasMusic, paid, live, url, onSettings, onAdd, folded }) {
         {step(1, hasMusic, "Add your music",
           <>Make a release (an album, an EP or a single), then add your songs to it.{" "}
             <button class="quiet-link" onClick={onAdd}>+ Add a release</button></>)}
-        {step(2, paid, "Choose how you're paid",
-          <>Cash App, Coinbase or card subscriptions. Skip it and your music is free.
+        {step(2, paid, "Get paid",
+          <>Make your wallet with Face ID, or take card subscriptions. Skip it and your music is free.
             <button class="btn ghost sm step-btn" onClick={onSettings}>Open Earnings</button></>)}
         {step(3, live, "Publish",
           <>Press <b>Publish</b> at the top. Nothing is public until you do.</>)}
@@ -1292,11 +1291,15 @@ function BackupReminder({ payees }) {
 }
 
 function PasskeyWallet({ onAddress }) {
-  const [offer, setOffer] = useState(false);
+  const [offer, setOffer] = useState(null);
   const [busy, setBusy] = useState(false);
   const [said, setSaid] = useState(null);
   useEffect(() => { mayOfferPasskey().then(setOffer); }, []);
-  if (!offer) return null;
+  if (offer === null) return null;
+  if (!offer) {
+    return <p class="warn small">This browser can't make a Face ID wallet. Open your editor on your phone, or paste a
+      wallet address below.</p>;
+  }
 
   async function go(seedFn) {
     setBusy(true); setSaid(null);
@@ -1321,9 +1324,7 @@ function PasskeyWallet({ onAddress }) {
       <button class="btn sm" disabled={busy} onClick={() => go(createPasskeySeed)}>
         {busy ? "Waiting for you…" : "Make my payout wallet with Face ID"}
       </button>
-      <p class="muted">On a computer it uses Touch ID, Windows Hello, or your phone. Nothing to install and no
-        passwords: your Face ID (a "passkey") opens it, and it syncs to your other devices through your Apple or
-        Google account. It's only as safe as that account, so move money to your bank now and then.{" "}
+      <p class="muted small">Face ID, Touch ID or Windows Hello · syncs through your Apple or Google account ·{" "}
         <button class="quiet-link" disabled={busy} onClick={() => go(restorePasskeySeed)}>Made one before?</button></p>
       {said && <p class={said.good ? "good" : "warn"} role="status">{said.text}</p>}
     </div>
@@ -1410,14 +1411,6 @@ function PayoutReady({ address, live }) {
       else if (e instanceof NoPasskeySecret) setCheck({ error: "This device's passkey can't open it. Try again and choose your phone." });
       else setCheck({ error: e?.message || "Couldn't check just now." });
     }
-  }
-  if (isCoinbaseAddress(address)) {
-    return (
-      <div class="payout-ready" role="status">
-        <p><b>✓ Coinbase is connected</b> <span class="mono muted small">{address.slice(0, 4)}…{address.slice(-4)}</span></p>
-        {!live && <p class="warn small">Press <b>Publish</b> at the top so listeners can start paying you.</p>}
-      </div>
-    );
   }
   return (
     <div class="payout-ready" role="status">
@@ -2257,18 +2250,62 @@ function EarningsSummary({ paid, payees }) {
           : paid.at ? <>Checked at {new Date(paid.at).toLocaleTimeString()}. <button class="link" onClick={paid.look}>Check again</button></>
           : <button class="link" onClick={paid.look}>Check payments</button>}
       </p>
-      {isCoinbaseAddress(payees.find((p) => p.address)?.address) ? (
-        <p class="payout-where muted small">It goes straight into your Coinbase account. To move it to your bank: in
-          Coinbase, sell the USDC for dollars (one for one), then withdraw.</p>
-      ) : <>
       <p class="payout-where muted small">In your payout wallet{" "}
         <Help about="your payout wallet">Where fans' payments land. Only you can move money out of it.</Help>{" "}
         <code title={payees.find((p) => p.address)?.address}>{short(payees.find((p) => p.address)?.address)}</code>{" "}
         <CopyButton text={payees.find((p) => p.address)?.address} label="Copy" /></p>
-      <a class="btn sm" href="#cash-out" onClick={(e) => { e.preventDefault(); const c = document.getElementById("cash-out"); c?.scrollIntoView({ behavior: "smooth", block: "start" }); c?.querySelector("button.choice")?.focus({ preventScroll: true }); }}>Move it to your bank</a>
-      </>}
+      <a class="btn sm" href="#cash-out" onClick={(e) => { e.preventDefault(); const c = document.getElementById("cash-out"); c?.scrollIntoView({ behavior: "smooth", block: "start" }); c?.querySelector("button.pay-choice")?.focus({ preventScroll: true }); }}>Cash out</a>
     </section>
   );
+}
+
+/** What to show when a Face ID step fails: nothing if they cancelled. */
+function faceIdProblem(e) {
+  if (e?.name === "Cancelled" || e?.name === "NotAllowedError") return null;
+  if (e instanceof NoPasskeySecret) return { error: "This device's passkey can't open the wallet. Try again and choose your phone in the window that appears." };
+  return { error: e?.message || "That didn't go through, and nothing was sent." };
+}
+
+/** The payout wallet's key, made from the passkey for one use and wiped. */
+async function withPayoutKey(payees, use) {
+  const seed = await restorePasskeySeed();
+  try {
+    const from = base58(await publicKeyOf(seed));
+    if (!payees.some((p) => p.address === from)) {
+      throw new Error("That passkey opens a different wallet from the one you're paid into. Try again and choose the passkey you made for Amply payouts.");
+    }
+    return await use(seed, from);
+  } finally {
+    seed.fill(0);
+  }
+}
+
+/**
+ * Send `micros` of USDC from the Face ID payout wallet to `dest`, returning
+ * the signature. The artist's server drafts the transfer and pays its network
+ * fee; this page checks every part of the draft before Face ID signs it (only
+ * this amount, only to this address, only from this wallet, nothing else),
+ * and the server checks it again before sending.
+ */
+async function sendFromPayoutWallet({ api, payees, net, dest, micros, step = () => {} }) {
+  step("Waiting for Face ID…");
+  return withPayoutKey(payees, async (seed, from) => {
+    step("Preparing the transfer…");
+    const { tx: draft, feePayer } = await api.prepareSend(from, dest, micros);
+    const tx = readTransaction(base64.decode(draft) || new Uint8Array(0));
+    if (tx.accounts[1] !== from) throw new Error("Your server prepared a transfer from a different wallet, so it wasn't sent.");
+    tx.signatures[1] = await signWithSeed(seed, tx.message);
+    // Checked here before it leaves this page: exactly this, nothing else.
+    const { NETWORKS } = await import("./chain.js");
+    const verdict = await checkFeePayment(tx, {
+      feePayer, mint: NETWORKS[net].usdc, payees: [{ address: dest, split: 100 }], minMicros: micros, maxMicros: micros,
+    });
+    if (!verdict.ok || verdict.listener !== from) {
+      throw new Error(`Your server prepared a transfer that isn't the one you asked for, so it wasn't sent (${verdict.ok ? "wrong wallet" : verdict.problem}).`);
+    }
+    step("Sending…");
+    return (await api.send(base64.encode(writeTransaction(tx)), from, dest, micros)).signature;
+  });
 }
 
 /**
@@ -2304,38 +2341,13 @@ function SendToBank({ api, payees, network, routeName }) {
     const usd = (micros / 1e6).toFixed(2);
     if (!window.confirm(`Send $${usd} to your ${routeName} (${dest.slice(0, 4)}…${dest.slice(-4)})?\n\n`
       + `Check that address matches the one ${routeName} shows you. A transfer can't be called back.`)) return;
-    let seed = null;
-    setState({ busy: true, text: "Waiting for Face ID…" });
     try {
-      seed = await restorePasskeySeed();
-      const from = base58(await publicKeyOf(seed));
-      if (!payees.some((p) => p.address === from)) {
-        throw new Error("That passkey opens a different wallet from the one you're paid into. Try again and choose the passkey you made for Amply payouts.");
-      }
-      setState({ busy: true, text: "Preparing the transfer…" });
-      const { tx: draft, feePayer } = await api.prepareSend(from, dest, micros);
-      const tx = readTransaction(base64.decode(draft) || new Uint8Array(0));
-      if (tx.accounts[1] !== from) throw new Error("Your server prepared a transfer from a different wallet, so it wasn't sent.");
-      tx.signatures[1] = await signWithSeed(seed, tx.message);
-      // Checked here before it leaves this page: exactly this, nothing else.
-      const { NETWORKS } = await import("./chain.js");
-      const verdict = await checkFeePayment(tx, {
-        feePayer, mint: NETWORKS[net].usdc, payees: [{ address: dest, split: 100 }], minMicros: micros, maxMicros: micros,
-      });
-      if (!verdict.ok || verdict.listener !== from) {
-        throw new Error(`Your server prepared a transfer that isn't the one you asked for, so it wasn't sent (${verdict.ok ? "wrong wallet" : verdict.problem}).`);
-      }
-      setState({ busy: true, text: "Sending…" });
-      const r = await api.send(base64.encode(writeTransaction(tx)), from, dest, micros);
-      setState({ done: true, usd, signature: r.signature });
+      const signature = await sendFromPayoutWallet({ api, payees, net, dest, micros, step: (text) => setState({ busy: true, text }) });
+      setState({ done: true, usd, signature });
       setAmount("");
       setBalance((b) => (b == null ? b : Math.max(0, b - micros)));
     } catch (e) {
-      if (e?.name === "Cancelled" || e?.name === "NotAllowedError") setState(null);
-      else if (e instanceof NoPasskeySecret) setState({ error: "This device's passkey can't open the wallet. Try again and choose your phone in the window that appears." });
-      else setState({ error: e?.message || "That didn't go through, and nothing was sent." });
-    } finally {
-      seed?.fill(0);
+      setState(faceIdProblem(e));
     }
   }
 
@@ -2392,55 +2404,156 @@ function SendToBank({ api, payees, network, routeName }) {
 }
 
 /**
- * Moving money to a bank, one route at a time: pick the app you use, then
- * see only its steps. Listeners pay in USDC; Cash App and Coinbase both take
- * it on Solana and turn it into dollars.
+ * Cashing out through Coinbase (Offramp). Face ID signs that the artist owns
+ * the wallet; Coinbase's own page takes the amount and where the money goes
+ * (bank or Coinbase balance); then Coinbase says where to send the USDC, read
+ * through the artist's node, and Face ID sends exactly that. Coinbase holds
+ * the request for 30 minutes after "Cash out now".
  */
-function CashOut({ api, payees, network, via: chosen }) {
+function CoinbaseCashOut({ api, payees, network }) {
+  const net = network === "devnet" ? "devnet" : "mainnet";
+  const mine = payees.find((p) => p.address)?.address;
+  const [balance, setBalance] = useState(null);
+  const [amount, setAmount] = useState("");
+  const [state, setState] = useState(null);  // { busy, text } | { signed, link } | { waiting } | { send } | { done } | { error }
+  const signed = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    import("./chain.js").then(({ usdcBalance }) => usdcBalance(mine, net)).then((b) => alive && setBalance(b)).catch(() => {});
+    return () => { alive = false; };
+  }, [mine, net]);
+
+  // While Coinbase is being used: ask now and then where it's waiting for the USDC.
+  useEffect(() => {
+    if (!state?.waiting) return;
+    let alive = true, delay = 4000;
+    const look = async () => {
+      if (!alive) return;
+      try {
+        const s = signed.current;
+        const r = await api.cashoutStatus(s.address, s.signedAt, s.signature);
+        if (!alive) return;
+        if (r.send) return setState({ send: r.send });
+        if (r.last === "success") return setState({ done: true });
+      } catch { /* asked again below */ }
+      delay = Math.min(delay * 1.5, 20_000);
+      setTimeout(look, delay);
+    };
+    const t = setTimeout(look, delay);
+    return () => { alive = false; clearTimeout(t); };
+  }, [state?.waiting]);
+
+  const usd = Number(amount);
+  const tooMuch = balance != null && Math.round(usd * 1e6) > balance;
+  const ok = usd >= 1 && Math.round(usd * 100) === usd * 100 && !tooMuch;
+
+  async function sign() {
+    setState({ busy: true, text: "Waiting for Face ID…" });
+    try {
+      const signedAt = Date.now();
+      const s = await withPayoutKey(payees, async (seed, from) => ({
+        address: from, signedAt,
+        signature: base58(await signWithSeed(seed, new TextEncoder().encode(sellMessage(from, signedAt)))),
+      }));
+      signed.current = s;
+      setState({ signed: true, link: coinbaseCashoutPage(s.address, usd, s.signedAt, s.signature) });
+    } catch (e) {
+      setState(faceIdProblem(e));
+    }
+  }
+
+  async function send() {
+    const { to, micros } = state.send;
+    try {
+      const signature = await sendFromPayoutWallet({ api, payees, net, dest: to, micros, step: (text) => setState({ send: state.send, busy: true, text }) });
+      setState({ sent: true, usd: (micros / 1e6).toFixed(2), signature });
+    } catch (e) {
+      setState(faceIdProblem(e) || { send: state.send });
+    }
+  }
+
+  if (state?.sent || state?.done) {
+    return (
+      <div class="send-done" role="status">
+        <p class="good"><b>{state.sent ? `Sent $${state.usd} to Coinbase.` : "Done."}</b> Coinbase pays it out where you chose,
+          and tells you when.</p>
+        <button class="link" onClick={() => setState(null)}>Cash out more</button>
+      </div>
+    );
+  }
+  if (state?.send) {
+    return (
+      <div class="send-form">
+        <p><b>Coinbase is ready for ${(state.send.micros / 1e6).toFixed(2)}.</b> Send it within 30 minutes of pressing
+          Cash out now.</p>
+        <button class="btn" disabled={state.busy} onClick={send}>{state.busy ? state.text : "Send with Face ID"}</button>
+        {state.error && <p class="warn" role="alert">{state.error}</p>}
+      </div>
+    );
+  }
+  if (state?.signed || state?.waiting) {
+    return (
+      <div class="send-form">
+        <a class="btn" href={state.link} target="_blank" rel="noopener noreferrer"
+          onClick={() => setState({ waiting: true, link: state.link })}>Open Coinbase</a>
+        <p class="muted small">Choose where the money goes and press <b>Cash out now</b>, then come back here.</p>
+        {state.waiting && <p class="muted small">Waiting for Coinbase… <button class="link" onClick={() => setState(null)}>Start again</button></p>}
+      </div>
+    );
+  }
+  return (
+    <div class="send-form">
+      <Field label="How much">
+        <div class="send-amount">
+          <span class="money">$<input type="number" min="1" step="0.01" value={amount} placeholder="0.00"
+            aria-label="Amount to cash out, in dollars" onInput={(e) => setAmount(e.target.value)} /></span>
+          {balance != null && balance >= 1_000_000 && (
+            <button class="link" onClick={() => setAmount((Math.floor(balance / 10_000) / 100).toFixed(2))}>
+              All of it (${(Math.floor(balance / 10_000) / 100).toFixed(2)})</button>
+          )}
+        </div>
+      </Field>
+      {tooMuch && <p class="warn small">That's more than your wallet holds.</p>}
+      <button class="btn" disabled={!ok || state?.busy} onClick={sign}>{state?.busy ? state.text : "Cash out with Coinbase"}</button>
+      <p class="muted small">At least $1 · needs a Coinbase account with your bank added · Face ID twice</p>
+      {state?.error && <p class="warn" role="alert">{state.error}</p>}
+    </div>
+  );
+}
+
+/** Moving money out of the payout wallet: Coinbase (most countries) or Cash App (US). */
+function CashOut({ api, payees, network, via: chosen, onVia }) {
   const [via, setVia] = useState(chosen === "cashapp" || chosen === "coinbase" ? chosen : null);
   const [passkey, setPasskey] = useState(true);
+  const pick = (k) => { setVia(k); onVia?.(k); };
   const routes = {
-    cashapp: { name: "Cash App", where: "US only, no fee",
-      first: <>In Cash App: tap <b>Money</b>, then <b>Deposit USDC</b>, choose <b>Solana</b>, and copy the address it shows.</>,
-      last: <>It arrives in Cash App as dollars. Move it to your bank as usual.</> },
-    coinbase: { name: "Coinbase", where: "most countries",
-      first: <>In Coinbase: tap <b>Receive</b>, choose <b>USDC</b>, network <b>Solana</b>, and copy the address.</>,
-      last: <>In Coinbase, sell the USDC for dollars (one for one), then withdraw to your bank.</> },
+    coinbase: { name: "Coinbase", where: "Most countries · to your bank or Coinbase", fee: "Coinbase shows any fee before you confirm" },
+    cashapp: { name: "Cash App", where: "US · turns into dollars by itself", fee: "Fees: 0% (for now)" },
   };
-  const r = via && routes[via];
   return (
     <section class="card" id="cash-out">
-      <h2>Move your money to your bank</h2>
-      <p class="muted">Send it to the app you use; it turns it into dollars for your bank.{" "}
-        <Help about="digital dollars">Fans pay you in digital dollars (USDC), each worth exactly $1. Cash App and
-          Coinbase turn them into ordinary dollars.</Help></p>
-      <div class="choices">
+      <h2>Cash out</h2>
+      <div class="pay-choices">
         {Object.entries(routes).map(([k, v]) => (
-          <button key={k} class="choice" aria-pressed={via === k} onClick={() => setVia(k)}>
-            {v.name} <span class="muted small">{v.where}</span></button>
+          <button key={k} type="button" class="pay-choice" aria-pressed={via === k} onClick={() => pick(k)}>
+            <b>{v.name}</b><span>{v.where}</span><span class="fee">{v.fee}</span></button>
         ))}
       </div>
-      {r && (
+      {via && !passkey && (
+        <p class="muted">In Phantom: tap <b>USDC</b>, then <b>Send</b>, and paste your {routes[via].name} USDC address
+          (Solana network).</p>
+      )}
+      {via === "coinbase" && passkey && <CoinbaseCashOut api={api} payees={payees} network={network} />}
+      {via === "cashapp" && passkey && (
         <ol class="cash-steps">
-          <li>{r.first}</li>
-          <li>
-            Send it from your payout wallet:
-            <div class="send-how">
-              {passkey ? (
-                <>
-                  <SendToBank api={api} payees={payees} network={network} routeName={r.name} />
-                  <button class="btn ghost sm" onClick={() => setPasskey(false)}>My payout wallet is in the Phantom app</button>
-                </>
-              ) : (
-                <>
-                  <p class="muted">In Phantom: tap <b>USDC</b>, then <b>Send</b>, paste the address and the amount.</p>
-                  <button class="btn ghost sm" onClick={() => setPasskey(true)}>I made my payout wallet with Face ID</button>
-                </>
-              )}
-            </div>
-          </li>
-          <li>{r.last}</li>
+          <li>In Cash App: tap <b>Money</b> → <b>Deposit USDC</b> → <b>Solana</b>, and copy the address.</li>
+          <li><SendToBank api={api} payees={payees} network={network} routeName="Cash App" /></li>
         </ol>
+      )}
+      {via && (
+        <button class="quiet-link" onClick={() => setPasskey(!passkey)}>
+          {passkey ? "My payout wallet is in the Phantom app" : "I made my payout wallet with Face ID"}</button>
       )}
       <details class="cash-out-passkey">
         <summary>Want to open your Face ID wallet in another app?</summary>
@@ -2563,138 +2676,41 @@ function HomeTab({ api, manifest, payees, rate, settleAt, network, live, onGo })
 const VIA_KEY = "amply.editor.payout-via";
 const readVia = () => { try { return localStorage.getItem(VIA_KEY); } catch { return null; } };
 
-// The fee line under each is what that company keeps, checked November 2026.
-const WAYS = [
-  ["coinbase", "Coinbase", "Recommended · payments go straight in", "Fees: 0% · Solana network fee ~0.1¢ a payment"],
-  ["cashapp", "Cash App", "US · fans pay by the minute", "Fees: 0% (for now) · Solana network fee ~0.1¢ a payment"],
-  ["stripe", "Card subscriptions", "Stripe · fans subscribe by card", "Fees: ~3.6% + 30¢ a payment (US cards) · no network fee"],
-];
-
 /**
- * Connect Coinbase: sign in and approve, and fans' payments go straight into
- * the artist's Coinbase account. The answer arrives through the window it
- * opened (coinbase.js), so this page keeps any unpublished changes.
+ * Before anything is set up. Fans pay into the artist's own wallet, made with
+ * Face ID: the same in every country, with no exchange in between and so no
+ * exchange's forms about each fan. Coinbase or Cash App is only where the
+ * artist moves it later (CashOut). Card subscriptions are the other way in.
  */
-function ConnectCoinbase({ onAddress, api }) {
-  const [said, setSaid] = useState(null);
-  const apply = useRef(null);
-  apply.current = (a) => {
-    if (a.address) {
-      onAddress(a.address);
-      api?.savePayout?.(a.address, "coinbase").catch(() => {});
-      setSaid({ good: true, text: "Coinbase is connected. Publish, and fans' payments go straight into your Coinbase account." });
-    } else setSaid({ good: false, text: `${a.error}.` });
+function GetPaid({ payees, setPayees, manifest, update, api, perMinuteOnly }) {
+  const [cards, setCards] = useState(false);
+  const setAddress = (a) => {
+    setPayees([{ ...payees[0], address: a }, ...payees.slice(1)]);
+    // Kept on the node at once: an unpublished change is otherwise lost on reload.
+    if (keyOf(a)) api?.savePayout?.(a).catch(() => {});
   };
-  useEffect(() => {
-    const check = () => { const a = readCoinbaseAnswer(); if (a) apply.current(a); };
-    check();
-    const onStorage = (e) => { if (e.key === ANSWER_KEY && e.newValue) check(); };
-    addEventListener("storage", onStorage);
-    return () => removeEventListener("storage", onStorage);
-  }, []);
-  return (
-    <div class="connect-coinbase">
-      <button class="btn" onClick={() => { setSaid(null); startCoinbaseConnect(); }}>Connect Coinbase</button>
-      <p class="muted small">Sign in to Coinbase (or join, it's free) and approve. Amply only makes an address for
-        your payments, then lets go of the connection. It can never move your money.</p>
-      {said && <p class={said.good ? "good" : "warn"} role="status">{said.text}</p>}
-    </div>
-  );
-}
-
-/**
- * Coinbase's USDC page: with the app installed it opens straight to USDC in
- * the app (tested on iPhone), one tap from Receive; otherwise the website,
- * which offers sign-up and the app.
- */
-const COINBASE_USDC = "https://www.coinbase.com/price/usdc";
-
-/**
- * Coinbase's deposit address, copied from the Coinbase app: payments go
- * straight in. No link can fill it in (only Connect Coinbase, once Coinbase
- * approves it), so it's one trip to the app and one tap on Paste.
- */
-function PasteCoinbase({ onAddress, api }) {
-  const [text, setText] = useState("");
-  const [said, setSaid] = useState(null);
-  const value = text.trim();
-  const good = !!keyOf(value);
-  // Kept on the node at once: an unpublished change is otherwise lost on reload.
-  const save = (a) => { rememberCoinbaseAddress(a); onAddress(a); api?.savePayout?.(a, "coinbase").catch(() => {}); };
-  const canPaste = typeof navigator !== "undefined" && !!navigator.clipboard?.readText;
-  async function paste() {
-    setSaid(null);
-    try {
-      const got = (await navigator.clipboard.readText()).trim();
-      setText(got);
-      if (keyOf(got)) save(got);
-      else setSaid("That isn't a Solana address. In Coinbase, check the network says Solana, then copy again.");
-    } catch {
-      setSaid("Couldn't read what you copied. Long-press the box below and choose Paste.");
-    }
-  }
-  return (
-    <div class="connect-coinbase">
-      <ol class="cash-steps">
-        <li>Open <a href={COINBASE_USDC} target="_blank" rel="noopener noreferrer">USDC in Coinbase</a> (free to join),
-          tap <b>Transfer</b> → <b>Receive crypto</b> → <b>Solana</b>, then copy the address.</li>
-        <li>Come back and paste it:</li>
-      </ol>
-      {canPaste && <button class="btn" onClick={paste}>Paste my Coinbase address</button>}
-      {said && <p class="warn small" role="alert">{said}</p>}
-      <div class="paste-row">
-        <input type="text" class="mono" value={text} placeholder="Or paste it here" aria-label="Your Coinbase USDC address (Solana)"
-          autocomplete="off" spellcheck={false} onInput={(e) => setText(e.target.value)} />
-        <button class="btn ghost sm" disabled={!good} onClick={() => save(value)}>Save</button>
-      </div>
-      {value && !good && !said && <p class="warn small">That isn't a Solana address. Check you chose the <b>Solana</b> network in Coinbase.</p>}
-    </div>
-  );
-}
-
-/** Before anything is set up: only the ways to be paid, and the one step each needs. */
-function GetPaid({ via, onVia, payees, setPayees, manifest, update, api, only }) {
-  const ways = WAYS.filter(([k]) => !only || only.includes(k));
-  const setAddress = (a) => setPayees([{ ...payees[0], address: a }, ...payees.slice(1)]);
-  const name = WAYS.find(([k]) => k === via)?.[1];
   return (
     <section class="card">
-      <h2>{only ? "Also take payments by the minute" : "How do you want to get paid?"}</h2>
-      <div class="pay-choices">
-        {ways.map(([k, label, sub, fee]) => (
-          <button key={k} type="button" class="pay-choice" aria-pressed={via === k} onClick={() => onVia(k)}>
-            <b>{label}</b><span>{sub}</span><span class="fee">{fee}</span>
+      <h2>{perMinuteOnly ? "Also take payments by the minute" : "Get paid"}</h2>
+      <p>Fans pay into your own wallet, opened with Face ID. Move it to Coinbase or Cash App whenever you like.</p>
+      <PasskeyWallet onAddress={setAddress} />
+      <p class="muted small">Amply: 0% · Solana network fee ~0.1¢ a payment, from your fees account</p>
+      <details class="more">
+        <summary>Already have a Solana wallet?</summary>
+        <Field label="Paste its address">
+          <Text value={payees[0]?.address || ""} class="mono" placeholder="Your wallet address" onInput={(v) => setAddress(v.trim())} />
+        </Field>
+      </details>
+      {!perMinuteOnly && <>
+        <div class="pay-choices">
+          <button type="button" class="pay-choice" aria-pressed={cards} onClick={() => setCards(!cards)}>
+            <b>Card subscriptions</b><span>Stripe · fans subscribe by card</span>
+            <span class="fee">Fees: ~3.6% + 30¢ a payment (US cards) · no network fee</span>
           </button>
-        ))}
-      </div>
-      <p class="muted small">Amply: 0% · network fees come from your fees account, not your earnings</p>
-      {via === "coinbase" && (
-        <div class="pay-next">
-          {CONNECT_OFFERED ? <ConnectCoinbase onAddress={setAddress} api={api} /> : <PasteCoinbase onAddress={setAddress} api={api} />}
-          <details class="more">
-            <summary>Rather keep it in your own wallet first?</summary>
-            <p>One tap makes a payout wallet with Face ID; you send it on to Coinbase whenever you like.</p>
-            <PasskeyWallet onAddress={setAddress} />
-            <Field label="Or paste a Solana wallet address">
-              <Text value={payees[0]?.address || ""} class="mono" placeholder="Your wallet address" onInput={(v) => setAddress(v.trim())} />
-            </Field>
-          </details>
         </div>
-      )}
-      {via === "cashapp" && (
-        <div class="pay-next">
-          <p>One tap makes your payout wallet. Fans' payments land there; you send them on to {name} whenever you like.</p>
-          <PasskeyWallet onAddress={setAddress} />
-          <details class="more">
-            <summary>No Face ID, or already use Phantom?</summary>
-            <Field label="Paste a Solana wallet address">
-              <Text value={payees[0]?.address || ""} class="mono" placeholder="Your wallet address" onInput={(v) => setAddress(v.trim())} />
-            </Field>
-          </details>
-        </div>
-      )}
-      {via === "stripe" && <Subscriptions manifest={manifest} update={update} api={api} />}
-      {!only && <p class="muted small">Until then, your music is free to listen to.</p>}
+        {cards && <Subscriptions manifest={manifest} update={update} api={api} />}
+        <p class="muted small">Until then, your music is free to listen to.</p>
+      </>}
     </section>
   );
 }
@@ -2759,7 +2775,7 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
 
   if (!hasWallet && !subscribing) {
     return (<>{head}<div class="stack">
-      <GetPaid via={via} onVia={setVia} payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} />
+      <GetPaid payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} />
     </div></>);
   }
 
@@ -2776,9 +2792,9 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
         {hasWallet && <Pricing wallet={wallet} onChange={setWallet} />}
         {subscribing && <Subscriptions manifest={manifest} update={update} api={api} />}
         <Listeners api={api} paid={paid} rate={rate} settleAt={settleAt} />
-        {hasWallet && !isCoinbaseAddress(payees.find((p) => p.address)?.address) && <CashOut api={api} payees={payees} network={network} via={via} />}
+        {hasWallet && <CashOut api={api} payees={payees} network={network} via={via} onVia={setVia} />}
         {hasWallet && <FeesCard api={api} network={network} payees={payees} />}
-        {!hasWallet && <GetPaid via={via} onVia={setVia} payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} only={["coinbase", "cashapp"]} />}
+        {!hasWallet && <GetPaid payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} perMinuteOnly />}
         <details class="advanced">
           <summary>More <span class="note">{[!subscribing && "card subscriptions", hasWallet && "split with bandmates", hasWallet && "test mode"].filter(Boolean).join(", ")}</span></summary>
           <div class="stack">

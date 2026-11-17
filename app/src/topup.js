@@ -80,6 +80,14 @@ export const COINBASE_SOL_AMOUNTS = [5, 10];
 export const coinbaseSolPage = (address, amount, signedAt, signature) =>
   `${RELAY}/coinbase/sol?${new URLSearchParams({ address, amount: String(amount), signedAt: String(signedAt), signature })}`;
 
+/** What a payout wallet signs to cash out through Coinbase (the relay checks it). */
+export const sellMessage = (address, signedAt) =>
+  `Amply: cash out from ${address} through Coinbase (${signedAt})`;
+
+/** Coinbase's cash-out page for `amount` USDC from this wallet, opened from the editor. */
+export const coinbaseCashoutPage = (address, amount, signedAt, signature) =>
+  `${RELAY}/coinbase/sell?${new URLSearchParams({ address, amount: String(amount), signedAt: String(signedAt), signature })}`;
+
 /** Exactly what the relay checks the signature against. */
 export const onrampMessage = (address, signedAt) =>
   `Amply: add money to ${address} through Coinbase (${signedAt})`;
