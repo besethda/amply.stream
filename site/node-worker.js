@@ -2432,8 +2432,9 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.19.28";
+var VERSION = "3.20.0";
 var SPEC_VERSION = 1;
+var RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
 var MANAGE_CSP = [
   "default-src 'none'",
   "script-src 'unsafe-inline'",
@@ -2860,10 +2861,18 @@ async function handleManage(request, env, path) {
   if (path === "/payout" && request.method === "POST") {
     const body = await jsonBody(request, 1e3);
     const address = typeof body?.address === "string" ? body.address : "";
-    const via = body?.via;
-    if (!keyOf(address) || via !== "coinbase" && via !== "cashapp" && via !== "wallet") return fail(400, "not a payout address");
-    await putSetting(env.DB, "payout", JSON.stringify({ address, via }));
-    return new Response(JSON.stringify({ address, via }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+    if (!keyOf(address)) return fail(400, "not a payout address");
+    await putSetting(env.DB, "payout", JSON.stringify({ address }));
+    return new Response(JSON.stringify({ address }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+  if (path === "/cashout/coinbase" && request.method === "GET") {
+    const q = new URL(request.url).searchParams;
+    const pay = walletOf(await manifestNowOf(env));
+    if (!pay?.recipients.some((r) => r.address === q.get("address"))) return fail(400, "that isn't one of your payout wallets");
+    const ask = new URLSearchParams({ address: q.get("address") || "", signedAt: q.get("signedAt") || "", signature: q.get("signature") || "" });
+    const res = await fetch(`${RELAY_ORIGIN}/coinbase/sell/status?${ask}`).catch(() => null);
+    const body = res ? await res.text() : JSON.stringify({ error: "Coinbase couldn't be reached" });
+    return new Response(body, { status: res?.status ?? 502, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
   }
   if (path === "/site" && request.method === "GET") {
     const t = await setting(env.DB, "site");

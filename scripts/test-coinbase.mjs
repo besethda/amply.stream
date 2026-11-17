@@ -161,6 +161,74 @@ const request = async (over = {}) => {
   ok("only USDC or SOL", eth.status === 403 && sent.length === 0);
 }
 
+// ── cashing out through Coinbase (Offramp) ─────────────────────────────────
+{
+  const app = await import("../app/src/topup.js");
+  const relayMod = await import("../relay/src/index.ts");
+  ok("the editor signs exactly the words the relay checks to cash out", app.sellMessage(address, 99) === relayMod.sellMessage(address, 99));
+  const signed = async (signedAt = Date.now(), key) => ({ signedAt, signature: await signFor(relayMod.sellMessage(address, signedAt), key) });
+  const open = async ({ amount = 25, signedAt, signature, env = configured } = {}) => {
+    const s = await signed(signedAt);
+    const href = app.coinbaseCashoutPage(address, amount, s.signedAt, signature ?? s.signature);
+    sent = [];
+    return relay.fetch(new Request(href.replace(app.RELAY, "https://relay.test"), { headers: { "CF-Connecting-IP": "203.0.113.4" } }), env);
+  };
+  reply = { status: 200, body: { token: "SELL-TOKEN" } };
+  const res = await open();
+  ok("a signed cash-out goes to Coinbase's cash-out page", res.status === 303, String(res.status));
+  const to = new URL(res.headers.get("Location") || "about:blank");
+  ok("  pay.coinbase.com/v3/sell", to.origin === "https://pay.coinbase.com" && to.pathname === "/v3/sell/input");
+  ok("  USDC on Solana, the amount asked for", to.searchParams.get("defaultAsset") === "USDC" && to.searchParams.get("defaultNetwork") === "solana"
+    && to.searchParams.get("presetCryptoAmount") === "25");
+  ok("  back to amply.stream afterwards", to.searchParams.get("redirectUrl") === "https://amply.stream/cashout");
+  ok("  naming the wallet only by a hash", /^[0-9a-f]{40}$/.test(to.searchParams.get("partnerUserRef") || ""));
+  const asked = JSON.parse(sent[0]?.init.body || "{}");
+  ok("  Coinbase is asked for this wallet's USDC on Solana", asked.addresses?.[0]?.address === address && asked.assets?.join() === "USDC");
+
+  ok("an old signature is refused", (await open({ signedAt: Date.now() - 10 * 60_000 })).status === 403 && sent.length === 0);
+  ok("someone else's signature is refused", (await open({ signature: (await signed(Date.now(), (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign"])).privateKey)).signature })).status === 403);
+  ok("less than a dollar is refused", (await open({ amount: 0.5 })).status === 400);
+  ok("fractions of a cent are refused", (await open({ amount: 1.005 })).status === 400);
+  ok("without Amply's key it says Coinbase isn't set up", (await open({ env: bare })).status === 503);
+
+  // Where to send, once the artist has pressed "Cash out now".
+  const status = async ({ signedAt = Date.now(), transactions = [], code = 200 } = {}) => {
+    const s = await signed(signedAt);
+    reply = { status: code, body: { transactions } };
+    sent = [];
+    const r = await relay.fetch(new Request(`https://relay.test/coinbase/sell/status?${new URLSearchParams({ address, signedAt: String(s.signedAt), signature: s.signature })}`), configured);
+    return { r, json: await r.json() };
+  };
+  const coinbaseAddress = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
+  const started = { status: "TRANSACTION_STATUS_STARTED", asset: "USDC", network: "solana", sell_amount: "25.00", to_address: coinbaseAddress };
+  let { r, json } = await status({ transactions: [started] });
+  ok("Coinbase's waiting cash-out comes back as where and how much to send", r.status === 200 && json.send?.to === coinbaseAddress && json.send?.micros === 25_000_000, JSON.stringify(json));
+  const call = sent[0];
+  ok("  asked of Coinbase's sell transactions for this wallet's reference", /\/onramp\/v1\/sell\/user\/[0-9a-f]{40}\/transactions\?page_size=5$/.test(call?.url || ""), call?.url);
+  ok("  with a token for exactly that GET", (() => {
+    const jwt = new Headers(call?.init.headers).get("Authorization")?.replace(/^Bearer /, "") || "";
+    const claims = JSON.parse(new TextDecoder().decode(b64urlDecode(jwt.split(".")[1] || "")));
+    return /^GET api\.developer\.coinbase\.com\/onramp\/v1\/sell\/user\/[0-9a-f]{40}\/transactions$/.test(claims.uri);
+  })());
+  ({ json } = await status());
+  ok("nothing yet: waiting", json.waiting === true);
+  ({ json } = await status({ transactions: [{ ...started, network: "ethereum" }] }));
+  ok("anything but USDC on Solana: still waiting, never sent", json.waiting === true && !json.send);
+  ({ json } = await status({ transactions: [{ ...started, to_address: "0xabc" }] }));
+  ok("an address that isn't Solana's: never sent", json.waiting === true);
+  ({ json } = await status({ transactions: [{ ...started, sell_amount: "abc" }] }));
+  ok("an amount that isn't a number: never sent", json.waiting === true);
+  ({ json } = await status({ transactions: [{ status: "TRANSACTION_STATUS_SUCCESS" }] }));
+  ok("a finished cash-out says so", json.last === "success");
+  ({ json } = await status({ transactions: [{ status: "TRANSACTION_STATUS_FAILED" }] }));
+  ok("  and a failed one", json.last === "failed");
+  ({ r } = await status({ signedAt: Date.now() - 60 * 60_000, transactions: [started] }));
+  ok("a signature over 45 minutes old can't ask", r.status === 403 && sent.length === 0);
+  ({ r } = await status({ code: 500 }));
+  ok("Coinbase not answering is passed on, not guessed", r.status === 502);
+  reply = { status: 200, body: { token: "SESSION-TOKEN" } };
+}
+
 // ── the app and the relay agree ─────────────────────────────────────────────
 {
   const app = await import("../app/src/topup.js");

@@ -29,9 +29,8 @@
  * carrying a refresh token rather than passing it on.
  */
 
-import { type ConnectEnv, connectReady, connectUrl, finishConnect, backToEditor, EDITOR_HOST, NONCE } from "./coinbase-connect.ts";
 
-export interface Env extends ConnectEnv {
+export interface Env {
   ALLOWED_ORIGINS: string;
   /**
    * Amply's own Coinbase Developer Platform key, for one thing only: asking
@@ -306,14 +305,134 @@ export async function onrampProblem(body: unknown, now = Date.now()): Promise<st
   if (!(asset === "SOL" ? COINBASE_SOL_AMOUNTS : COINBASE_AMOUNTS).includes(b.amount as number)) return "not an amount offered";
   const signedAt = b.signedAt;
   if (typeof signedAt !== "number" || Math.abs(now - signedAt) > SIGNED_WITHIN_MS) return "the signature is too old";
-  const sig = typeof b.signature === "string" ? unbase58(b.signature) : null;
+  return signedBy(key, b.signature, onrampMessage(address, signedAt));
+}
+
+/** Whether `signature` (base58) is `key`'s signature over `message`, or why not. */
+async function signedBy(key: Uint8Array, signature: unknown, message: string): Promise<string | null> {
+  const sig = typeof signature === "string" ? unbase58(signature) : null;
   if (!sig || sig.length !== 64) return "not a signature";
   let good = false;
   try {
     const pub = await crypto.subtle.importKey("raw", key, { name: "Ed25519" }, false, ["verify"]);
-    good = await crypto.subtle.verify({ name: "Ed25519" }, pub, sig, new TextEncoder().encode(onrampMessage(address, signedAt)));
+    good = await crypto.subtle.verify({ name: "Ed25519" }, pub, sig, new TextEncoder().encode(message));
   } catch { good = false; }
   return good ? null : "the signature isn't this wallet's";
+}
+
+// ── cashing out (Coinbase Offramp) ─────────────────────────────────────────
+
+const COINBASE_SELL = "https://pay.coinbase.com/v3/sell/input";
+const CASHOUT_RETURN = "https://amply.stream/cashout";
+// Long enough to open Coinbase after Face ID; the status check is asked for
+// while Coinbase's own 30-minute window runs, so it accepts a longer one.
+const SELL_SIGNED_WITHIN_MS = 5 * 60_000;
+const SELL_STATUS_WITHIN_MS = 45 * 60_000;
+export const CASHOUT_MAX_USD = 10_000;
+
+/** What a payout wallet signs to cash out through Coinbase, and to follow it. */
+export const sellMessage = (address: string, signedAt: number) =>
+  `Amply: cash out from ${address} through Coinbase (${signedAt})`;
+
+/** The address, if the request is signed by its wallet within `within`; else why not. */
+export async function sellProblem(
+  q: { address?: unknown; signedAt?: unknown; signature?: unknown }, within: number, now = Date.now(),
+): Promise<string | null> {
+  const address = typeof q.address === "string" ? q.address : "";
+  const key = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address) ? unbase58(address) : null;
+  if (!key || key.length !== 32) return "not a Solana address";
+  const signedAt = Number(q.signedAt);
+  if (!Number.isSafeInteger(signedAt) || Math.abs(now - signedAt) > within) return "the signature is too old";
+  return signedBy(key, q.signature, sellMessage(address, signedAt));
+}
+
+/** Coinbase's reference for a wallet: a hash of it, not the wallet itself. */
+async function refOf(address: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address)));
+  return Array.from(digest.slice(0, 20), (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+/** A session token from Coinbase for this wallet, USDC on Solana, or why not. */
+async function sessionToken(env: Env, address: string, clientIp: string | null, asset: OnrampAsset = "USDC"): Promise<{ token: string } | { status: number; error: string }> {
+  const jwt = await coinbaseJwt(env.CDP_KEY_ID!, env.CDP_KEY_SECRET!, "POST", COINBASE_TOKEN_PATH);
+  // Coinbase ties the session to the person's connection. Cloudflare sets
+  // CF-Connecting-IP itself, so it can't be supplied by the caller.
+  const upstream = await fetch(`https://${COINBASE_HOST}${COINBASE_TOKEN_PATH}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      addresses: [{ address, blockchains: ["solana"] }],
+      assets: [asset],
+      ...(clientIp ? { clientIp } : {}),
+    }),
+  });
+  const json = (await upstream.json().catch(() => null)) as { token?: string; message?: string } | null;
+  if (!upstream.ok || !json?.token) {
+    return { status: 502, error: `Coinbase didn't start a session${json?.message ? `: ${json.message}` : ""}` };
+  }
+  return { token: json.token };
+}
+
+/** Coinbase's cash-out page for a signed request: USDC on Solana, the amount, back to amply.stream. */
+export async function startCashout(env: Env, q: URLSearchParams, clientIp: string | null, now = Date.now()): Promise<{ url: string } | { status: number; error: string }> {
+  if (!env.CDP_KEY_ID || !env.CDP_KEY_SECRET) return { status: 503, error: "Coinbase isn't set up here yet" };
+  const address = q.get("address") || "";
+  const problem = await sellProblem({ address, signedAt: q.get("signedAt"), signature: q.get("signature") }, SELL_SIGNED_WITHIN_MS, now);
+  if (problem) return { status: 403, error: problem };
+  const amount = Number(q.get("amount"));
+  if (!(amount >= 1 && amount <= CASHOUT_MAX_USD) || Math.round(amount * 100) !== amount * 100) {
+    return { status: 400, error: "cash out at least $1, in whole cents" };
+  }
+  if (!(await onrampAllowed(env, `ip:${clientIp || "unknown"}`)) || !(await onrampAllowed(env, `addr:${address}`))) {
+    return { status: 429, error: "too many requests; try again in a minute" };
+  }
+  const session = await sessionToken(env, address, clientIp);
+  if ("error" in session) return session;
+  const p = new URLSearchParams({
+    sessionToken: session.token,
+    partnerUserRef: await refOf(address),
+    redirectUrl: CASHOUT_RETURN,
+    defaultNetwork: "solana",
+    defaultAsset: "USDC",
+    presetCryptoAmount: String(amount),
+  });
+  return { url: `${COINBASE_SELL}?${p}` };
+}
+
+export type CashoutState =
+  | { waiting: true }
+  | { send: { to: string; micros: number } }
+  | { last: "success" | "failed" };
+
+/**
+ * Where Coinbase is waiting for this wallet's USDC, once the artist has
+ * pressed "Cash out now": its address and the exact amount. Read from
+ * Coinbase's own record of the session, for a signed request only.
+ */
+export async function cashoutStatus(env: Env, q: URLSearchParams, now = Date.now()): Promise<CashoutState | { status: number; error: string }> {
+  if (!env.CDP_KEY_ID || !env.CDP_KEY_SECRET) return { status: 503, error: "Coinbase isn't set up here yet" };
+  const address = q.get("address") || "";
+  const problem = await sellProblem({ address, signedAt: q.get("signedAt"), signature: q.get("signature") }, SELL_STATUS_WITHIN_MS, now);
+  if (problem) return { status: 403, error: problem };
+  const path = `/onramp/v1/sell/user/${await refOf(address)}/transactions`;
+  const jwt = await coinbaseJwt(env.CDP_KEY_ID, env.CDP_KEY_SECRET, "GET", path, now);
+  const res = await fetch(`https://${COINBASE_HOST}${path}?page_size=5`, { headers: { Authorization: `Bearer ${jwt}` } });
+  const json = (await res.json().catch(() => null)) as { transactions?: Record<string, unknown>[] } | null;
+  if (!res.ok || !Array.isArray(json?.transactions)) return { status: 502, error: "Coinbase didn't answer" };
+  const newest = json.transactions[0];
+  if (!newest) return { waiting: true };
+  const status = String(newest.status || "");
+  if (status === "TRANSACTION_STATUS_SUCCESS") return { last: "success" };
+  if (status === "TRANSACTION_STATUS_FAILED") return { last: "failed" };
+  const to = String(newest.to_address || "");
+  const micros = Math.round(Number(newest.sell_amount) * 1_000_000);
+  const solana = /solana/i.test(String(newest.network || ""));
+  const usdc = String(newest.asset || "").toUpperCase() === "USDC";
+  const toKey = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(to) ? unbase58(to) : null;
+  // Only an exact, sendable request comes back; anything else waits.
+  if (status !== "TRANSACTION_STATUS_STARTED" || !solana || !usdc || !toKey || toKey.length !== 32
+    || !Number.isSafeInteger(micros) || micros < 10_000 || micros > CASHOUT_MAX_USD * 1_000_000) return { waiting: true };
+  return { send: { to, micros } };
 }
 
 const b64url = (bytes: Uint8Array) =>
@@ -348,10 +467,7 @@ export async function coinbaseJwt(keyId: string, keySecret: string, method: stri
 
 /** Coinbase's page for this session: USDC on Solana, the amount, and the way back. */
 export async function onrampUrl(token: string, address: string, amount: number, asset: OnrampAsset = "USDC"): Promise<string> {
-  // Coinbase's reference for the person, for looking up the transaction
-  // later: a hash of the wallet, not the wallet itself, and nothing else.
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address)));
-  const ref = Array.from(digest.slice(0, 20), (x) => x.toString(16).padStart(2, "0")).join("");
+  const ref = await refOf(address);
   const q = new URLSearchParams({
     sessionToken: token,
     defaultNetwork: "solana",
@@ -377,23 +493,9 @@ async function startOnramp(env: Env, body: unknown, clientIp: string | null): Pr
   if (!(await onrampAllowed(env, `ip:${clientIp || "unknown"}`)) || !(await onrampAllowed(env, `addr:${address}`))) {
     return { status: 429, error: "too many requests; try again in a minute" };
   }
-  const jwt = await coinbaseJwt(env.CDP_KEY_ID, env.CDP_KEY_SECRET, "POST", COINBASE_TOKEN_PATH);
-  // Coinbase ties the session to the person's connection. Cloudflare sets
-  // CF-Connecting-IP itself, so it can't be supplied by the caller.
-  const upstream = await fetch(`https://${COINBASE_HOST}${COINBASE_TOKEN_PATH}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      addresses: [{ address, blockchains: ["solana"] }],
-      assets: [asset],
-      ...(clientIp ? { clientIp } : {}),
-    }),
-  });
-  const json = (await upstream.json().catch(() => null)) as { token?: string; message?: string } | null;
-  if (!upstream.ok || !json?.token) {
-    return { status: 502, error: `Coinbase didn't start a session${json?.message ? `: ${json.message}` : ""}` };
-  }
-  return { url: await onrampUrl(json.token, address, amount, asset) };
+  const session = await sessionToken(env, address, clientIp, asset);
+  if ("error" in session) return session;
+  return { url: await onrampUrl(session.token, address, amount, asset) };
 }
 
 /** An artist's node on workers.dev: `<worker>.<subdomain>.workers.dev`, nothing else. */
@@ -499,24 +601,22 @@ export default {
       return seeOther(started.url);
     }
 
-    // "Connect Coinbase" (coinbase-connect.ts): pages too, opened by the
-    // artist's editor, so its own network policy stays as it is.
-    if (request.method === "GET" && url.pathname === "/coinbase/connect") {
-      if (!connectReady(env)) return page(503, "Connecting Coinbase isn't set up yet");
-      const host = url.searchParams.get("host") || "";
-      const nonce = url.searchParams.get("nonce") || "";
-      if (!EDITOR_HOST.test(host) || !NONCE.test(nonce)) return page(400, "Open this from your Amply editor");
-      if (!(await onrampAllowed(env, `connect:${request.headers.get("CF-Connecting-IP") || "unknown"}`))) {
-        return page(429, "Too many tries; wait a minute and try again");
-      }
-      // Coinbase refuses a return address containing its own name.
-      return seeOther(await connectUrl(env, `${url.origin}/oauth/connected`, host, nonce));
+
+    // Cashing out through Coinbase: a page the artist's editor opens, and the
+    // check the artist's node makes for where to send (server to server, so
+    // no Origin; the wallet's signature is what's checked).
+    if (request.method === "GET" && url.pathname === "/coinbase/sell") {
+      const started = await startCashout(env, url.searchParams, request.headers.get("CF-Connecting-IP"));
+      if ("error" in started) return page(started.status, started.error);
+      return seeOther(started.url);
     }
-    if (request.method === "GET" && url.pathname === "/oauth/connected") {
-      if (!connectReady(env)) return page(503, "Connecting Coinbase isn't set up yet");
-      const done = await finishConnect(env, `${url.origin}/oauth/connected`, url.searchParams);
-      if (!("host" in done)) return page(400, done.error);
-      return seeOther(backToEditor(done.host, done.nonce, done.result));
+    if (request.method === "GET" && url.pathname === "/coinbase/sell/status") {
+      const state = await cashoutStatus(env, url.searchParams);
+      const body = "error" in state ? { error: state.error } : state;
+      return new Response(JSON.stringify(body), {
+        status: "error" in state ? state.status : 200,
+        headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      });
     }
 
     if (request.method === "OPTIONS") {

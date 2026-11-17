@@ -54,8 +54,9 @@ These are properties of the architecture, not promises:
   token. Access to an artist's account lasts for one flow and is then gone for good.
   An artist without a Cloudflare account starts in a temporary one Cloudflare makes for
   them; its token lives only in their browser tab, and claiming the account ends it.
-  The relay holds one key, Amply's own Coinbase developer key, used only to open a
-  Coinbase checkout for a listener's wallet; nothing belonging to anyone else.
+  The relay holds one key, Amply's own Coinbase developer key, used only to open
+  Coinbase's buy and cash-out pages for a wallet that signed for it, and to read
+  where Coinbase is waiting for a cash-out; nothing belonging to anyone else.
 - **Stores nothing.** No accounts, no database, no analytics, no record that an artist
   exists. Nodes are found by listing an account, not by looking anyone up.
 - **Takes no cut.** Payments go from listener to artist. Amply is not in the transaction.

@@ -96,7 +96,8 @@ const api = {
   async stats() { return { songs: [], usage: { streams: { used: 4200, of: 16666 }, storage: { used: 610e6, of: 1e9 } } }; },
   async readSite() { return null; },
   async payout() { return null; },
-  async savePayout(address, via) { return { address, via }; },
+  async savePayout(address) { return { address }; },
+  async cashoutStatus() { await wait(800); return { waiting: true }; },
   async writeSite(site) { await wait(400); return { site: cleanSite(site) }; },
   // ?fees-off shows an empty fees account.
   async fees() {

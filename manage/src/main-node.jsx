@@ -10,14 +10,8 @@ import { render } from "preact";
 import { useState, useEffect } from "preact/hooks";
 import { Editor, Banner } from "./ui.jsx";
 import { nodeApi } from "./node-api.js";
-import { takeCoinbaseAnswer, rememberCoinbaseAddress } from "./coinbase.js";
 
 const api = nodeApi();
-
-// Back from Connect Coinbase in the window it opened: hand the answer to the
-// editor that asked (it's listening), and close. If this is that editor's own
-// tab (no new window was allowed), it carries on and reads the answer itself.
-if (takeCoinbaseAnswer()) window.close();
 
 function App() {
   const [state, setState] = useState({ phase: "loading" });
@@ -26,7 +20,6 @@ function App() {
     (async () => {
       try {
         const [who, manifest, payout] = await Promise.all([api.whoami(), api.readManifest(), api.payout().catch(() => null)]);
-        if (payout?.via === "coinbase") rememberCoinbaseAddress(payout.address);
         setState({
           phase: "ready",
           who,

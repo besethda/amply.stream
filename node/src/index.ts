@@ -39,7 +39,7 @@ import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf } from "../../spec/p
 import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
 import { ICONS, MANIFEST_PATH, studioManifest } from "./studio";
 
-import { VERSION, SPEC_VERSION, MANAGE_CSP } from "./constants";
+import { VERSION, SPEC_VERSION, MANAGE_CSP, RELAY_ORIGIN } from "./constants";
 import { media, maxObject, MediaTooLarge, type MediaObject, type MediaObjectBody } from "./media";
 import { quotaFailure, FREE_STREAMS_A_DAY, FREE_STORAGE } from "./quota";
 
@@ -392,10 +392,8 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
 
   // The website: read it, or save it. Saved through cleanSite, the one gate
   // between what the editor sends and what visitors are shown.
-  // Where the artist chose to be paid, kept here the moment they choose, so a
-  // reload or an update before publishing doesn't lose it (and so every device
-  // knows a Coinbase address is Coinbase's). Not in the manifest: fans don't
-  // need to know which app an artist uses.
+  // The payout wallet the artist just made, kept here at once so a reload or
+  // an update before publishing doesn't lose it.
   if (path === "/payout" && request.method === "GET") {
     const t = await setting(env.DB, "payout");
     return new Response(t || "null", { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
@@ -403,10 +401,22 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   if (path === "/payout" && request.method === "POST") {
     const body = await jsonBody(request, 1_000);
     const address = typeof body?.address === "string" ? body.address : "";
-    const via = body?.via;
-    if (!keyOf(address) || (via !== "coinbase" && via !== "cashapp" && via !== "wallet")) return fail(400, "not a payout address");
-    await putSetting(env.DB, "payout", JSON.stringify({ address, via }));
-    return new Response(JSON.stringify({ address, via }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+    if (!keyOf(address)) return fail(400, "not a payout address");
+    await putSetting(env.DB, "payout", JSON.stringify({ address }));
+    return new Response(JSON.stringify({ address }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+  }
+
+  // Cashing out through Coinbase: where Coinbase is waiting for the USDC, read
+  // through Amply's relay (which holds the Coinbase key) with the payout
+  // wallet's own signature. Only for a payout wallet this node publishes.
+  if (path === "/cashout/coinbase" && request.method === "GET") {
+    const q = new URL(request.url).searchParams;
+    const pay = walletOf(await manifestNowOf(env));
+    if (!pay?.recipients.some((r) => r.address === q.get("address"))) return fail(400, "that isn't one of your payout wallets");
+    const ask = new URLSearchParams({ address: q.get("address") || "", signedAt: q.get("signedAt") || "", signature: q.get("signature") || "" });
+    const res = await fetch(`${RELAY_ORIGIN}/coinbase/sell/status?${ask}`).catch(() => null);
+    const body = res ? await res.text() : JSON.stringify({ error: "Coinbase couldn't be reached" });
+    return new Response(body, { status: res?.status ?? 502, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
   }
 
   if (path === "/site" && request.method === "GET") {
