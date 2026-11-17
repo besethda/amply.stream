@@ -30,6 +30,13 @@ function fakeKV() {
     },
     async put(key, value, { metadata } = {}) { rows.set(key, { bytes: value.slice(0), metadata }); },
     async delete(key) { rows.delete(key); },
+    // Two keys a page, so a listing has to follow the cursor.
+    async list({ cursor } = {}) {
+      const all = [...rows].map(([name, row]) => ({ name, metadata: row.metadata }));
+      const from = Number(cursor || 0);
+      const keys = all.slice(from, from + 2);
+      return { keys, list_complete: from + 2 >= all.length, cursor: String(from + 2) };
+    },
   };
 }
 
@@ -134,6 +141,26 @@ await store.put("audio/song.mp3", song.buffer, { httpMetadata: { contentType: "a
   let threw = false;
   try { media({}); } catch { threw = true; }
   ok("a node with neither says so, rather than failing later", threw);
+}
+
+// ── how much is stored, for the editor's storage bar ────────────────────────
+{
+  const kvUsed = fakeKV();
+  const s = kvMedia(kvUsed);
+  await s.put("audio/a.mp3", new Uint8Array(1000).buffer);
+  await s.put("audio/b.mp3", new Uint8Array(2500).buffer);
+  await s.put("art/c.jpg", new Uint8Array(300).buffer);
+  kvUsed.rows.set("manage/index.html", { bytes: new Uint8Array(50).buffer });   // written by setup, no metadata
+  ok("KV: every file's size added up, across pages of the listing", (await s.used()) === 3800, String(await s.used()));
+
+  const objects = [{ size: 4000 }, { size: 6000 }, { size: 500 }];
+  const bucket = {
+    async list({ cursor } = {}) {
+      const from = Number(cursor || 0);
+      return { objects: objects.slice(from, from + 2), truncated: from + 2 < objects.length, cursor: String(from + 2) };
+    },
+  };
+  ok("R2: the same, from the bucket's listing", (await media({ MEDIA: bucket }).used()) === 10500);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

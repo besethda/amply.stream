@@ -18,6 +18,22 @@
 
 export interface QuotaFailure { status: number; message: string }
 
+/**
+ * How near the free plan's limits a node is, for the editor's bars.
+ *
+ * Streams: Cloudflare counts requests (100,000 a day), and the node can't see
+ * that count without an analytics token it deliberately doesn't hold. It can
+ * count plays, so the bar is plays against the requests a play takes: the
+ * audio in a few ranged pieces, its play report, the page and the manifest.
+ * Six is on the cautious side, so the bar fills a little early, not late.
+ *
+ * Storage: what KV holds free (1 GB), or R2 (10 GB) on a node that has it.
+ */
+export const FREE_REQUESTS_A_DAY = 100_000;
+export const REQUESTS_PER_PLAY = 6;
+export const FREE_STREAMS_A_DAY = Math.floor(FREE_REQUESTS_A_DAY / REQUESTS_PER_PLAY);
+export const FREE_STORAGE = { kv: 1_000_000_000, r2: 10_000_000_000 };
+
 /** Whole hours to the next midnight UTC, when the daily limits reset. */
 export function hoursToReset(now = Date.now()): number {
   const next = new Date(now);

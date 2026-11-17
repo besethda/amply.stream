@@ -12,7 +12,7 @@
  * Run via `npm run test:store`. Uses node:sqlite, wrapped to look like D1.
  */
 import { DatabaseSync } from "node:sqlite";
-import { SCHEMA, seen, counted, listener, listeners, setBlocked, forget, signingKey, pruneStale, remove } from "./src/store.ts";
+import { SCHEMA, seen, counted, listener, listeners, setBlocked, forget, signingKey, pruneStale, remove, heard, playsToday } from "./src/store.ts";
 
 /** The slice of D1's interface store.ts actually uses. */
 function d1(db) {
@@ -159,6 +159,19 @@ ok("the listeners list is ordered by how much they listened",
   for (const sql of published.schema) { try { fresh.exec(sql); } catch (e) { broke = `${sql.slice(0, 60)} — ${e.message}`; break; } }
   ok("  and again on one that already has them (an update)", !broke, broke);
   ok("  and they're the same statements store.ts declares", published.schema.length === SCHEMA.length, `${published.schema.length} vs ${SCHEMA.length}`);
+}
+
+// ── plays per day, for the editor's "free streams" bar ──────────────────────
+{
+  const NOON = Date.parse("2026-11-17T12:00:00Z");
+  const before = await playsToday(DB, NOON);
+  await heard(DB, "t1", 200, NOON);
+  await heard(DB, "t2", 200, NOON);
+  await heard(DB, "t1", 200, NOON + 11 * 3_600_000);   // 23:00 UTC, still today
+  ok("today's plays are counted, every song together", (await playsToday(DB, NOON)) === before + 3, String(await playsToday(DB, NOON)));
+  ok("  and start again after midnight UTC", (await playsToday(DB, NOON + 13 * 3_600_000)) === 0);
+  ok("  while each song's own total still counts too",
+    db.prepare("SELECT plays FROM track_plays WHERE track = 't1'").get().plays === 2);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

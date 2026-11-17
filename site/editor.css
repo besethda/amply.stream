@@ -796,6 +796,13 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .stat b { font-size: 34px; line-height: 1.1; color: var(--ink); }
 .pay-bar { height: 12px; border-radius: 99px; background: var(--bg2); overflow: hidden; margin: 6px 0 10px; }
 .pay-bar i { display: block; height: 100%; background: var(--orange); border-radius: 99px; }
+/* How much of Cloudflare's free plan is used (Meter): a label and a bar. */
+.meters { display: grid; gap: 16px; }
+.meter { display: grid; gap: 8px; }
+.meter .label { font-size: 12px; letter-spacing: .08em; color: var(--ink3); font-weight: 600; text-transform: uppercase; }
+.meter-bar { height: 12px; border-radius: 99px; background: var(--bg2); overflow: hidden; }
+.meter-bar i { display: block; height: 100%; background: var(--orange); border-radius: 99px; }
+.meter.full .meter-bar i { background: var(--bad); }
 .top-songs { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; counter-reset: song; }
 .top-songs li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, 2fr) auto; align-items: center; gap: 12px; counter-increment: song; }
 .top-songs .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
