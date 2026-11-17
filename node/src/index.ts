@@ -16,7 +16,7 @@
  */
 
 import { verifyAccess, type AccessConfig } from "./access";
-import { renderPage, renderPrivacy, pageCsp } from "./page";
+import { renderPage, renderPrivacy, pageCsp, pageWebManifest } from "./page";
 import {
   setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale,
   subscribedUntil, pruneSubscriptions, heard, songTotals,
@@ -1019,6 +1019,15 @@ export default {
       if (request.method === "HEAD") return new Response(null, { status: 200, headers });
       return new Response(renderPrivacy(manifest as never, new URL(request.url).origin, nonce), {
         status: 200, headers,
+      });
+    }
+
+    // The artist's public page, installable on a fan's Home Screen.
+    if (pathname === "/page.webmanifest") {
+      let manifest: unknown = null;
+      try { const t = await manifestText(env); manifest = t ? JSON.parse(t) : null; } catch { /* a plain name */ }
+      return new Response(pageWebManifest((manifest || {}) as never), {
+        status: 200, headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=3600" })),
       });
     }
 

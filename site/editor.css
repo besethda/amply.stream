@@ -1010,3 +1010,18 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .fees-on > summary { cursor: pointer; list-style: none; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .fees-on > summary::-webkit-details-marker { display: none; }
 .fees-on[open] > summary { margin-bottom: 12px; }
+
+/* Notices float over the page instead of pushing it down. */
+.toasts {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 70;
+  display: grid; gap: 10px; width: min(560px, calc(100vw - 32px)); pointer-events: none;
+}
+.toasts .banner { margin: 0; pointer-events: auto; box-shadow: 0 14px 40px rgba(0, 0, 0, .18); background-clip: padding-box; }
+.toasts .banner.ok { background: #fff4ec; }
+.toasts .banner.update { background: var(--bg); }
+.toasts .banner.update .link + .link { color: var(--ink3); }
+@media (max-width: 700px) {
+  .toasts { bottom: 84px; }
+  /* The phone menu drops over the page rather than pushing it down. */
+  .menu-pop { position: absolute; left: 0; right: 0; top: 100%; z-index: 55; }
+}
