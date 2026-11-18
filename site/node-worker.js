@@ -656,6 +656,7 @@ ${empty}
 <meta name="twitter:title" content="${cardTitle}">
 <meta name="twitter:description" content="${esc2(cardAbout)}">
 <link rel="manifest" href="/page.webmanifest">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#ffffff">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="${name}">
@@ -2469,6 +2470,8 @@ var ICONS = {
   "/studio/icon-192.png": icon_192_default,
   "/studio/icon-512.png": icon_512_default
 };
+var FAVICON_PATH = "/favicon.svg";
+var FAVICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="#f6711e"><title>Amply</title><circle cx="8.2" cy="24.6" r="6.2"/><circle cx="23.4" cy="23.6" r="6.2"/><rect x="11.8" y="3.2" width="2.6" height="21.6" rx="1.3"/><rect x="27" y="6.4" width="2.6" height="17.4" rx="1.3"/><rect x="15.825" y="6" width="2.3" height="8.5" rx="1.15"/><rect x="19.55" y="3.8" width="2.3" height="12.6" rx="1.15"/><rect x="23.275" y="7" width="2.3" height="8" rx="1.15"/></svg>`;
 var MANIFEST_PATH = "/studio.webmanifest";
 var studioManifest = () => JSON.stringify({
   name: "Amply \u2014 your music",
@@ -3680,6 +3683,12 @@ async function serve(request, env) {
     return new Response(studioManifest(), {
       status: 200,
       headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=86400" }))
+    });
+  }
+  if (pathname === FAVICON_PATH) {
+    return new Response(FAVICON, {
+      status: 200,
+      headers: withCors(new Headers({ "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=604800" }))
     });
   }
   if (ICONS[pathname]) {

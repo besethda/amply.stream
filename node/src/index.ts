@@ -37,7 +37,7 @@ import { base64 } from "./solana-tx";
 import { TOKEN_PROGRAM, SYSTEM_PROGRAM, ATA_PROGRAM } from "./feepay";
 import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf, paused } from "../../spec/pricing.mjs";
 import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
-import { ICONS, MANIFEST_PATH, studioManifest } from "./studio";
+import { ICONS, MANIFEST_PATH, studioManifest, FAVICON, FAVICON_PATH } from "./studio";
 
 import { VERSION, SPEC_VERSION, MANAGE_CSP, RELAY_ORIGIN } from "./constants";
 import { media, maxObject, MediaTooLarge, type MediaObject, type MediaObjectBody } from "./media";
@@ -1290,6 +1290,11 @@ async function serve(request: Request, env: Env): Promise<Response> {
   if (pathname === MANIFEST_PATH) {
     return new Response(studioManifest(), {
       status: 200, headers: withCors(new Headers({ "Content-Type": "application/manifest+json", "Cache-Control": "public, max-age=86400" })),
+    });
+  }
+  if (pathname === FAVICON_PATH) {
+    return new Response(FAVICON, {
+      status: 200, headers: withCors(new Headers({ "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=604800" })),
     });
   }
   if (ICONS[pathname]) {

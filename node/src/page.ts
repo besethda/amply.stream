@@ -210,6 +210,7 @@ ${empty}
 <meta name="twitter:title" content="${cardTitle}">
 <meta name="twitter:description" content="${esc(cardAbout)}">
 <link rel="manifest" href="/page.webmanifest">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <meta name="theme-color" content="#ffffff">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="${name}">
