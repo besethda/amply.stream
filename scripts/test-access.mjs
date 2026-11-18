@@ -6,9 +6,10 @@
  * before it leaves a rebuilt service answering "this streaming service has no
  * sign-in set up". That happened, so the rules are pinned here.
  *
- *   only a rule admitting everybody is fatal
+ *   a rule admitting everybody is fatal
  *   a rule admitting nobody is fixed by adding one
- *   policies that cannot be read are not evidence of anything
+ *   policies that cannot be read are fatal too, with a clear message: they
+ *   might admit everybody
  *
  *   node scripts/test-access.mjs
  */
@@ -142,12 +143,13 @@ r = await rebuild({ policies: [] });
 ok_("an application with no rules gets one", r.policiesCreated.length === 1);
 ok_("  and still finishes", r.kind === null && !!r.settings.access, String(r.kind));
 
-// Unknown is not evidence. Carrying on is right: the node checks the token's
-// audience itself, and refusing here would lock the artist out of their editor
-// to protect them from something we never established.
+// Unknown might be everybody, and the node's check of the token's audience
+// can't tell: anyone the app admits gets a token for it. So stop, plainly,
+// rather than adopt an application nobody has checked.
 r = await rebuild({ policies: null, readFails: true });
-ok_("policies that cannot be read do not stop the rebuild", r.kind === null, String(r.kind));
-ok_("  and the editor is still configured", !!r.settings.access);
+ok_("policies that cannot be read stop the rebuild", r.kind === "zt_policy_unreadable", String(r.kind));
+ok_("  and the node is not pointed at that application", !r.settings.access);
+ok_("  and nothing is added to it", r.policiesCreated.length === 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

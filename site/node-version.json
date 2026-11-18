@@ -1,10 +1,11 @@
 {
-  "version": "3.24.5",
+  "version": "3.24.6",
   "spec": 1,
   "schema": [
     "CREATE TABLE IF NOT EXISTS settings ( key TEXT PRIMARY KEY, value TEXT NOT NULL )",
     "CREATE TABLE IF NOT EXISTS owed ( pubkey TEXT PRIMARY KEY, micros INTEGER NOT NULL DEFAULT 0, seconds INTEGER NOT NULL DEFAULT 0 )",
     "CREATE TABLE IF NOT EXISTS listeners ( pubkey TEXT PRIMARY KEY, plays INTEGER NOT NULL DEFAULT 0, seconds INTEGER NOT NULL DEFAULT 0, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, blocked INTEGER NOT NULL DEFAULT 0 )",
+    "CREATE INDEX IF NOT EXISTS listeners_by_last_seen ON listeners (last_seen)",
     "CREATE TABLE IF NOT EXISTS subscriptions ( wallet TEXT PRIMARY KEY, subscription TEXT NOT NULL, customer TEXT, until INTEGER NOT NULL, updated INTEGER NOT NULL )",
     "CREATE INDEX IF NOT EXISTS subscriptions_by_id ON subscriptions (subscription)",
     "CREATE TABLE IF NOT EXISTS sales ( ref TEXT PRIMARY KEY, item TEXT NOT NULL, buyer TEXT NOT NULL, owner TEXT, gift TEXT, via TEXT NOT NULL, created INTEGER NOT NULL )",
@@ -41,6 +42,12 @@
       "limit": 20,
       "period": 60,
       "namespace": "7104"
+    },
+    {
+      "binding": "LIMIT_HEARD",
+      "limit": 3,
+      "period": 60,
+      "namespace": "7105"
     }
   ],
   "published": "2026-11-18"

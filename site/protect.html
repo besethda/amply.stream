@@ -152,6 +152,28 @@ they're doing.</p>
 </details>
 
 <details>
+<summary>If someone floods your service with requests</summary>
+<p>Your streaming service limits how fast any one address can ask it for things, so a flood
+can't fill your database or run up a bill. But on Cloudflare's free plan, every request
+counts towards a daily allowance of 100,000 <em>before</em> your service gets to turn it
+away. One determined address can use that up in a few hours, and then your page and music
+stop loading until the allowance resets the next day.</p>
+
+<p>Most artists will never see this. If it happens to you, either fix works:</p>
+<ul>
+  <li><strong>Put your service on your <a href="/domain">own domain</a></strong> and add a
+  rate-limiting rule in Cloudflare (your domain → Security → WAF → Rate limiting rules). The
+  free plan includes one rule; something like "more than 100 requests in 10 seconds from one
+  address: block" stops a flood before it's counted against your service. It covers your
+  domain only: your .workers.dev address still answers, so against someone who goes looking
+  for it, the next fix is the sure one.</li>
+  <li><strong>Move to Workers Paid</strong> (from $5 a month, in your Cloudflare dashboard
+  under Workers &amp; Pages → Plans), which counts millions of requests a month instead of
+  100,000 a day.</li>
+</ul>
+</details>
+
+<details>
 <summary>What Amply does here</summary>
 <p><strong>Nothing, and that's deliberate.</strong> We don't monitor your music, don't know
 who's listening to it, and have no standing to act on your behalf. Your recordings are yours;

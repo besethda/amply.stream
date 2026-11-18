@@ -13,6 +13,8 @@ import worker from "./src/index.ts";
 import { SCHEMA, putSetting, setting, listener } from "./src/store.ts";
 import { feeAddress, OFFER_ABOVE_LAMPORTS } from "./src/settle.ts";
 import { issueToken } from "./src/listen.ts";
+import { base58 } from "./src/solana-tx.ts";
+import { RULES } from "./src/limits.ts";
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -143,6 +145,148 @@ rpcDown = false;
   const body = await res.text();
   ok("the artist's server serves the favicon, as an SVG", res.status === 200 && res.headers.get("Content-Type") === "image/svg+xml");
   ok("  the same one as amply.stream's", body === readFileSync("site/favicon.svg", "utf8").trim());
+}
+
+// ── the database's daily allowance: plays reported by anyone (A1) ──
+{
+  later(6);
+  lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
+  const withFree = { ...manifest, releases: [{ ...manifest.releases[0], tracks: [
+    ...manifest.releases[0].tracks, { id: "f", title: "F", url: `${ORIGIN}/audio/free.mp3`, free: true },
+  ] }] };
+  await putSetting(DB, "manifest", JSON.stringify(withFree));
+  later(1);
+  ok("(payments are live for these)", (await served()).paused === undefined);
+  const plays = (id) => sqlite.prepare("SELECT plays FROM track_plays WHERE track = ?").get(id)?.plays || 0;
+  const rows = () => sqlite.prepare("SELECT (SELECT COUNT(*) FROM track_plays) + (SELECT COALESCE(SUM(plays), 0) FROM play_days) AS n").get().n;
+  const heardAs = (track, { ip = "203.0.113.1", token } = {}) => worker.fetch(new Request(
+    `${ORIGIN}/listen/heard${token ? `?t=${encodeURIComponent(token)}` : ""}`, {
+      method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip },
+      body: JSON.stringify({ track, seconds: 120 }),
+    }), env);
+
+  const before = rows();
+  for (let i = 0; i < 30; i++) await heardAs("s", { ip: "203.0.113.1" });
+  ok("an anonymous flood of a paid song's plays writes nothing", rows() === before && plays("s") === 0, `${rows()} vs ${before}`);
+
+  later(2);
+  for (let i = 0; i < 10; i++) await heardAs("f", { ip: "203.0.113.2" });
+  ok(`a free song's anonymous plays: only ${RULES.heard.limit} a minute from one address`, plays("f") === RULES.heard.limit, String(plays("f")));
+  await heardAs("f", { ip: "203.0.113.3" });
+  ok("  another address has its own count", plays("f") === RULES.heard.limit + 1);
+
+  later(2);
+  const token = await issueToken(DB, wallet);
+  await heardAs("s", { ip: "203.0.113.4", token });
+  ok("a paid song's play with a listener's pass is counted", plays("s") === 1);
+  for (let i = 0; i < 20; i++) await heardAs("s", { ip: "203.0.113.4", token });
+  ok(`  at most ${RULES.wallet.limit} a minute, as fast as songs can end`, plays("s") === RULES.wallet.limit, String(plays("s")));
+  await heardAs("s", { ip: "203.0.113.5", token: "made.up.token" });
+  ok("  a made-up pass counts for nothing", plays("s") === RULES.wallet.limit);
+
+  // ── brand-new wallets, admitted only so fast at /listen/token (A1, A2) ──
+  later(2);
+  const askPass = async (keys, ip = "198.51.100.1") => {
+    const address = base58(new Uint8Array(await crypto.subtle.exportKey("raw", keys.publicKey)));
+    const message = `amply:artist.test:${clock}:${crypto.randomUUID()}`;
+    const signature = base58(new Uint8Array(await crypto.subtle.sign("Ed25519", keys.privateKey, new TextEncoder().encode(message))));
+    return worker.fetch(new Request(`${ORIGIN}/listen/token`, {
+      method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip },
+      body: JSON.stringify({ address, message, signature }),
+    }), env);
+  };
+  const newKeys = () => crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]);
+  const statuses = [];
+  for (let i = 0; i < RULES.newListener.limit + 3; i++) statuses.push((await askPass(await newKeys(), `198.51.100.${10 + i}`)).status);
+  ok(`new wallets get passes, ${RULES.newListener.limit} a minute`, statuses.slice(0, RULES.newListener.limit).every((s) => s === 200), statuses.join(","));
+  ok("  and past that, /listen/token refuses them for now", statuses.slice(RULES.newListener.limit).every((s) => s === 429), statuses.join(","));
+  ok("  writing nothing for them", sqlite.prepare("SELECT COUNT(*) AS n FROM listeners").get().n <= 1);
+  const known = await newKeys();
+  const knownAddress = base58(new Uint8Array(await crypto.subtle.exportKey("raw", known.publicKey)));
+  sqlite.prepare("INSERT INTO listeners (pubkey, plays, seconds, first_seen, last_seen) VALUES (?, 1, 60, ?, ?)").run(knownAddress, clock, clock);
+  ok("  a wallet already known here still gets one", (await askPass(known, "198.51.100.200")).status === 200);
+  later(2);
+  ok("  and a minute later, new ones again", (await askPass(await newKeys(), "198.51.100.201")).status === 200);
+}
+
+// ── paid audio isn't left in shared caches (A2) ──
+{
+  later(6);
+  lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
+  later(1);
+  const bytes = new Uint8Array(1000);
+  const MEDIA = {
+    async get(_key, { range } = {}) {
+      const wants = range?.get?.("Range");
+      return {
+        size: bytes.length, httpEtag: '"e1"', writeHttpMetadata() {},
+        ...(wants ? { range: { offset: 0, length: 100 } } : {}),
+        body: new Blob([wants ? bytes.slice(0, 100) : bytes]).stream(),
+      };
+    },
+    async head() { return { size: bytes.length, httpEtag: '"e1"', writeHttpMetadata() {} }; },
+  };
+  const audioEnv = { ...env, MEDIA };
+  const fetchAudio = (path, headers = {}) => worker.fetch(new Request(`${ORIGIN}${path}`, { headers }), audioEnv);
+  const token = await issueToken(DB, wallet);
+  const paid = await fetchAudio(`/audio/song.mp3?t=${encodeURIComponent(token)}`);
+  ok("a paid song is served to a listener with a pass, privately", paid.status === 200 && paid.headers.get("Cache-Control") === "private, max-age=31536000, immutable", `${paid.status} ${paid.headers.get("Cache-Control")}`);
+  const ranged = await fetchAudio(`/audio/song.mp3?t=${encodeURIComponent(token)}`, { Range: "bytes=0-99" });
+  ok("  ranges and ETags as before", ranged.status === 206 && ranged.headers.get("Content-Range") === "bytes 0-99/1000" && ranged.headers.get("ETag") === '"e1"' && /^private/.test(ranged.headers.get("Cache-Control")));
+  const free = await fetchAudio("/audio/free.mp3");
+  ok("a free song stays public", free.status === 200 && free.headers.get("Cache-Control") === "public, max-age=31536000, immutable", free.headers.get("Cache-Control"));
+  later(6);
+  lamports = 0;
+  later(1);
+  const pausedPaid = await fetchAudio("/audio/song.mp3");
+  ok("  a paid song playing free while payments are paused is still private", pausedPaid.status === 200 && /^private/.test(pausedPaid.headers.get("Cache-Control")), `${pausedPaid.status} ${pausedPaid.headers.get("Cache-Control")}`);
+}
+
+// ── a Coinbase cash-out's status, asked through the artist's node (A4) ──
+{
+  const { hashKey, PREVIEW_KEY } = await import("./src/preview-key.ts");
+  const KEY = "K".repeat(43);
+  await putSetting(DB, PREVIEW_KEY, JSON.stringify({ hash: await hashKey(KEY), until: clock + 30 * 60_000 }));
+  const realFetch = globalThis.fetch;
+  let asked = null;
+  globalThis.fetch = async (url) => { asked = new URL(String(url)); return new Response(JSON.stringify({ waiting: true })); };
+  const nonce = "0123456789abcdef0123456789abcdef";
+  const q = new URLSearchParams({ address: ADDRESS, signedAt: "123", signature: "sig", nonce, amount: "25" });
+  const res = await worker.fetch(new Request(`${ORIGIN}/manage/cashout/coinbase?${q}`, { headers: { Cookie: `amply_preview=${KEY}` } }), env);
+  globalThis.fetch = realFetch;
+  ok("the editor's cash-out check reaches the relay", res.status === 200 && asked?.pathname === "/coinbase/sell/status", `${res.status} ${asked}`);
+  ok("  with the cash-out's nonce and amount, so the relay finds that session alone",
+    asked?.searchParams.get("nonce") === nonce && asked?.searchParams.get("amount") === "25" && asked?.searchParams.get("signature") === "sig");
+}
+
+// ── Stripe's own words stay with the artist (A5) ──
+{
+  await putSetting(DB, "stripe", JSON.stringify({
+    key: "rk_test_x", live: false, product: "prod_1", portal: "bpc_1", plans: [],
+    sales: [{ item: "r", price: 5, priceId: "price_1", linkId: "plink_1", url: "https://buy.stripe.com/x" }],
+  }));
+  const keys = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]);
+  const address = base58(new Uint8Array(await crypto.subtle.exportKey("raw", keys.publicKey)));
+  sqlite.prepare("INSERT INTO subscriptions (wallet, subscription, customer, until, updated) VALUES (?, 'sub_9', 'cus_9', ?, ?)").run(address, clock + 86400_000, clock);
+  const signedBody = async (extra) => {
+    const message = `amply:artist.test:${clock}:${crypto.randomUUID()}`;
+    const signature = base58(new Uint8Array(await crypto.subtle.sign("Ed25519", keys.privateKey, new TextEncoder().encode(message))));
+    return JSON.stringify({ address, message, signature, ...extra });
+  };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: "secret detail about the artist's account rak_checkout_session_read" } }), { status: 403 });
+  for (const [path, extra] of [
+    ["/listen/claim", { session: "cs_test_abcdefghijkl" }],
+    ["/listen/buy/claim", { session: "cs_test_abcdefghijkl" }],
+    ["/listen/subscription", { returnTo: "https://amply.stream/app/" }],
+  ]) {
+    const res = await worker.fetch(new Request(`${ORIGIN}${path}`, {
+      method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": "192.0.2.50" }, body: await signedBody(extra),
+    }), env);
+    const said = (await res.json().catch(() => ({}))).error || "";
+    ok(`${path}: Stripe's error isn't passed to the listener`, res.status === 502 && said === "Couldn't confirm that with Stripe; try again", `${res.status} ${said}`);
+  }
+  globalThis.fetch = realFetch;
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

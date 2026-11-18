@@ -987,6 +987,15 @@ async function pruneStale(db, now = Date.now()) {
   await db.prepare("DELETE FROM listeners WHERE blocked = 0 AND last_seen < ?").bind(now - KEEP_FOR).run();
   await forgetOwed(db);
 }
+var PRUNED_AT = "pruned-at";
+var PRUNE_EVERY = 36e5;
+async function pruneHourly(db, now = Date.now()) {
+  const last = Number(await setting(db, PRUNED_AT).catch(() => null)) || 0;
+  if (last <= now && now - last < PRUNE_EVERY) return false;
+  await putSetting(db, PRUNED_AT, String(now));
+  await pruneStale(db, now);
+  return true;
+}
 async function remove(db, pubkey) {
   await db.prepare("DELETE FROM listeners WHERE pubkey = ?").bind(pubkey).run();
   await db.prepare("DELETE FROM subscriptions WHERE wallet = ?").bind(pubkey).run();
@@ -1135,12 +1144,15 @@ async function proveOwnership(host, body, now = Date.now()) {
   if (!await verifySignature(address, message, signature)) return { ok: false, why: "that signature does not match that wallet" };
   return { ok: true, address };
 }
-async function introduce(db, host, body, now = Date.now()) {
+async function introduce(db, host, body, now = Date.now(), admitNew = async () => true) {
   const proof = await proveOwnership(host, body, now);
   if (!proof.ok) return { ok: false, why: proof.why };
   const address = proof.address;
   const known = await listener(db, address);
   if (known?.blocked) return { ok: false, why: "this artist has stopped serving this wallet" };
+  if (!known && !await admitNew()) {
+    return { ok: false, busy: true, why: "too many new listeners right now; try again in a minute" };
+  }
   await seen(db, address, now);
   return { ok: true, token: await issueToken(db, address, now) };
 }
@@ -2078,6 +2090,18 @@ async function checkFeePayment(tx, expect) {
   if (payeeSet.has(listener2)) return no("the artist can't pay themselves through their own node");
   if (!tx.signatures[0].every((b) => b === 0)) return no("the fee wallet's signature is already there");
   const at = (i) => tx.accounts[i];
+  const usdcOf = /* @__PURE__ */ new Map();
+  const accountOf = /* @__PURE__ */ new Map();
+  try {
+    for (const p of payees) {
+      const a = await tokenAccountOf(p.address, mint, TOKEN_PROGRAM, ATA_PROGRAM);
+      usdcOf.set(p.address, a);
+      accountOf.set(a, p.address);
+    }
+  } catch {
+    return no("the artist's wallet list names something that isn't an address");
+  }
+  const mayOpen = new Set(expect.mayOpen ?? payees.map((p) => p.address));
   const created = /* @__PURE__ */ new Map();
   const paid = /* @__PURE__ */ new Map();
   const uses = /* @__PURE__ */ new Map();
@@ -2094,7 +2118,10 @@ async function checkFeePayment(tx, expect) {
       if (at(mintAt) !== mint) return no("that isn't USDC");
       if (at(system) !== SYSTEM_PROGRAM || at(token) !== TOKEN_PROGRAM) return no("creating a USDC account names the wrong programs");
       if (account < 2 || owner < 2) return no("a signer can't be a payee's account");
+      if (!mayOpen.has(at(owner))) return no("this payee's USDC account can't be opened at the fee wallet's cost here");
+      if (at(account) !== usdcOf.get(at(owner))) return no("that isn't the payee's own USDC account");
       if (created.has(at(account)) || [...created.values()].includes(at(owner))) return no("a payee's USDC account is created twice");
+      if (paid.has(at(owner))) return no("a payee's USDC account is created after they're paid");
       created.set(at(account), at(owner));
       uses.set(0, (uses.get(0) ?? 0) + 1);
       continue;
@@ -2107,9 +2134,9 @@ async function checkFeePayment(tx, expect) {
       if (authority !== 1) return no("the listener must sign their own payment");
       if (at(mintAt) !== mint) return no("that isn't USDC");
       if (source < 2) return no("a signer can't be a token account");
-      const payee = created.get(at(dest));
+      const payee = accountOf.get(at(dest));
       if (!payee) return no("a transfer goes somewhere that isn't a payee's USDC account");
-      if (created.has(at(source))) return no("a transfer can't come from a payee's account");
+      if (accountOf.has(at(source))) return no("a transfer can't come from a payee's account");
       if (paid.has(payee)) return no("a payee is paid twice");
       const micros2 = u64(ix.data, 1);
       if (micros2 <= 0) return no("a transfer of nothing");
@@ -2133,7 +2160,7 @@ async function checkFeePayment(tx, expect) {
   if (mentions(0) !== (uses.get(0) ?? 0)) return no("the fee wallet is used for something other than fees");
   if (mentions(1) !== (uses.get(1) ?? 0)) return no("the listener's key is used for something other than paying");
   if (expect.memo !== void 0 && memos !== 1) return no("a purchase must say what it bought");
-  if (paid.size !== created.size) return no("a USDC account is created without being paid");
+  for (const owner of created.values()) if (!paid.has(owner)) return no("a USDC account is created without being paid");
   const micros = [...paid.values()].reduce((a, b) => a + b, 0);
   if (!Number.isSafeInteger(micros)) return no("the amount is impossibly large");
   let shares;
@@ -2414,8 +2441,12 @@ var RULES = {
   media: { binding: "LIMIT_MEDIA", limit: 600, period: 60 },
   /** Play reports from any one wallet: a song can't finish every ten seconds. */
   wallet: { binding: "LIMIT_WALLET", limit: 6, period: 60 },
-  /** Brand-new listeners, across the whole service. */
-  newListener: { binding: "LIMIT_NEW", limit: 20, period: 60 }
+  /** Brand-new listeners, across the whole service: counted where a wallet
+   *  gets its first pass (/listen/token) and where its first play is kept. */
+  newListener: { binding: "LIMIT_NEW", limit: 20, period: 60 },
+  /** Song plays reported with no wallet (free tracks), per address: each one
+   *  is two writes, so a few a minute, not the forty other requests get. */
+  heard: { binding: "LIMIT_HEARD", limit: 3, period: 60 }
 };
 var counts = /* @__PURE__ */ new Map();
 var MAX_KEYS = 1e4;
@@ -2494,7 +2525,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.24.5";
+var VERSION = "3.24.6";
 var SPEC_VERSION = 1;
 var RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
 var MANAGE_CSP = [
@@ -2725,6 +2756,7 @@ function storedType(prefix, key) {
   return table[ext] ?? "application/octet-stream";
 }
 var CACHE_AUDIO = "public, max-age=31536000, immutable";
+var CACHE_AUDIO_PAID = "private, max-age=31536000, immutable";
 var CACHE_ART = "public, max-age=86400";
 var CACHE_MANIFEST = "public, max-age=300, must-revalidate";
 var MANIFEST_CACHE = 5e3;
@@ -2960,7 +2992,13 @@ async function handleManage(request, env, path) {
     const q = new URL(request.url).searchParams;
     const pay = walletOf(await manifestNowOf(env));
     if (!pay?.recipients.some((r) => r.address === q.get("address"))) return fail(400, "that isn't one of your payout wallets");
-    const ask = new URLSearchParams({ address: q.get("address") || "", signedAt: q.get("signedAt") || "", signature: q.get("signature") || "" });
+    const ask = new URLSearchParams({
+      address: q.get("address") || "",
+      signedAt: q.get("signedAt") || "",
+      signature: q.get("signature") || "",
+      nonce: q.get("nonce") || "",
+      amount: q.get("amount") || ""
+    });
     const res = await fetch(`${RELAY_ORIGIN}/coinbase/sell/status?${ask}`).catch(() => null);
     const body = res ? await res.text() : JSON.stringify({ error: "Coinbase couldn't be reached" });
     return new Response(body, { status: res?.status ?? 502, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
@@ -3253,6 +3291,7 @@ async function feeOffer(env) {
     withdraw: { to: pay.recipients[0].address, fee: WITHDRAW_FEE_MICROS, newAccountFee: NEW_ACCOUNT_FEE_MICROS }
   };
 }
+var stripeTrouble = () => fail(502, "Couldn't confirm that with Stripe; try again");
 async function handleListen(request, env, path) {
   const host = new URL(request.url).host;
   if (path === "/challenge" && request.method === "POST") {
@@ -3264,8 +3303,14 @@ async function handleListen(request, env, path) {
   if (path === "/token" && request.method === "POST") {
     const body = await jsonBody(request);
     if (!body) return fail(400, "bad request");
-    const result = await introduce(env.DB, host, body);
-    if (!result.ok) return fail(403, result.why || "refused");
+    const result = await introduce(
+      env.DB,
+      host,
+      body,
+      Date.now(),
+      () => allow(env, RULES.newListener, host)
+    );
+    if (!result.ok) return result.busy ? tooMany(withCors(new Headers())) : fail(403, result.why || "refused");
     const address = String(body.address);
     const until = await refresh(env.DB, address).catch(() => subscribedUntil(env.DB, address));
     const subscribed = until !== null && until > Date.now();
@@ -3336,10 +3381,14 @@ async function handleListen(request, env, path) {
     if (to === offer.feePayer || pay.recipients.some((r) => r.address === to)) return fail(400, "that address can't be sent to this way");
     const rpc = rpcAt(chain.rpc);
     let fee = WITHDRAW_FEE_MICROS;
+    let opensDestination = false;
     try {
       const ata = await tokenAccountOf(to, chain.mint, TOKEN_PROGRAM, ATA_PROGRAM);
       const info = await rpc("getAccountInfo", [ata, { encoding: "base64", commitment: "confirmed" }]);
-      if (!info?.value) fee += NEW_ACCOUNT_FEE_MICROS;
+      if (!info?.value) {
+        fee += NEW_ACCOUNT_FEE_MICROS;
+        opensDestination = true;
+      }
     } catch {
       return fail(502, "couldn't reach the network; nothing was sent");
     }
@@ -3348,12 +3397,18 @@ async function handleListen(request, env, path) {
       payees: [{ address: to }, { address: offer.withdraw.to }],
       minMicros: 1e4,
       maxMicros: 1e10,
-      withdrawal: { fee }
+      withdrawal: { fee },
+      // The destination's account may be opened only when the listener is
+      // paying for that (it was missing just now): otherwise it could be
+      // closed between that look and the send, and the fee wallet would pay
+      // its rent, again and again. Existing, it's simply paid into.
+      mayOpen: opensDestination ? [to, offer.withdraw.to] : [offer.withdraw.to]
     }, {
       allowed: async (who) => !!await listener(env.DB, who) && allow(env, RULES.wallet, `${host}|withdraw|${who}`),
-      // The destination's account is paid for by the listener's fee; only the
-      // artist's own is opened once at most.
-      openOnce: [offer.withdraw.to]
+      // Each opened at most once by the fee wallet: the artist's own, and a
+      // destination opened for a listener, so neither can be closed for its
+      // rent and reopened at the fee wallet's cost.
+      openOnce: [offer.withdraw.to, to]
     });
     if (!result.ok) return fail(result.status, result.why);
     return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {
@@ -3375,7 +3430,7 @@ async function handleListen(request, env, path) {
         headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
       });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
   const saleView = (s, wallet) => ({
@@ -3411,7 +3466,7 @@ async function handleListen(request, env, path) {
       const sale = await recordSale(env.DB, { ref: c.ref, item: c.item, buyer: proof.address, gift: body.gift === true, via: "card" });
       return json({ outcome: "recorded", ...saleView(sale, proof.address) });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
   if (path === "/buy/wallet" && request.method === "POST") {
@@ -3502,7 +3557,7 @@ async function handleListen(request, env, path) {
         headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
       });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
   if (path === "/played" && request.method === "POST") {
@@ -3523,18 +3578,36 @@ async function handleListen(request, env, path) {
     } catch {
     }
     await counted(env.DB, who, Number(body?.seconds) || 0, Date.now(), perMinute2);
-    if (Math.random() < 0.02) await pruneStale(env.DB);
+    if (Math.random() < 0.02) await pruneHourly(env.DB).catch(() => {
+    });
     return new Response(null, { status: 204, headers: noStore() });
   }
   if (path === "/heard" && request.method === "POST") {
+    const nothing = () => new Response(null, { status: 204, headers: noStore() });
     const body = await jsonBody(request);
-    const track = String(body?.track || "");
+    const trackId = String(body?.track || "");
     const seconds = Number(body?.seconds) || 0;
-    const manifest = await manifestNowOf(env);
-    const known = (manifest?.releases || []).some((r) => (r.tracks || []).some((t) => t.id === track));
-    if (known && seconds >= 30) await heard(env.DB, track, seconds).catch(() => {
+    if (seconds < 30) return nothing();
+    let manifest = null;
+    try {
+      manifest = JSON.parse(await listenerText(env) || "null");
+    } catch {
+      return nothing();
+    }
+    const track = (manifest?.releases || []).flatMap((r) => r.tracks || []).find((t) => t?.id === trackId);
+    if (!track) return nothing();
+    const from = request.headers.get("CF-Connecting-IP") || "unknown";
+    const who = await whoIsAsking(request, env);
+    if (who) {
+      if (!await allow(env, RULES.wallet, `${host}|heard|${who}`)) return nothing();
+      if (!await allow(env, RULES.wallet, `${host}|heard-from|${from}`)) return nothing();
+    } else {
+      if (needsWallet(manifest, track)) return nothing();
+      if (!await allow(env, RULES.heard, `${host}|${from}`)) return nothing();
+    }
+    await heard(env.DB, trackId, seconds).catch(() => {
     });
-    return new Response(null, { status: 204, headers: noStore() });
+    return nothing();
   }
   if (path === "/forget" && request.method === "POST") {
     const body = await jsonBody(request);
@@ -3736,6 +3809,16 @@ async function serve(request, env) {
       if (!who) {
         return fail(401, "this track is for listeners who have said who they are");
       }
+      return serveObject(env, request, key, CACHE_AUDIO_PAID, "audio/mpeg");
+    }
+    const own = await manifestText(env).catch(() => null);
+    if (own && own !== manifest) {
+      let paid = /* @__PURE__ */ new Set();
+      try {
+        paid = guardedKeys(JSON.parse(own));
+      } catch {
+      }
+      if (paid.has(key.slice("audio/".length))) return serveObject(env, request, key, CACHE_AUDIO_PAID, "audio/mpeg");
     }
     return serveObject(env, request, key, CACHE_AUDIO, "audio/mpeg");
   }

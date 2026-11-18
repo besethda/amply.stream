@@ -243,5 +243,36 @@ for (const [name, junk] of [["nothing", undefined], ["not base64", "%%%"], ["too
   forgetFeeKey();
 }
 
+// ── a withdrawal's destination, opened by the fee wallet once (A3) ─────────
+{
+  const { sqlite: s6, DB: db6 } = fresh();
+  forgetFeeKey();
+  s6.prepare("INSERT INTO settings (key, value) VALUES ('fee-wallet', ?)").run(sqlite.prepare("SELECT value FROM settings WHERE key = 'fee-wallet'").get().value);
+  const dest = Keypair.generate().publicKey;
+  const ata = (o) => spl.getAssociatedTokenAddressSync(USDC, o, true);
+  const withdrawal = (openDest) => {
+    const t = new Transaction({ feePayer, recentBlockhash: Keypair.generate().publicKey.toBase58() });
+    if (openDest) t.add(spl.createAssociatedTokenAccountIdempotentInstruction(feePayer, ata(dest), dest, USDC));
+    t.add(spl.createTransferCheckedInstruction(ata(listener.publicKey), USDC, ata(dest), listener.publicKey, 1_000_000, 6));
+    t.add(spl.createAssociatedTokenAccountIdempotentInstruction(feePayer, ata(artist.publicKey), artist.publicKey, USDC));
+    t.add(spl.createTransferCheckedInstruction(ata(listener.publicKey), USDC, ata(artist.publicKey), listener.publicKey, 550_000, 6));
+    t.partialSign(listener);
+    return Buffer.from(t.serialize({ requireAllSignatures: false })).toString("base64");
+  };
+  const w = {
+    mint: USDC.toBase58(), payees: [{ address: dest.toBase58() }, { address: artist.publicKey.toBase58() }],
+    minMicros: 10_000, maxMicros: 10_000_000_000, withdrawal: { fee: 550_000 }, mayOpen: [dest.toBase58(), artist.publicKey.toBase58()],
+  };
+  const once = { ...quick, openOnce: [artist.publicKey.toBase58(), dest.toBase58()] };
+  const missing = [ata(dest).toBase58()];
+  const first = await settle(db6, network({ missing }).rpc, withdrawal(true), w, once);
+  ok("a withdrawal opening its destination's account, paid for, goes through", first.ok, first.why);
+  ok("  and the fee wallet notes it opened that account", !!s6.prepare("SELECT 1 FROM fee_days WHERE day = ?").get(`opened:${dest.toBase58()}`));
+  const again = network({ missing });
+  const second = await settle(db6, again.rpc, withdrawal(true), w, once);
+  ok("  closed since, it isn't reopened at the fee wallet's cost", !second.ok && /closed their USDC account/.test(second.why) && !again.methods().includes("simulateTransaction"), second.why);
+  forgetFeeKey();
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
