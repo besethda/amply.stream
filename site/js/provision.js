@@ -42,15 +42,16 @@ export const STEPS = [
   { id: "account", label: "Finding your account" },
   { id: "bucket", label: "Creating storage for your audio" },
   { id: "database", label: "Creating your track list" },
-  { id: "worker", label: "Deploying your player" },
+  { id: "worker", label: "Deploying your player and editor" },
   { id: "subdomain", label: "Giving it a web address" },
-  { id: "editor", label: "Installing your editor" },
   { id: "access", label: "Locking the editor to you" },
   { id: "manifest", label: "Publishing your page" },
 ];
 
 /**
- * The editor steps are soft-failing, but they are not optional.
+ * The editor's lock is soft-failing, but it is not optional. (The editor
+ * itself arrives inside the Worker's upload, stepWorker, so it can't fail on
+ * its own.)
  *
  * There is no hosted editor to fall back to — Amply is deliberately not
  * involved in an artist editing their own music. What softness buys is that a
@@ -59,7 +60,7 @@ export const STEPS = [
  * stopped. That is a much better failure than a half-built node behind an
  * error screen.
  */
-export const OPTIONAL_STEPS = new Set(["editor", "access"]);
+export const OPTIONAL_STEPS = new Set(["access"]);
 
 /**
  * Rebuilding an artist's node.
@@ -85,7 +86,6 @@ export const REPAIR_STEPS = [
   { id: "database", label: "Checking your track list" },
   { id: "worker", label: "Installing the latest version" },
   { id: "subdomain", label: "Checking its address" },
-  { id: "editor", label: "Updating your editor" },
   { id: "access", label: "Checking your editor's sign-in" },
 ];
 
@@ -517,7 +517,13 @@ async function stepWorker(ctx) {
   // name, so claim one first rather than fail here and explain two steps later.
   await ensureSubdomain(ctx, accountId, workerName).catch(() => null);
 
-  const source = ctx.release.worker;
+  // The editor goes inside the Worker's own upload, as one line in front of
+  // its code (node/src/index.ts, bundledEditor). Writing it to storage instead
+  // needed a second permission, and Amply's sign-in can't write KV, where a
+  // page started before signup keeps its files: those pages kept their first
+  // editor for good. Inside the upload it needs nothing more, and it's always
+  // the same version as the Worker.
+  const source = `globalThis.__amplyEditor = ${JSON.stringify(ctx.release.editor)};\n${ctx.release.worker}`;
 
   const base = [
     storage === "kv"
@@ -549,22 +555,6 @@ async function stepWorker(ctx) {
   }
 
   ctx.progress.workerDone = true;
-  saveProgress(ctx.progress);
-}
-
-/** Upload the editor into the artist's own storage, under a non-public prefix. */
-async function stepEditor(ctx) {
-  const { accountId, bucketName, storage, kvId } = ctx.progress;
-  if (ctx.progress.editorDone) return;
-
-  const html = ctx.release.editor;
-
-  const path = storage === "kv"
-    ? `/accounts/${accountId}/storage/kv/namespaces/${kvId}/values/${encodeURIComponent("manage/index.html")}`
-    : `/accounts/${accountId}/r2/buckets/${bucketName}/objects/manage/index.html`;
-  await api(ctx, "PUT", path, { headers: { "Content-Type": "text/html" }, body: html });
-
-  ctx.progress.editorDone = true;
   saveProgress(ctx.progress);
 }
 
@@ -854,7 +844,6 @@ const RUNNERS = {
   database: stepDatabase,
   worker: stepWorker,
   subdomain: stepSubdomain,
-  editor: stepEditor,
   access: stepAccess,
   manifest: stepManifest,
 };
