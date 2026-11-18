@@ -836,7 +836,7 @@ async function feeOffer(env: Env, ctx?: ExecutionContext): Promise<{ feePayer: s
   const feePayer = await feeAddress(env.DB);
   if (pay.recipients.some((r) => r.address === feePayer)) return null;
   const later = ctx ? (p: Promise<unknown>) => ctx.waitUntil(p) : undefined;
-  if ((await feeBalance(rpcAt(chain.rpc, BALANCE_TIMEOUT_MS), feePayer, { later })) < OFFER_ABOVE_LAMPORTS) return null;
+  if ((await feeBalance(rpcAt(chain.rpc, BALANCE_TIMEOUT_MS, 1), feePayer, { later })) < OFFER_ABOVE_LAMPORTS) return null;
   return {
     feePayer, network: pay.network, minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS,
     withdraw: { to: pay.recipients[0].address, fee: WITHDRAW_FEE_MICROS, newAccountFee: NEW_ACCOUNT_FEE_MICROS },
