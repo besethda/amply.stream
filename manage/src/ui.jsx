@@ -2378,7 +2378,7 @@ function FeesCard({ api, network, payees, onStatus, step = false, bare = false }
   return (
     <section class="card" id="fees">
       {!bare && <h2>{step ? "Step 2: fees account" : "Fees account"} <span class="pill-status off">Off</span></h2>}
-      <p>Add $5 so fans can pay you. It covers every payment's network fee for months.</p>
+      <p>Add $5 so fans can pay you. Each $1 covers ~1,000 payments' network fees.</p>
       {real && <>
         <a class="btn" href={topupUrl(fees.address, { currency: "sol" })} target="_blank" rel="noopener noreferrer">Add $5 by card</a>
         <BuySol api={api} />
@@ -2969,7 +2969,7 @@ function EarnSetup({ api, network, payees, onAddress, onFees, onPublish, onClose
           <>
             <p class="setup-count">Step 2 of 3</p>
             <h1>Cover the fees <Help about="the fees account">Every time a fan pays you, Solana charges a tiny network
-              fee, about 0.1¢. Your fees account pays it, so fans never deal with it. $5 lasts months.</Help></h1>
+              fee, about 0.1¢. Your fees account pays it, so fans never deal with it. Each $1 covers ~1,000 payments.</Help></h1>
             {feesOn
               ? <p class="good">✓ Your fees account is on.</p>
               : <FeesCard api={api} network={network} payees={payees} onStatus={(on) => { if (on) { setFeesOn(true); onFees?.(true); } }} bare />}
