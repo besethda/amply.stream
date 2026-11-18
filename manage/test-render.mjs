@@ -392,5 +392,57 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
   check("  and drawing the editor asks nothing by itself", asked === 0);
 }
 
+// ── Auto-block: the switch, why it waits, and what turning it on would do ──
+{
+  const { AutoBlockSwitch, AutoBlockHelp, AutoBlockChip, autoBlockWaits, wouldAutoBlock, paidChunks } = await import("./src/ui.jsx");
+  const check = (name, cond, detail = "") => { cond ? pass++ : fail++; console.log(`${cond ? "ok  " : "FAIL"}  ${name}${cond ? "" : ` — ${detail}`}`); };
+  const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const W = (n) => `${"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosg".slice(0, 40)}${[0, 1, 2, 3].map((k) => B58[Math.floor(n / 58 ** k) % 58]).join("")}`;
+  const ready = { addresses: ["a"], at: 1, more: false, busy: false, byWallet: {} };
+
+  const off = renderToString(h(AutoBlockSwitch, { ab: { known: true, on: false, disabled: false } }));
+  check("Auto-block is a switch, labelled, saying it's off", /role="switch"/.test(off) && /aria-checked="false"/.test(off) && off.includes("Auto-block") && /aria-describedby="autoblock-help"/.test(off), off);
+  check("  a button, so a keyboard works it", /^<button type="button"/.test(off));
+  const on = renderToString(h(AutoBlockSwitch, { ab: { known: true, on: true, disabled: false } }));
+  check("  and on", /aria-checked="true"/.test(on) && /class="ab-switch on"/.test(on));
+  check("  not drawn until the server has said which", renderToString(h(AutoBlockSwitch, { ab: { known: false } })) === "");
+  const waiting = renderToString(h(AutoBlockSwitch, { ab: { known: true, on: false, disabled: true, reason: "x" } }));
+  check("  disabled while it waits", /disabled/.test(waiting));
+  const help = renderToString(h(AutoBlockHelp, { ab: { known: true, on: false, reason: autoBlockWaits(0.01, { ...ready, at: undefined }) } }));
+  check("the help says what it does", help.includes("Stop serving listeners who are behind on paying, until they pay. Their app is told what they owe and pays it.") && /id="autoblock-help"/.test(help));
+  check("  and why it can't be turned on yet", help.includes("Check who has paid first"));
+
+  check("waits for a price", autoBlockWaits(0, ready) !== null && autoBlockWaits(0.01, { ...ready, addresses: [] }) !== null);
+  check("  for payments to be read", /Check who has paid/.test(autoBlockWaits(0.01, { ...ready, at: undefined })));
+  check("  for a reading to finish", /Checking/.test(autoBlockWaits(0.01, { ...ready, busy: true })));
+  check("  for all of them, not some", /more payments/.test(autoBlockWaits(0.01, { ...ready, more: true })));
+  check("  and then it can be turned on", autoBlockWaits(0.01, ready) === null);
+
+  const NOW = Date.now();
+  const rows = [
+    { pubkey: W(1), seconds: 600, owed_seconds: 600, owed_micros: 5_000_000, last_seen: NOW },           // $5 behind
+    { pubkey: W(2), seconds: 600, owed_seconds: 600, owed_micros: 5_000_000, last_seen: NOW },           // paid it
+    { pubkey: W(3), seconds: 600, owed_seconds: 600, owed_micros: 5_000_000, last_seen: NOW, blocked: 1 }, // blocked by hand
+    { pubkey: W(4), seconds: 600, owed_seconds: 600, owed_micros: 5_000_000, last_seen: NOW, subscribed_until: NOW + 86_400_000 },
+    { pubkey: W(5), seconds: 600, owed_seconds: 600, owed_micros: 300_000, last_seen: NOW },             // under the point
+  ];
+  const paid = { ...ready, byWallet: { [W(2)]: { micros: 5_000_000 } } };
+  const caught = wouldAutoBlock(rows, paid, 0.01, 0.5, NOW);
+  check("turning it on would stop the one who's behind, owing $5", caught.length === 1 && caught[0].r.pubkey === W(1) && caught[0].owes === 5_000_000, JSON.stringify(caught.map((c) => c.r.pubkey)));
+  check("  not one who paid, one blocked by hand, a subscriber, or one within their payment point", !caught.some((c) => [W(2), W(3), W(4), W(5)].includes(c.r.pubkey)));
+
+  const many = { byWallet: Object.fromEntries(Array.from({ length: 2500 }, (_, i) => [W(i), { micros: 1000.4 + i }])) };
+  many.byWallet.unknown = { micros: 5 };
+  many.byWallet[W(9999)] = { micros: 0 };
+  const chunks = paidChunks(many);
+  check("what everyone paid goes in pieces of a thousand", chunks.length === 3 && Object.keys(chunks[0]).length === 1000 && Object.keys(chunks[2]).length === 500,
+    chunks.map((c) => Object.keys(c).length).join());
+  check("  as whole micros, real wallets only, nobody who paid nothing", chunks.every((c) => Object.entries(c).every(([w, m]) => Number.isInteger(m) && m > 0 && w !== "unknown")));
+
+  check("a listener auto-blocked has a chip saying what they owe",
+    renderToString(h(AutoBlockChip, { row: { auto_blocked: true, owes_micros: 1_840_000 } })).includes("Auto-blocked, owes $1.84"));
+  check("  and nobody else does", renderToString(h(AutoBlockChip, { row: { auto_blocked: false, owes_micros: 1_840_000 } })) === "");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

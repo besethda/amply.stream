@@ -129,3 +129,64 @@ export function refusalSheet(r, { money, go }) {
     };
   }
 }
+
+/**
+ * An artist's server has stopped serving this wallet until it's paid what it
+ * says is owed (their Auto-block). What it says, and the one thing to do.
+ *
+ * `v`: `{ name, art, owes (micros), state, partial, message }`. `state` is
+ * where paying it has got to: "ask" (the Pay button), "daily" (over what goes
+ * without asking in a day: the Pay button), "paying", "funds" (add money),
+ * "paused" (their fees account can't pay: nobody can pay them right now —
+ * not the listener's doing, and said calmly), "counting" (paid; their server
+ * hasn't caught up), "unsure" (a payment not yet seen landing), "mismatch"
+ * (wrong network), or "error" (didn't go through; tried again).
+ */
+export function unpaidSheet(v, { money, go }) {
+  const name = v.name || "This artist";
+  const usd = money(Math.max(v.owes || 0, 0) / 1e6);
+  const base = { art: v.art ?? null, seed: name, title: `${name} has paused your listening until you've paid ${usd}` };
+  const already = v.partial ? " Part of it has been paid already." : "";
+  switch (v.state) {
+    case "paying": return { ...base, body: `Paying ${usd} to ${name}…`, secondaryLabel: "Hide" };
+    case "funds": return {
+      ...base,
+      body: `There isn't enough in your wallet to pay it.${already} Add money and it's paid straight away, and their music plays again.`,
+      primaryLabel: "Add money", primary: go.topUp,
+    };
+    case "paused": return {
+      icon: <Icon.card size={22} />, title: `${name} can't take payments right now`,
+      body: "Their account for network fees is empty, so nobody can pay them at the moment. That isn't anything you've done, and nothing was taken. Amply keeps checking, and pays them as soon as they can take it.",
+      secondaryLabel: "OK",
+    };
+    case "counting": return {
+      icon: <Icon.check size={22} />, title: "Paid. Waiting for their server",
+      body: `${name}'s server hasn't counted your payment yet. Your music plays again as soon as it does. Amply keeps checking.`,
+      secondaryLabel: "OK",
+    };
+    case "unsure": return {
+      ...base,
+      body: `A payment to ${name} is still on its way. Amply checks it landed before sending anything more, so nothing is paid twice.`,
+      secondaryLabel: "OK",
+    };
+    case "mismatch": return {
+      ...base, icon: <Icon.warn size={22} />, tone: "warn", art: undefined,
+      body: v.message, primaryLabel: "Settings", primary: go.you,
+    };
+    case "error": return {
+      ...base,
+      body: `${v.message ? `${v.message} ` : ""}Amply tries again on its own in a little while.${already}`,
+      primaryLabel: `Try again: pay ${usd}`, primary: go.pay,
+    };
+    case "daily": return {
+      ...base,
+      body: `That's for listening you've already done, and goes straight to them. It's more than Amply pays without asking in a day, so it waits for your OK.${already}`,
+      primaryLabel: `Pay ${usd}`, primary: go.pay,
+    };
+    default: return {
+      ...base,
+      body: `That's for listening you've already done, and goes straight to them. Their music plays again as soon as it's paid.${already}`,
+      primaryLabel: `Pay ${usd}`, primary: go.pay,
+    };
+  }
+}

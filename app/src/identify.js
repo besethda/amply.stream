@@ -11,6 +11,7 @@
 import { machinery } from "./paying.js";
 import { NETWORKS, networkFor } from "./networks.js";
 import { FEES_READY_LAMPORTS } from "../../spec/pricing.mjs";
+import { unpaidRefusal, reported, markReported, dropCredit } from "./owes.js";
 
 const TOKENS = "amply.tokens.v1";
 
@@ -129,10 +130,20 @@ export async function tokenFor(pair, origin) {
   });
 
   if (res.status === 403) {
+    const body = await res.json().catch(() => ({}));
+    // Auto-block: their server won't serve this wallet until it has been paid
+    // what it says is owed. Not a ban: paying lifts it, so the app is told
+    // how much (owes.js), and pays.
+    const unpaid = unpaidRefusal(res.status, body);
+    if (unpaid) {
+      const e = new Error(unpaid.error || "This artist is waiting to be paid for listening you've already done.");
+      e.unpaid = true;
+      e.owes = unpaid.owes;
+      throw e;
+    }
     // Refused. Usually this artist has stopped serving this wallet, which the
     // listener should be told plainly rather than shown a dead play button.
-    const { error } = await res.json().catch(() => ({}));
-    throw new Error(error || "This artist has stopped serving this wallet.");
+    throw new Error(body?.error || "This artist has stopped serving this wallet.");
   }
   if (res.status === 402) {
     // This artist is paid by subscription only, and this wallet has none.
@@ -256,6 +267,37 @@ export async function reportHeard(origin, track, seconds, token = null) {
       credentials: "omit",
     });
   } catch { /* not worth interrupting playback for */ }
+}
+
+/**
+ * Tell an artist's server about a payment that landed after it had stopped
+ * waiting for it (`/listen/settle` answered `confirmed: false`). Until it
+ * knows, it still counts that money as owed, and with Auto-block on it would
+ * keep refusing this wallet. It checks the payment on the network itself, so
+ * all it needs is the signature.
+ *
+ * Once per signature, and only after this app has seen it land. Best effort:
+ * nothing waits on it, and a failure costs nothing but a wait, since the
+ * server finds payments for itself too. Returns whether it was taken.
+ */
+export async function reportPaid(origin, signature) {
+  if (!origin || !signature || reported(signature)) return false;
+  let res;
+  try {
+    res = await fetch(`${origin}/listen/paid`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ signature }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    return false;          // never reached it: may be told next time it lands
+  }
+  // An answer of any kind counts as telling it: a refusal won't change by
+  // asking again, and this is its own network lookup each time.
+  markReported(signature);
+  if (res.ok) { dropCredit(signature); return true; }
+  return false;
 }
 
 /** Tell the node a track finished, so the artist can see how much was played. */

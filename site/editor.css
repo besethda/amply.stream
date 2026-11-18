@@ -397,6 +397,32 @@ table.listeners tr.blocked td.short { color: var(--ink3); font-weight: 400; }
 table.listeners .overdue { display: block; margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--bad); white-space: nowrap; }
 table.listeners tr.late td { background: color-mix(in srgb, var(--bad) 6%, transparent); }
 table.listeners tr.blocked .overdue { color: var(--ink3); }
+/* Auto-block not serving them until they pay. */
+table.listeners .chip.unpaid {
+  display: inline-block; margin-top: 4px; padding: 1px 8px; border-radius: 99px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  color: var(--bad); background: var(--bad-bg);
+}
+
+/* "Your listeners", with Auto-block's switch at its right. On a phone the
+   switch wraps under the heading rather than squeezing it. */
+.listeners-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+.listeners-head h2 { margin-bottom: 0; }
+.ab-switch {
+  display: inline-flex; align-items: center; gap: 10px; flex: none; min-height: 44px; padding: 0 2px;
+  font: inherit; font-weight: 600; color: var(--ink); background: none; border: 0; cursor: pointer;
+}
+.ab-switch:disabled { cursor: not-allowed; opacity: .55; }
+.ab-knob { width: 40px; height: 24px; border-radius: 999px; background: var(--line); position: relative; transition: background .15s; flex: none; }
+.ab-knob::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 999px; background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s; }
+.ab-switch.on .ab-knob { background: var(--orange); }
+.ab-switch.on .ab-knob::after { transform: translateX(16px); }
+.ab-switch:focus-visible { outline: none; }
+.ab-switch:focus-visible .ab-knob { outline: 2.5px solid var(--orange); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .ab-knob, .ab-knob::after { transition: none; } }
+.autoblock-help { margin: 6px 0 0; font-size: 14px; }
+.autoblock-help .bad { color: var(--bad); }
 
 /* Connecting Stripe: the exact rows to set, and how to try it. */
 table.perms { border-collapse: collapse; margin: 8px 0 4px; font-size: 14px; }

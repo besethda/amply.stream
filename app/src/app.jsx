@@ -15,19 +15,20 @@ import { fetchManifest, tracksOf, rateOf, verifiedDomain } from "./manifest.js";
 import { loadLibrary, saveLibrary, addArtist, addKnown, removeArtist, followedOnly, isFollowed, setFollowed, noteReach, reachable, CHECK_EVERY_MS, feesCovered } from "./library.js";
 import { createPlayer } from "./player.js";
 import {
-  loadLedger, bank, owing, settle, settleAll, backupSaved, totalOwed, hasWallet, machinery, rateStatus, mismatch, oneTabAtATime,
+  loadLedger, bank, owing, settle, settleAll, backupSaved, totalOwed, hasWallet, machinery, rateStatus, mismatch, exclusive, payClaim,
 } from "./paying.js";
 import { agreeRate } from "./spend.js";
+import { claimOf, noteClaim, claimDue, wakeClaims } from "./owes.js";
 import {
   tokenFor, reportPlayed, reportHeard, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
-  manageSubscription, claimSubscription,
+  manageSubscription, claimSubscription, reportPaid,
 } from "./identify.js";
 import { perMinute, subscriptionOnly, plans as plansOf } from "../../spec/pricing.mjs";
 import { Icon } from "./icons.jsx";
 import { money } from "./wallet-ui.jsx";
 import { recent, played, forgetRecent, theme, setTheme, waveStyle, setWaveStyle, WAVE_STYLES } from "./looks.js";
 import { MiniPlayer, NowPlaying, Tips } from "./playing.jsx";
-import { Sheet, Toast, refusalSheet, registerAsk, ask } from "./sheets.jsx";
+import { Sheet, Toast, refusalSheet, unpaidSheet, registerAsk, ask } from "./sheets.jsx";
 import { FirstRun, Home, Library, ArtistPage, nameOf, RowSwipe } from "./screens.jsx";
 import { Collection, trackMenu, AddToPlaylist, PlaylistOptions, EditDetails } from "./collections.jsx";
 import {
@@ -95,7 +96,10 @@ export function App() {
   const youView = ui.you;
   const [, bump] = useState(0);                   // redraw after likes/playlists change
   const [shared, setShared] = useState(null);     // a playlist opened from a link
-  const [sheet, setSheet] = useState(null);
+  const [sheet, setSheetState] = useState(null);
+  // Kept in step at once, not at the next render: a payment finishing in the
+  // same moment has to see which sheet is up (showOwes).
+  const setSheet = (next) => { sheetNow.current = next; setSheetState(next); };
   const [toast, setToastState] = useState(null);
   const [pair, setPair] = useState(null);
   const [balance, setBalance] = useState(null);
@@ -117,6 +121,8 @@ export function App() {
   const funds = useRef(null); funds.current = balance;
   const session = useRef(0);           // micros accrued since the app opened
   const shown = useRef(null);          // the refusal last put in a sheet
+  const refusedNow = useRef(null);     // the player's refusal, as of the last render
+  const sheetNow = useRef(null);       // the sheet on screen, as of the last render
 
   const go = useCallback((patch, { replace = false } = {}) => {
     // Going anywhere from Now playing closes it; that part is no history step.
@@ -233,7 +239,16 @@ export function App() {
         const origin = originOf(track.url);
         let token;
         try { token = await tokenFor(holder.current, origin); }
-        catch (e) { throw refuse(e.subscribe ? "subscribe" : "refused", e.message, data); }
+        catch (e) {
+          // Auto-block: their server wants paying first. What it says is
+          // owed is kept (owes.js), so it's paid even if the app is closed
+          // before the sheet is answered, and survives a reload.
+          if (e.unpaid) {
+            noteClaim(track.from, e.owes);
+            throw refuse("unpaid", e.message, { ...data, owes: e.owes });
+          }
+          throw refuse(e.subscribe ? "subscribe" : "refused", e.message, data);
+        }
         if (!token) throw refuse("offline", "", data);
 
         // An artist who can't be paid right now (their fees account is
@@ -409,9 +424,13 @@ export function App() {
       // Money bought on Stripe's page arrives while the fan is away: say so
       // when it lands, rather than quietly changing a number.
       const was = lastBalance.current;
-      if (was && next.usdc > was.usdc + 0.001) flash({ text: `${money(next.usdc - was.usdc)} has arrived. Paid songs will play now.` });
+      const arrived = was && next.usdc > was.usdc + 0.001;
+      if (arrived) flash({ text: `${money(next.usdc - was.usdc)} has arrived. Paid songs will play now.` });
       lastBalance.current = next;
       setBalance(next);
+      // Money arrived: whatever was waiting for it is tried now, not at the
+      // end of its back-off.
+      if (arrived) { funds.current = next; retryAt.current = 0; wakeClaims(["funds"]); settleRef.current?.(); }
     }
     catch { setBalance(null); flash({ bad: true, text: "Couldn't check your wallet" }); }
   }, [pair]);
@@ -430,28 +449,49 @@ export function App() {
    * time the debt is looked at again; a payment takes that long and more to
    * confirm, and until it does the debt is still on the books. Without this,
    * the same debt would be sent a second time while the first was on its way.
-   * After a failure it waits a minute before trying again, and after one that
-   * may still have gone through, half an hour, so it can't be paid twice.
+   * After a failure it waits a minute before trying again; one that may
+   * still have gone through is looked up on the network before anything more
+   * is sent (paying.js), so it can't be paid twice.
+   *
+   * An artist whose server has refused this wallet until it pays (Auto-block,
+   * owes.js) is paid what that server says, here too, as its own back-off
+   * allows: that back-off is kept on the device, so closing the app or
+   * reloading it doesn't lose it, and nothing about it ever gives up.
    */
-  const settling = useRef(false);
   const retryAt = useRef(0);
+  /** The artist whose "paused your listening" sheet is open, if any. */
+  const owesView = useRef(null);
+  /** Pay, through the one lock every payment for listening goes through. */
+  const payWith = (job) => exclusive(job);
+  const claimOptions = () => ({
+    report: reportPaid,
+    // Asking for a pass again, after paying: a refusal says what's still owed.
+    token: async (origin) => {
+      forgetToken(origin);
+      const t = await tokenFor(holder.current, origin);
+      if (!t) throw new Error("Their streaming service isn't answering. Amply will ask again shortly.");
+      return t;
+    },
+    balanceMicros: funds.current && Number.isFinite(funds.current.usdc) ? Math.floor(funds.current.usdc * 1e6) : null,
+  });
   const settleNow = useCallback(async () => {
-    if (!pair || settling.current || Date.now() < retryAt.current) return;
-    settling.current = true;
-    let result;
-    try {
-      // And one tab at a time: each tab has its own copy of the page, but the
-      // debt is one, stored where they all see it. Read afresh inside the lock.
-      result = await oneTabAtATime("amply-pay", () => settleAll(pair, library.current, loadLedger()));
-    } finally { settling.current = false; }
-    if (!result) return;                       // another tab is paying
+    if (!pair) return;
+    const now = Date.now();
+    const anyClaim = library.current.some((e) => claimDue(claimOf(e.url), now));
+    if (now < retryAt.current && !anyClaim) return;
+    // One tab at a time, and one payment at a time in this tab: each tab has
+    // its own copy of the page, but the debt is one, stored where they all
+    // see it. Read afresh inside the lock.
+    const result = await payWith(() => settleAll(pair, library.current, loadLedger(), { ...claimOptions(), fromLedger: now >= retryAt.current }));
+    if (!result) return;                       // already paying, here or in another tab
     // What's stored is the truth: taken off what was owed as it stood then,
     // so listening banked meanwhile (here or elsewhere) still counts.
     setLedger(loadLedger());
     if (result.paid.length || result.failed.length) refresh();
-    // A minute before trying again after a failure. One that may have gone
-    // through is checked on the network before anything more is sent.
-    if (result.failed.length) retryAt.current = Date.now() + 60_000;
+    // A minute before trying again after a failure. The loop below comes back
+    // to it then, whether or not anything is being listened to.
+    const ledgerFailed = result.failed.filter((f) => !f.claim);
+    if (ledgerFailed.length) retryAt.current = Date.now() + 60_000;
     if (result.paid.length) {
       const first = result.paid[0];
       const total = result.paid.reduce((n, p) => n + p.usd, 0);
@@ -461,13 +501,143 @@ export function App() {
     // at the next check. What's owed waits for their fees account.
     const refused = result.failed.filter((f) => f.kind === "paused").map((f) => f.entry.url);
     if (refused.length) noteFees(refused, refused.map(() => false));
-    if (result.failed.length) flash({ bad: true, text: result.failed[0].message });
+    for (const c of result.claimed) claimSettled(c.entry, c);
+    for (const f of result.failed.filter((x) => x.claim)) claimFailed(f.entry, f);
+    // A failure for an artist whose sheet is open is said there instead.
+    const loud = result.failed.find((f) => !(f.claim && owesView.current?.url === f.entry.url));
+    if (loud) flash({ bad: true, text: loud.message });
   }, [pair, entries, ledger, refresh, noteFees]);
+  const settleRef = useRef(null); settleRef.current = settleNow;
 
   useEffect(() => {
     if (!pair || !entries.some((e) => owing(e, ledger)?.due)) return;
     settleNow();
   }, [ledger, pair]);
+
+  // Not only when listening is banked: a payment that failed, a payment
+  // waiting to be seen landing, and every artist who has refused this wallet
+  // until it pays are come back to on their own. When the app opens, every
+  // half-minute while it's open, when it comes back to the front, when the
+  // network comes back, and when money arrives (refresh, above).
+  useEffect(() => {
+    if (!pair) return;
+    const tick = () => {
+      const now = Date.now();
+      const due = library.current.some((e) => claimDue(claimOf(e.url), now))
+        || (now >= retryAt.current && library.current.some((e) => owing(e, loadLedger())?.due));
+      if (due) settleRef.current?.();
+    };
+    const back = () => { if (document.visibilityState === "visible") tick(); };
+    const online = () => { retryAt.current = 0; wakeClaims(); tick(); };
+    tick();
+    const t = setInterval(tick, 30_000);
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("focus", back);
+    window.addEventListener("online", online);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("focus", back);
+      window.removeEventListener("online", online);
+    };
+  }, [pair]);
+
+  // ── an artist who won't play until they're paid (Auto-block) ──────────────
+
+  /** Put the sheet for this artist's claim on screen, in `state`. */
+  function showOwes(url, state, extra = {}, { open = false } = {}) {
+    const view = owesView.current;
+    if (!view || view.url !== url) return;
+    // Only ever replaces its own sheet: one closed, or replaced by another,
+    // stays closed (the paying carries on behind it).
+    if (!open && sheetNow.current?.owesUrl !== url) { owesView.current = null; return; }
+    const claim = claimOf(url);
+    const entry = library.current.find((e) => e.url === url);
+    view.state = state;
+    setSheet({ ...unpaidSheet({
+      name: entry ? nameOf(entry) : view.name, art: view.art,
+      owes: claim ? Math.max(claim.remaining, 0) : view.owes,
+      state, ...extra,
+    }, {
+      money,
+      go: {
+        pay: () => payOwes(url),
+        topUp: () => { owesView.current = null; goYou("topup"); },
+        you: () => { owesView.current = null; goYou(); },
+      },
+    }), owesUrl: url });
+  }
+  /** A go at a claim finished (settleAll or the Pay button): say how. */
+  function claimSettled(entry, r) {
+    const url = entry.url;
+    const sum = r.paid.reduce((n, m) => n + m, 0);
+    if (r.state === "clear") {
+      // Their server has given a pass again: back to the music, if it was
+      // waiting for this.
+      if (owesView.current?.url === url) { owesView.current = null; setSheet(null); }
+      if (refusedNow.current?.kind === "unpaid" && refusedNow.current.url === url) player.retry();
+      return;
+    }
+    const state = r.state === "ask" ? (r.why === "daily" ? "daily" : "ask")
+      : r.state === "owes" ? "ask"
+      : r.state === "token" ? "error"
+      : r.state;
+    showOwes(url, state, { partial: sum > 0, message: r.message || "" });
+  }
+  function claimFailed(entry, f) {
+    showOwes(entry.url, f.kind === "paused" ? "paused" : f.kind === "unconfirmed" ? "unsure" : f.kind === "funds" ? "funds" : "error", { message: f.message });
+  }
+  /** The Pay button: the listener's own yes to this amount. */
+  async function payOwes(url) {
+    const entry = library.current.find((e) => e.url === url);
+    if (!pair || !entry) return;
+    showOwes(url, "paying");
+    let r;
+    try {
+      r = await payWith(() => payClaim(pair, entry, { ...claimOptions(), explicit: true }));
+    } catch (e) {
+      setLedger(loadLedger());
+      if (e.kind === "paused") noteFees([url], [false]);
+      if (e.paid?.length) refresh();
+      claimFailed(entry, e);
+      return;
+    }
+    // Something else is paying right now (the background loop, or another
+    // tab): it will say how it went. Look again shortly in case it was
+    // another tab, whose result this one doesn't hear.
+    if (!r) { setTimeout(() => settleRef.current?.(), 5_000); return; }
+    setLedger(loadLedger());
+    const sum = r.paid.reduce((n, m) => n + m, 0);
+    if (sum > 0) { refresh(); flash({ text: `Paid ${money(sum / 1e6)} → ${nameOf(entry)}` }); }
+    claimSettled(entry, r);
+  }
+  /** The player was refused for this: open the sheet, and pay at once if the
+   *  listener has already agreed to pay this artist. */
+  async function openOwes(r) {
+    const claim = claimOf(r.url);
+    owesView.current = { url: r.url, name: r.name, art: r.art, owes: claim?.remaining ?? r.owes };
+    // A claim waiting out a back-off is shown as it stands, with its Pay
+    // button: the listener can pay now, but tapping play again doesn't
+    // hammer anyone. One that's due is paid straight away, if it may be
+    // without asking (paying.js settleClaim), and the sheet follows how
+    // that goes (claimSettled).
+    if (!claimDue(claim)) { showOwes(r.url, sheetStateOf(claim), {}, { open: true }); return; }
+    showOwes(r.url, "paying", {}, { open: true });
+    await settleRef.current?.();
+    // Still "paying" means this go didn't reach it (another was under way,
+    // here or in another tab): say what's owed, and look again shortly.
+    if (owesView.current?.url === r.url && owesView.current.state === "paying") {
+      showOwes(r.url, sheetStateOf(claimOf(r.url)));
+      setTimeout(() => settleRef.current?.(), 5_000);
+    }
+  }
+  const sheetStateOf = (claim) => (!claim ? "ask"
+    : claim.kind === "paused" ? "paused"
+    : claim.kind === "funds" ? "funds"
+    : claim.kind === "counting" ? "counting"
+    : claim.kind === "unsure" || claim.kind === "unconfirmed" ? "unsure"
+    : claim.kind === "ask-daily" ? "daily"
+    : "ask");
 
   // Another tab banked or paid: this one sees it too.
   useEffect(() => {
@@ -512,6 +682,7 @@ export function App() {
 
   // Remember what was played, for Home.
   useEffect(() => { if (state.track && !state.refused) played(state.track); }, [state.track?.id, state.track?.from]);
+  refusedNow.current = state.refused;
 
   // ── a song that can't play opens the sheet that fixes it ──────────────────
 
@@ -523,6 +694,9 @@ export function App() {
     shown.current = r;
     // Their ID first, then money, then the song: one screen, step by step.
     const setup = () => { setSheet(null); needWallet({ needsMoney: true }).then((who) => who && player.retry()); };
+    // Their server wants paying first (Auto-block): its own sheet, which
+    // pays and then plays on.
+    if (r.kind === "unpaid") { openOwes(r); return; }
     const unsaved = pair && !backupSaved(pair.publicKey.toBase58());
     if ((r.kind === "nowallet" && !(r.plans || []).length) || (r.kind === "empty" && unsaved)) { setup(); return; }
     setSheet(refusalSheet(r, {
@@ -725,9 +899,14 @@ export function App() {
   async function drop(url) {
     if (referenced(url)) { follow(url, false); back(); return; }
     const leaving = entries.find((e) => e.url === url);
-    if (pair && leaving && owing(leaving, ledger)) {
+    // An artist whose server has said what's owed is paid that way, by the
+    // loop that keeps at it (settleNow), not from the ledger here as well.
+    if (pair && leaving && owing(leaving, ledger) && !claimOf(url)) {
       try {
-        const result = await settle(pair, leaving, loadLedger(), { ending: true });
+        // Through the same lock as every other payment: the loop may be part
+        // way through paying this very debt, and both would send it.
+        const result = await payWith(() => settle(pair, leaving, loadLedger(), { ending: true, report: reportPaid }));
+        if (!result) throw new Error("A payment is on its way. Try again in a moment.");
         if (result.refused) throw new Error(typeof result.refused === "string" ? result.refused : result.refused.message || "Payment not allowed");
         setLedger(loadLedger());
         refresh();
@@ -737,9 +916,10 @@ export function App() {
       }
     }
     // Something still owed that can't go now (their fees account is empty,
-    // under a cent, or a payment not yet seen landing): keep them known, out
-    // of the library, so it's paid when it can be rather than lost.
-    if (loadLedger()[url]?.micros > 0) { follow(url, false); back(); return; }
+    // under a cent, a payment not yet seen landing, or what their server
+    // says is owed): keep them known, out of the library, so it's paid when
+    // it can be rather than lost.
+    if (loadLedger()[url]?.micros > 0 || claimOf(url)) { follow(url, false); back(); return; }
     const next = removeArtist(entries, url);
     setEntries(next);
     saveLibrary(next);

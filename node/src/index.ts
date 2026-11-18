@@ -26,19 +26,24 @@ import { renderPage, renderPrivacy, pageCsp, pageWebManifest } from "./page";
 import {
   setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale, pruneHourly,
   subscribedUntil, pruneSubscriptions, heard, songTotals, playsToday,
+  paidOf, recordPaid, paidSigKnown, mergePaid, MAX_PAID_WALLETS, autoBlockSetting, setAutoBlock, owedRowOf,
+  type Listener,
 } from "./store";
+import { autoBlock } from "../../spec/standing.mjs";
+import { fromBase58 } from "./identity";
+import { readListeningPayment } from "./payment-check";
 import { introduce, readToken, guardedKeys, masterKeys, proveOwnership } from "./listen";
 import { challenge } from "./identity";
 import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, claim, refresh, StripeError, setSales, claimSale, refundedSale } from "./stripe";
 import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, itemFor, CHAINS, type Sale } from "./sales";
-import { settle, feeAddress, feeBalance, feeOnrampSignature, rpcAt, BALANCE_TIMEOUT_MS, dayKey, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS, WITHDRAW_FEE_MICROS, NEW_ACCOUNT_FEE_MICROS } from "./settle";
+import { settle, feeRoom, feeAddress, feeBalance, feeOnrampSignature, rpcAt, BALANCE_TIMEOUT_MS, dayKey, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS, WITHDRAW_FEE_MICROS, NEW_ACCOUNT_FEE_MICROS } from "./settle";
 import { tokenAccountOf, keyOf } from "./solana-tx";
 import { purchaseMemo, tipMemo, TIP_MIN_MICROS, TIP_MAX_MICROS } from "./payment-check";
 import { cleanSite } from "../../spec/site.mjs";
 import { cashOutProblem, draftCashOut, CASHOUT_MIN_MICROS, CASHOUT_MAX_MICROS } from "./cashout";
 import { base64 } from "./solana-tx";
 import { TOKEN_PROGRAM, SYSTEM_PROGRAM, ATA_PROGRAM } from "./feepay";
-import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf, paused, needsWallet } from "../../spec/pricing.mjs";
+import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf, paused, needsWallet, SETTLE_WITHIN_DAYS } from "../../spec/pricing.mjs";
 import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
 import { ICONS, MANIFEST_PATH, studioManifest, FAVICON, FAVICON_PATH } from "./studio";
 
@@ -695,7 +700,38 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     await pruneStale(env.DB);
     await pruneSubscriptions(env.DB);
     const rows = await listeners(env.DB);
-    return json(rows);
+    return json(await withStanding(env, rows));
+  }
+
+  // Auto-block: whether it's on, and turning it on or off. Turning it on
+  // carries what the editor has just read from the chain about who has paid,
+  // and must: this server has seen only the payments it sent or was told of,
+  // and anyone who paid another way would otherwise be refused as if they
+  // hadn't. So it can't be turned on without them (an empty set is fine: then
+  // nobody has paid). Turning it off lifts every block it made, since nothing
+  // is stored but the setting.
+  if (path === "/autoblock" && request.method === "GET") {
+    return json(await autoBlockSetting(env.DB));
+  }
+  if (path === "/autoblock" && request.method === "POST") {
+    const body = await jsonBody(request, PAID_BODY);
+    if (!body || typeof body.enabled !== "boolean") return fail(400, "on or off?");
+    const paid = body.paid === undefined ? undefined : paidTotals(body.paid);
+    if (paid === null) return fail(400, `what each wallet paid, as whole micros, for at most ${MAX_PAID_WALLETS} wallets`);
+    const was = await autoBlockSetting(env.DB);
+    if (body.enabled && !was.enabled && !paid) {
+      return fail(409, "check who has paid first, so nobody who paid is stopped as if they hadn't");
+    }
+    if (paid) await mergePaid(env.DB, paid);
+    return json(await setAutoBlock(env.DB, body.enabled));
+  }
+  // The editor, having read the chain again, sending what everyone has paid,
+  // so anything this server missed is made good.
+  if (path === "/paid" && request.method === "POST") {
+    const body = await jsonBody(request, PAID_BODY);
+    const paid = paidTotals(body?.paid);
+    if (!paid) return fail(400, `what each wallet paid, as whole micros, for at most ${MAX_PAID_WALLETS} wallets`);
+    return json({ merged: await mergePaid(env.DB, paid) });
   }
 
   if (request.method === "POST" && path === "/block") {
@@ -785,6 +821,8 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
  * body through. The text itself is measured.
  */
 const MAX_BODY = 4096;
+/** What everyone paid, from the editor: a thousand wallets and amounts. */
+const PAID_BODY = 128 * 1024;
 
 async function jsonBody(request: Request, max = MAX_BODY): Promise<Record<string, unknown> | null> {
   if (Number(request.headers.get("Content-Length") || 0) > max) return null;
@@ -843,6 +881,101 @@ async function feeOffer(env: Env, ctx?: ExecutionContext): Promise<{ feePayer: s
   };
 }
 
+// ── Auto-block ──────────────────────────────────────────────────────────────
+//
+// When the artist turns it on, a listener who has fallen behind on paying
+// (spec/standing.mjs, the same rules the editor shows) isn't given a new pass
+// until they pay. Never a flag in the database: worked out each time from what
+// their listening cost and what they've paid, so paying lifts it by itself,
+// and so does turning it off. A block the artist made by hand is separate,
+// and paying never lifts that.
+
+/** The artist's price by the minute and payment point (dollars), as they
+ *  published them: null unless they charge by the minute in USDC. */
+function pricing(manifest: unknown): { ratePerMinute: number; settleAt: number } | null {
+  if (!walletOf(manifest)) return null;
+  const usdc = ((manifest as { payment?: { type?: string; ratePerMinute?: unknown; settleAt?: unknown }[] } | null)?.payment || [])
+    .find((p) => p?.type === "solana-usdc");
+  const rate = Number(usdc?.ratePerMinute) || 0;
+  if (!(rate > 0)) return null;
+  return { ratePerMinute: rate, settleAt: Number(usdc?.settleAt) > 0 ? Number(usdc?.settleAt) : 1 };
+}
+
+/**
+ * Auto-block's terms, if it applies right now: the artist has turned it on,
+ * charges by the minute in USDC, and listeners can actually pay them — the
+ * fees account can pay their network fees and today's fees aren't used up.
+ * Otherwise null, and nobody is refused for owing: a listener who can't pay
+ * must never be shut out for not paying.
+ */
+async function autoBlockTerms(env: Env, ctx?: ExecutionContext): Promise<{ ratePerMinute: number; settleAt: number } | null> {
+  if (!(await autoBlockSetting(env.DB)).enabled) return null;
+  const priced = pricing(await manifestNowOf(env));
+  if (!priced) return null;
+  if (!(await takingPayments(env, ctx).catch(() => false))) return null;
+  if (!(await feeRoom(env.DB))) return null;
+  return priced;
+}
+
+/** What this known wallet owes, if Auto-block says it isn't to be served
+ *  until it pays; else null. A subscriber is asked about last, since that may
+ *  mean asking Stripe. */
+async function owingFor(
+  env: Env, ctx: ExecutionContext | undefined, known: Listener, subscribedUntilOf: () => Promise<number | null>,
+): Promise<number | null> {
+  const terms = await autoBlockTerms(env, ctx);
+  if (!terms) return null;
+  const now = Date.now();
+  const paid = await paidOf(env.DB, known.pubkey);
+  if (paid === null) return null;   // no record of payments at all: nobody can say who's behind
+  const row = { ...known, ...(await owedRowOf(env.DB, known.pubkey)) };
+  const { blocked, owes } = autoBlock(row, paid, { ...terms, now });
+  if (!blocked) return null;
+  const until = await subscribedUntilOf().catch(() => null);
+  if (until !== null && until > now) return null;
+  return owes;
+}
+
+/** The listeners as the editor gets them: each with what it owes by this
+ *  server's count, and whether Auto-block is refusing it right now. */
+async function withStanding(env: Env, rows: Awaited<ReturnType<typeof listeners>>) {
+  const terms = await autoBlockTerms(env).catch(() => null);
+  const priced = terms ?? pricing(await manifestNowOf(env));
+  const now = Date.now();
+  return rows.map((r) => {
+    // Read without the paid table (a database from before it): nobody can
+    // say who's behind, so nobody is shown as refused.
+    const paidKnown = "paid_micros" in r;
+    const subscribed = r.subscribed_until !== null && r.subscribed_until > now;
+    const s = priced ? autoBlock(r, Number(r.paid_micros) || 0, { ...priced, subscribed, now }) : { blocked: false, owes: 0 };
+    return { ...r, auto_blocked: !!terms && paidKnown && !r.blocked && s.blocked, owes_micros: s.owes };
+  });
+}
+
+/**
+ * Wallet → micros, as the editor sends what it read from the chain: at most
+ * MAX_PAID_WALLETS, each a real address and a whole, non-negative number.
+ * Null if anything in it isn't.
+ */
+function paidTotals(value: unknown): Record<string, number> | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > MAX_PAID_WALLETS) return null;
+  const out: Record<string, number> = {};
+  for (const [wallet, micros] of entries) {
+    if (fromBase58(wallet)?.length !== 32) return null;
+    if (typeof micros !== "number" || !Number.isSafeInteger(micros) || micros < 0) return null;
+    out[wallet] = micros;
+  }
+  return out;
+}
+
+/** How long after it landed a payment can be reported to /listen/paid. The
+ *  app reports one as soon as it sees it land; the week it may hold a debt
+ *  covers an app closed in between. Older payments can't be brought back to
+ *  be counted against listening they didn't pay for. */
+const REPORT_WITHIN_MS = SETTLE_WITHIN_DAYS * 86_400_000;
+
 /** Stripe's trouble, as a listener hears it. What Stripe said is about the
  *  artist's own account (a missing permission, an inactive key) and is the
  *  artist's to see in their editor, not every listener's. */
@@ -862,17 +995,28 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     // A wallet this node hasn't seen counts against the cap on brand-new
     // listeners here, where its pass is issued, not only at its first play:
     // made-up wallets otherwise get passes (and paid audio) without end.
-    const result = await introduce(env.DB, host, body as never, Date.now(),
-      () => allow(env as never, RULES.newListener, host));
-    if (!result.ok) return result.busy ? tooMany(withCors(new Headers())) : fail(403, result.why || "refused");
-
-    // Whether they have paid for a subscription, so their app knows not to
-    // charge them by the minute as well. And where a subscription is the only
-    // way this artist is paid, it is required: with nothing else offered, a
-    // wallet on its own would otherwise be free listening.
     const address = String((body as { address?: string }).address);
-    // Checked with Stripe when due — a renewal, or once a day — else as known.
-    const until = await refresh(env.DB, address).catch(() => subscribedUntil(env.DB, address));
+    // Whether they have paid for a subscription: checked with Stripe when due
+    // (a renewal, or once a day), else as known. Asked once, whether
+    // Auto-block asks first or not.
+    let asked: Promise<number | null> | null = null;
+    const untilOf = () => (asked ??= refresh(env.DB, address).catch(() => subscribedUntil(env.DB, address)));
+    const result = await introduce(env.DB, host, body as never, Date.now(),
+      () => allow(env as never, RULES.newListener, host),
+      (known) => owingFor(env, ctx, known, untilOf));
+    if (!result.ok) {
+      if (result.busy) return tooMany(withCors(new Headers()));
+      // Auto-block: told what's owed, in micros, so their app can pay it and
+      // ask again. The words are for a person; `code` is for the app.
+      if (result.unpaid !== undefined) return json({ error: result.why, code: "unpaid", owes: result.unpaid }, 403);
+      return fail(403, result.why || "refused");
+    }
+
+    // A subscriber's app knows not to charge them by the minute as well. And
+    // where a subscription is the only way this artist is paid, it is
+    // required: with nothing else offered, a wallet on its own would
+    // otherwise be free listening.
+    const until = await untilOf();
     const subscribed = until !== null && until > Date.now();
     const manifest = (await listenerView(env, ctx))?.parsed ?? null;   // unreadable: treated as nothing offered
     if (!subscribed && subscriptionOnly(manifest)) {
@@ -921,7 +1065,55 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
       allowed: (who) => allow(env as never, RULES.wallet, `${host}|settle|${who}`),
     });
     if (!result.ok) return fail(result.status, result.why);
+    // Paying for listening, landed: counted towards what this wallet has paid
+    // (Auto-block reads it). Not a tip or a purchase, which pay for something
+    // else; and not a send that hasn't been seen to land, which the app
+    // reports at /listen/paid once it has.
+    if (result.confirmed && body.tip !== true && body.item === undefined) {
+      await recordPaid(env.DB, result.listener, result.micros, result.signature).catch(() => false);
+    }
     return json({ signature: result.signature, confirmed: result.confirmed });
+  }
+
+  // A payment for listening the app saw land after this node sent it
+  // unconfirmed (or one it made some other way): counted towards what the
+  // wallet has paid, once the node has read it off the chain itself. Only the
+  // signature is taken from the request; who paid, how much and to whom come
+  // from the chain. Open to a wallet Auto-block is refusing — paying is how it
+  // gets served again — and limited per address, since each one asks the
+  // network once.
+  if (path === "/paid" && request.method === "POST") {
+    const body = await jsonBody(request);
+    const signature = String(body?.signature || "");
+    if (!/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(signature)) return fail(400, "that isn't a transaction signature");
+    const from = request.headers.get("CF-Connecting-IP") || "unknown";
+    if (!(await allow(env as never, RULES.wallet, `${host}|paid|${from}`))) return tooMany(withCors(new Headers()));
+    const already = await paidSigKnown(env.DB, signature);
+    if (already) {
+      return json({ recorded: false, wallet: already.pubkey, micros: already.micros, paidMicros: await paidOf(env.DB, already.pubkey) });
+    }
+    const pay = walletOf(await manifestNowOf(env));
+    const chain = pay && CHAINS[pay.network];
+    if (!pay || !chain) return fail(409, "this artist doesn't take USDC payments here");
+    const accounts = new Map<string, string>();
+    try {
+      for (const r of pay.recipients) accounts.set(await tokenAccountOf(r.address, chain.mint, TOKEN_PROGRAM, ATA_PROGRAM), r.address);
+    } catch {
+      return fail(409, "this artist's payment details can't be read");
+    }
+    let tx: unknown;
+    try {
+      // One question to the network per report (rpcAt asks again only when
+      // it answers busy).
+      tx = await rpcAt(chain.rpc)("getTransaction", [signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+    } catch {
+      return fail(502, "couldn't reach the network; try again in a minute");
+    }
+    const verdict = readListeningPayment(tx, { mint: chain.mint, accounts, now: Date.now(), withinMs: REPORT_WITHIN_MS });
+    if (!verdict.ok) return verdict.retry ? json({ pending: true, error: verdict.why }, 202) : fail(422, verdict.why);
+    if (!(await listener(env.DB, verdict.payer))) return fail(403, "that payment is from a wallet that hasn't listened here");
+    const recorded = await recordPaid(env.DB, verdict.payer, verdict.micros, signature);
+    return json({ recorded, wallet: verdict.payer, micros: verdict.micros, paidMicros: await paidOf(env.DB, verdict.payer) });
   }
 
   // A listener sending their own money out, with no SOL for the fee: this
@@ -1214,6 +1406,8 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
             seconds: row.seconds,
             costMicros: await env.DB.prepare("SELECT micros FROM owed WHERE pubkey = ?").bind(proof.address)
               .first<{ micros: number }>().then((o) => o?.micros ?? null).catch(() => null),
+            paidMicros: await env.DB.prepare("SELECT micros FROM paid WHERE pubkey = ?").bind(proof.address)
+              .first<{ micros: number }>().then((o) => o?.micros ?? null).catch(() => null),
             firstSeen: row.first_seen ? new Date(row.first_seen).toISOString() : null,
             lastSeen: row.last_seen ? new Date(row.last_seen).toISOString() : null,
             servingStopped: !!row.blocked,
@@ -1326,7 +1520,8 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
     try { if (body) manifest = JSON.parse(body); } catch { /* an empty notice beats an error */ }
     const { nonce, headers } = pageHeaders();
     if (request.method === "HEAD") return new Response(null, { status: 200, headers });
-    return new Response(renderPrivacy(manifest as never, new URL(request.url).origin, nonce), {
+    const autoBlocking = (await autoBlockSetting(env.DB)).enabled;
+    return new Response(renderPrivacy(manifest as never, new URL(request.url).origin, nonce, { autoBlock: autoBlocking }), {
       status: 200, headers,
     });
   }

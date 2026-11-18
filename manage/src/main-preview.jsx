@@ -72,6 +72,8 @@ const sample = {
 
 // Every call succeeds, slowly enough that the busy states are visible.
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// ?autoblock opens with Auto-block on.
+let autoBlocking = new URLSearchParams(location.search).has("autoblock");
 const api = {
   async whoami() { return { email: "you@example.com", version: "preview" }; },
   async readManifest() { return sample; },
@@ -90,8 +92,13 @@ const api = {
       pubkey: `${"7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosg".slice(0, 40)}${String(i).padStart(4, "A")}`,
       plays: 12 - (i % 9), seconds: 2880 - i * 120, first_seen: Date.now() - 864e5 * (9 + i),
       last_seen: Date.now() - 864e5 * (1 + (i % 4)), blocked: i === 5 ? 1 : 0, subscribed_until: null,
+      // With Auto-block on, the third is behind and isn't being served.
+      auto_blocked: autoBlocking && i === 2, owes_micros: i === 2 ? 1_840_000 : 0,
     }));
   },
+  async autoblock() { return { enabled: autoBlocking, since: autoBlocking ? Date.now() : null }; },
+  async setAutoblock(enabled) { await wait(500); autoBlocking = enabled; return { enabled, since: enabled ? Date.now() : null }; },
+  async sendPaid(paid) { await wait(200); return { merged: Object.keys(paid).length }; },
   async stripeStatus() { return { connected: false }; },
   async stats() { return { songs: [], usage: { streams: { used: 4200, of: 16666 }, storage: { used: 610e6, of: 1e9 } } }; },
   async readSite() { return null; },

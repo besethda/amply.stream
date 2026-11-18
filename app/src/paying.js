@@ -14,8 +14,11 @@ import { rateOf } from "./manifest.js";
 import { SETTLE_WITHIN_DAYS, LISTEN_MIN_MICROS } from "../../spec/pricing.mjs";
 import { payableHere, networkName, networkFor, NETWORKS } from "./networks.js";
 import {
-  loadLedger, accrue, settled, rateStatus, recordSpend, clampRate, spentToday, MAX_PAYMENT, DAILY_LIMIT,
+  loadLedger, accrue, settled, rateStatus, recordSpend, clampRate, spentToday, agreements, MAX_PAYMENT, DAILY_LIMIT,
 } from "./spend.js";
+import {
+  claimOf, noteClaim, clearClaim, paidTowards, backOff, claimDue, noteCredit, pieces,
+} from "./owes.js";
 import { toUsd } from "./money.js";
 
 // ── payments that may have gone out ────────────────────────────────────────
@@ -173,49 +176,21 @@ export function owing(entry, ledger, { ending = false, now = Date.now() } = {}) 
  * was, because the alternative is an artist going unpaid for listening that the
  * app has already forgotten about.
  */
-export async function settle(pair, entry, ledger, { ending = false } = {}) {
+export async function settle(pair, entry, ledger, { ending = false, report = noReport } = {}) {
   const owed = owing(entry, ledger, { ending });
   if (!owed?.due) return { ledger, paid: null };
 
-  const rate = rateOf(entry.manifest);
-
-  // Settled in the money it was earned in, which is not necessarily what the
-  // manifest says today. An artist who switches to testing after somebody has
-  // listened is still owed for the listening: refusing on today's setting
-  // would strand a real debt for good. What their change does stop is any
-  // further debt accruing — see bank().
-  //
-  // The wallet still has to be on that network, because that is where the
-  // money is. An older debt from before this was recorded is payable wherever
-  // the listener is now, rather than stranded for want of a field.
-  const owedOn = ledger[entry.url]?.network;
-  if (owedOn && owedOn !== networkName()) {
-    return { ledger, paid: null, refused: NETWORKS[owedOn]?.real
-      ? "This was owed in real money. Switch your wallet back to Solana to send it."
-      : "This was owed in play money, on the test network. Switch your wallet there to send it." };
-  }
-  if (!owedOn) {
-    const wrong = mismatch(rate);
-    if (wrong) return { ledger, paid: null, refused: wrong };
-  }
-
-  const recipients = (rate.recipients || []).filter((r) => r.address);
-  if (!recipients.length) return { ledger, paid: null, refused: "nobody to pay" };
+  const where = payees(entry, ledger);
+  if (where.refused) return { ledger, paid: null, refused: where.refused };
+  const { recipients } = where;
 
   const { pay } = await machinery();
 
   // The last payment to them wasn't seen landing: find out before sending more.
-  const unsure = unsureOf(entry.url);
-  if (unsure && Date.now() - (unsure.looked || 0) < 30_000) return { ledger, paid: null };
-  if (unsure) {
-    noteUnsure(entry.url, { ...unsure, looked: Date.now() });
-    const landed = await pay.landedSince(pair, recipients, { since: unsure.at, signature: unsure.signature });
-    if (landed === null) return { ledger, paid: null };          // can't tell yet: wait
-    forgetUnsure(entry.url);
-    if (landed > 0) {
-      recordSpend(landed);
-      return { ledger: settled(loadLedger(), entry.url, landed), paid: { micros: landed, usd: toUsd(landed), recovered: true } };
-    }
+  const before = await lookAgain(pair, entry, recipients, pay, { report });
+  if (before.wait) return { ledger, paid: null };
+  if (before.landed > 0) {
+    return { ledger: loadLedger(), paid: { micros: before.landed, usd: toUsd(before.landed), recovered: true } };
   }
 
   // At most one payment's worth, and what's left of today's limit: a debt
@@ -226,22 +201,213 @@ export async function settle(pair, entry, ledger, { ending = false } = {}) {
     return { ledger, paid: null, refused: { ok: false, why: "daily", limit: toUsd(DAILY_LIMIT), spent: toUsd(spentToday()) } };
   }
 
+  const result = await sendPiece(pair, entry, recipients, micros, pay, { report });
+  // Taken off the debt as it stands now: listening banked meanwhile, here or
+  // in another tab, still counts.
+  return { ledger: loadLedger(), paid: { ...result, usd: toUsd(micros) } };
+}
+
+/** Nobody to tell: the default for `report`, which the app sets to
+ *  identify.js reportPaid (passed in, so this file needn't import it). */
+const noReport = async () => false;
+
+/**
+ * Who to pay for this artist, from this wallet, or why it can't be done.
+ *
+ * Settled in the money it was earned in, which is not necessarily what the
+ * manifest says today. An artist who switches to testing after somebody has
+ * listened is still owed for the listening: refusing on today's setting
+ * would strand a real debt for good. What their change does stop is any
+ * further debt accruing — see bank().
+ *
+ * The wallet still has to be on that network, because that is where the
+ * money is. An older debt from before this was recorded is payable wherever
+ * the listener is now, rather than stranded for want of a field.
+ */
+function payees(entry, ledger) {
+  const rate = rateOf(entry.manifest);
+  if (!rate) return { refused: "nobody to pay" };
+  const owedOn = ledger[entry.url]?.network;
+  if (owedOn && owedOn !== networkName()) {
+    return { refused: NETWORKS[owedOn]?.real
+      ? "This was owed in real money. Switch your wallet back to Solana to send it."
+      : "This was owed in play money, on the test network. Switch your wallet there to send it." };
+  }
+  if (!owedOn) {
+    const wrong = mismatch(rate);
+    if (wrong) return { refused: wrong };
+  }
+  const recipients = (rate.recipients || []).filter((r) => r.address);
+  if (!recipients.length) return { refused: "nobody to pay" };
+  return { recipients };
+}
+
+/**
+ * The last payment to this artist wasn't seen landing: did it? Until the
+ * network can say, nothing more is sent (`wait`). What landed comes off the
+ * debt — the device's, and any the artist's server has claimed — and the
+ * server is told, in case it hadn't counted it.
+ */
+async function lookAgain(pair, entry, recipients, pay, { report = noReport } = {}) {
+  const unsure = unsureOf(entry.url);
+  if (!unsure) return { landed: 0 };
+  if (Date.now() - (unsure.looked || 0) < 30_000) return { wait: true };
+  noteUnsure(entry.url, { ...unsure, looked: Date.now() });
+  const landed = await pay.landedSince(pair, recipients, { since: unsure.at, signature: unsure.signature });
+  if (landed === null) return { wait: true };          // can't tell yet: wait
+  forgetUnsure(entry.url);
+  if (landed > 0) {
+    recordSpend(landed);
+    settled(loadLedger(), entry.url, landed);
+    paidTowards(entry.url, landed);
+    // Its server may not know: that answer was what got lost.
+    noteCredit(entry.url, unsure.signature || `unsure:${unsure.at}`, landed);
+    if (unsure.signature) report(originOf(entry.url), unsure.signature).catch(() => {});
+  }
+  return { landed };
+}
+
+/**
+ * Send one payment and book it. A payment that may have gone out is
+ * remembered before anything else happens, so it is never sent twice; one
+ * that went out is taken off what is owed, here and in any claim from the
+ * artist's server. If that server hadn't seen it land when it answered, it
+ * may not have counted it, so it's told (once, without waiting) and, until
+ * it says it has, the app doesn't pay that money again on its word.
+ */
+async function sendPiece(pair, entry, recipients, micros, pay, { report = noReport } = {}) {
   let result;
   try {
     result = await pay.payArtist(pair, recipients, micros, {
       artistName: entry.manifest.artist?.name,
       // Their node pays the network fee (node/src/settle.ts).
-      node: { origin: new URL(entry.url).origin },
+      node: { origin: originOf(entry.url) },
     });
   } catch (e) {
     if (e?.kind === "unconfirmed") noteUnsure(entry.url, { micros, signature: e.signature || null });
     throw e;
   }
-
   recordSpend(micros);
-  // Taken off the debt as it stands now: listening banked meanwhile, here or
-  // in another tab, still counts.
-  return { ledger: settled(loadLedger(), entry.url, micros), paid: { ...result, usd: toUsd(micros) } };
+  settled(loadLedger(), entry.url, micros);
+  paidTowards(entry.url, micros);
+  if (result?.nodeConfirmed === false && result.signature) {
+    noteCredit(entry.url, result.signature, micros);
+    report(originOf(entry.url), result.signature).catch(() => {});
+  }
+  return result;
+}
+
+const originOf = (url) => { try { return new URL(url).origin; } catch { return null; } };
+
+// ── paying what an artist's server says is owed (Auto-block) ────────────────
+
+/**
+ * Pay what this artist's server says is owed, after it refused this wallet a
+ * pass (owes.js). Unlike the ledger, there's no waiting for the artist's
+ * amount or the week: the listener can't hear them until it's paid.
+ *
+ * The server's number, not the ledger's: the ledger may be empty (a new
+ * device) or short of it. But it is a stranger's number, so:
+ *
+ * - **Sent without asking** only to an artist the listener has agreed a price
+ *   with on this device, and only within the daily limit. Otherwise it waits
+ *   for the listener's tap (`explicit`), which is their agreement to exactly
+ *   that amount, shown to them — the daily limit doesn't hold that back, as a
+ *   debt over it could otherwise never be paid in one go.
+ * - **In pieces** of no more than one payment's worth (the most an artist's
+ *   server takes for listening, which is also the app's own per-payment
+ *   limit), at least a cent, and never more than the wallet holds: what the
+ *   wallet can pay goes now, and the rest when money is added.
+ * - **Never twice**: a payment not yet seen landing is looked up first, and
+ *   one the server may not have counted is taken off its number.
+ *
+ * Returns `{ state, paid: [micros…], message? }`. `state` is "paid" (nothing
+ * left to send: ask the server for a pass again), "counting" (paid, the server
+ * hasn't caught up), "ask" (needs the listener's tap; `why` says why),
+ * "funds" (not enough in the wallet), "unsure" (a payment's fate unknown
+ * yet), "mismatch" (wrong network: `message`), or "none". A failure to send
+ * throws, with the payment error's `kind` ("paused" when the artist's fees
+ * account can't pay, "network", …), and leaves the claim to be tried again.
+ */
+export async function settleClaim(pair, entry, { explicit = false, balanceMicros = null, report = noReport, agreed = agreements() } = {}) {
+  const url = entry.url;
+  if (!claimOf(url)) return { state: "none", paid: [] };
+  const where = payees(entry, loadLedger());
+  if (where.refused) return { state: "mismatch", paid: [], message: typeof where.refused === "string" ? where.refused : "" };
+  if (!explicit && agreed[url] == null) return { state: "ask", why: "consent", paid: [] };
+
+  const { pay } = await machinery();
+  const paid = [];
+  const before = await lookAgain(pair, entry, where.recipients, pay, { report });
+  if (before.wait) return { state: "unsure", paid };
+  if (before.landed > 0) paid.push(before.landed);
+
+  const left = claimOf(url)?.remaining ?? 0;
+  if (left <= 0) return { state: paid.length ? "paid" : "counting", paid };
+
+  let wallet = balanceMicros;
+  for (const piece of pieces(left)) {
+    let micros = piece;
+    if (!explicit && micros > DAILY_LIMIT - spentToday()) return { state: "ask", why: "daily", paid };
+    if (wallet != null && wallet < micros) {
+      // What the wallet holds goes now, if it's enough to send; the rest
+      // when money is added.
+      if (wallet < LISTEN_MIN_MICROS) return { state: "funds", paid };
+      micros = wallet;
+    }
+    try {
+      await sendPiece(pair, entry, where.recipients, micros, pay, { report });
+    } catch (e) {
+      e.paid = paid;
+      throw e;
+    }
+    paid.push(micros);
+    if (wallet != null) {
+      wallet -= micros;
+      if (micros < piece) return { state: "funds", paid };
+    }
+  }
+  return { state: "paid", paid };
+}
+
+/**
+ * One go at an artist's claim, start to finish: pay it (settleClaim), then
+ * ask their server for a pass again (`token(origin)`, identify.js tokenFor).
+ * A pass means it's settled, and the claim is forgotten. A fresh refusal
+ * updates what's owed, to be tried again shortly — never straight away, so a
+ * server whose books lag can't draw payment after payment in a loop.
+ *
+ * Whatever doesn't finish it is booked as a back-off on the claim, kept on
+ * the device: every try is followed by another, sooner or later, until the
+ * server says it's paid. Nothing here gives up.
+ */
+export async function payClaim(pair, entry, { explicit = false, balanceMicros = null, report = noReport, token = null, now = () => Date.now() } = {}) {
+  const url = entry.url;
+  let r;
+  try {
+    r = await settleClaim(pair, entry, { explicit, balanceMicros, report });
+  } catch (e) {
+    backOff(url, e.kind || "unknown", e.message, now());
+    throw e;
+  }
+  if (r.state === "none") return r;
+  if ((r.state === "paid" || r.state === "counting") && token) {
+    try {
+      await token(originOf(url));
+      clearClaim(url);
+      return { ...r, state: "clear" };
+    } catch (e) {
+      if (e?.unpaid) {
+        const c = noteClaim(url, e.owes, now());
+        backOff(url, c.remaining > 0 ? "owes" : "counting", null, now());
+        return { ...r, state: c.remaining > 0 ? "owes" : "counting", owes: e.owes };
+      }
+      backOff(url, "token", e?.message || null, now());
+      return { ...r, state: "token", message: e?.message || "" };
+    }
+  }
+  backOff(url, r.state === "ask" ? `ask-${r.why}` : r.state, r.message || null, now());
+  return r;
 }
 
 /**
@@ -249,24 +415,52 @@ export async function settle(pair, entry, ledger, { ending = false } = {}) {
  *
  * One artist failing must not stop the others being paid, so each is attempted
  * on its own and the failures are reported rather than thrown.
+ *
+ * An artist whose server has said what's owed (a claim, owes.js) is paid
+ * that way instead, as its back-off allows, and not from the ledger as well:
+ * the server's number already covers the ledger's, and paying both would pay
+ * the same listening twice.
  */
-export async function settleAll(pair, entries, ledger, { ending = false } = {}) {
+export async function settleAll(pair, entries, ledger, { ending = false, report = noReport, token = null, balanceMicros = null, now = Date.now(), fromLedger = true } = {}) {
   let next = ledger;
   const paid = [];
   const failed = [];
+  const claimed = [];
 
   for (const entry of entries) {
-    if (!owing(entry, next, { ending })?.due) continue;
+    const claim = claimOf(entry.url);
+    if (claim) {
+      if (!claimDue(claim, now)) continue;
+      try {
+        const r = await payClaim(pair, entry, { balanceMicros, report, token });
+        claimed.push({ entry, ...r });
+        const sum = r.paid.reduce((n, m) => n + m, 0);
+        if (sum > 0) {
+          paid.push({ entry, micros: sum, usd: toUsd(sum) });
+          if (balanceMicros != null) balanceMicros = Math.max(0, balanceMicros - sum);
+        }
+      } catch (e) {
+        failed.push({ entry, message: e.message, kind: e.kind, claim: true });
+      }
+      next = loadLedger();
+      continue;
+    }
+    // `fromLedger: false`: only claims are due this time (the ledger's own
+    // retry is still waiting out its minute).
+    if (!fromLedger || !owing(entry, next, { ending })?.due) continue;
     try {
-      const result = await settle(pair, entry, next, { ending });
+      const result = await settle(pair, entry, next, { ending, report });
       next = result.ledger;
-      if (result.paid) paid.push({ entry, ...result.paid });
+      if (result.paid) {
+        paid.push({ entry, ...result.paid });
+        if (balanceMicros != null) balanceMicros = Math.max(0, balanceMicros - result.paid.micros);
+      }
     } catch (e) {
       failed.push({ entry, message: e.message, kind: e.kind });
     }
   }
 
-  return { ledger: next, paid, failed };
+  return { ledger: next, paid, failed, claimed };
 }
 
 /** Everything owed across the library, for one honest number on screen. */
@@ -283,3 +477,18 @@ export async function oneTabAtATime(name, job) {
   if (!locks) return job();
   return locks.request(name, { ifAvailable: true }, (lock) => (lock ? job() : null));
 }
+
+/**
+ * Every payment for listening goes through here: one at a time in this tab,
+ * and one tab at a time (oneTabAtATime). A second caller while one is under
+ * way — the background loop, a Pay button, unfollowing an artist — gets null
+ * at once, rather than reading a debt the first is part-way through paying
+ * and paying it again.
+ */
+let busy = false;
+export async function exclusive(job) {
+  if (busy) return null;
+  busy = true;
+  try { return await oneTabAtATime("amply-pay", job); } finally { busy = false; }
+}
+export const paymentUnderWay = () => busy;

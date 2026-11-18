@@ -118,6 +118,28 @@ export function nodeApi() {
       return (await req("GET", "/listeners")).json();
     },
 
+    /** Auto-block's setting: { enabled, since }. */
+    async autoblock() {
+      return (await req("GET", "/autoblock")).json();
+    },
+
+    /** Turn Auto-block on or off. Turning it on sends what the chain says
+     *  each wallet has paid ({ wallet: micros }), which the server needs. */
+    async setAutoblock(enabled, paid) {
+      return (await req("POST", "/autoblock", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(paid ? { enabled, paid } : { enabled }),
+      })).json();
+    },
+
+    /** What the chain says each wallet has paid, for the server to catch up. */
+    async sendPaid(paid) {
+      return (await req("POST", "/paid", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paid }),
+      })).json();
+    },
+
     /** Stop serving a wallet, or start again. */
     async setBlocked(pubkey, blocked) {
       await req("POST", "/block", {

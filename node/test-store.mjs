@@ -173,6 +173,28 @@ ok("the listeners list is ordered by how much they listened",
   ok("  and they're the same statements store.ts declares", published.schema.length === SCHEMA.length, `${published.schema.length} vs ${SCHEMA.length}`);
 }
 
+// ── what a wallet has paid (Auto-block) ─────────────────────────────────────
+{
+  const { recordPaid, paidOf, mergePaid, autoBlockSetting, setAutoBlock } = await import("./src/store.ts");
+  const P = "WalletPAY0000000000000000000000000000000000";
+  await counted(DB, P, 600);
+  ok("a payment is counted once, by its transaction", (await recordPaid(DB, P, 50_000, "sig1")) && !(await recordPaid(DB, P, 50_000, "sig1")) && (await paidOf(DB, P)) === 50_000);
+  ok("  a second one adds", (await recordPaid(DB, P, 20_000, "sig2")) && (await paidOf(DB, P)) === 70_000);
+  ok("  nothing, or nonsense, is not a payment", !(await recordPaid(DB, P, 0, "sig3")) && !(await recordPaid(DB, P, Number.NaN, "sig4")) && (await paidOf(DB, P)) === 70_000);
+  await mergePaid(DB, { [P]: 60_000 });
+  ok("the chain's total merged in never lowers it", (await paidOf(DB, P)) === 70_000);
+  await mergePaid(DB, { [P]: 90_000 });
+  ok("  and raises it when the chain knows more", (await paidOf(DB, P)) === 90_000);
+  ok("a wallet never seen has paid nothing here", (await paidOf(DB, "WalletNONE000000000000000000000000000000000")) === 0);
+  ok("Auto-block starts off", (await autoBlockSetting(DB)).enabled === false);
+  const on = await setAutoBlock(DB, true, 1000);
+  ok("  turned on, it notes since when, and keeps that when said again", on.since === 1000 && (await setAutoBlock(DB, true, 5000)).since === 1000);
+  ok("  turned off, it forgets it", (await setAutoBlock(DB, false)).since === null && !(await autoBlockSetting(DB)).enabled);
+  await forget(DB, P);
+  ok("forgetting a wallet forgets what it paid, and its payments' references",
+    (await paidOf(DB, P)) === 0 && !db.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(P));
+}
+
 // ── plays per day, for the editor's "free streams" bar ──────────────────────
 {
   const NOON = Date.parse("2026-11-17T12:00:00Z");
