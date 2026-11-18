@@ -30,8 +30,6 @@
   #log li[data-state="run"]::before { content: "→"; color: var(--orange); }
   #log li[data-state="ok"] { color: var(--ink); }
   #log li[data-state="ok"]::before { content: "✓"; color: var(--orange); }
-  .how { margin: 0 0 30px; padding-left: 1.3em; max-width: 34em; font-size: 17px; line-height: 1.5; }
-  .how li { margin: 0 0 6px; }
   .q { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 14px; }
   .choices { display: grid; gap: 12px; margin: 0 0 28px; max-width: 34em; }
   .choice {
@@ -66,52 +64,35 @@
 <div class="panel" data-panel="intro" data-on>
   <h1 class="step">Give your page<br>its own address.</h1>
   <p class="lead">
-    Right now people find you at <strong id="now-addr">an address ending in .workers.dev</strong>.
-    This changes it to one you own, like <strong>music.yourname.com</strong>. Your old address
-    keeps working, and your website isn't touched.
+    Put your page at an address you own, like <strong>music.yourname.com</strong>.
+    Your old address keeps working.
   </p>
-  <ol class="how">
-    <li>Say which address you want.</li>
-    <li>Sign in to Cloudflare and press Allow.</li>
-    <li>That's it. It takes about a minute.</li>
-  </ol>
 
-  <p class="q" id="q-where">First: is your domain on Cloudflare?</p>
+  <p class="q" id="q-where">Is your domain on Cloudflare?</p>
   <div class="choices" role="group" aria-labelledby="q-where">
     <button type="button" class="choice" data-choice="yes" aria-pressed="false">
-      <b>Yes, it's on Cloudflare</b><span>I can see it when I log in at dash.cloudflare.com</span>
+      <b>Yes</b><span>I see it at dash.cloudflare.com</span>
     </button>
     <button type="button" class="choice" data-choice="no" aria-pressed="false">
-      <b>No, or I'm not sure</b><span>I bought it from Squarespace, GoDaddy, Wix, Namecheap or somewhere else</span>
+      <b>No, or not sure</b><span>Squarespace, GoDaddy, Wix, Namecheap…</span>
     </button>
   </div>
 
   <div class="branch" data-branch="no">
-    <h2>Then this page can't move your page onto it.</h2>
-    <p>You have two options:</p>
     <div class="aside">
-      <strong>Prove the domain is yours (easiest).</strong> Your page stays where it is, and listeners
-      see your domain next to your name, which shows it's really you. In your editor, open
-      <strong>Profile → Link your website</strong> and add the one record it shows you, wherever you
-      bought the domain. It takes a minute.
+      <strong>Prove it's yours instead.</strong> In your editor, open <strong>Profile → Link your website</strong>
+      and add the one record it shows. Listeners see your domain beside your name.
       <p style="margin:12px 0 0"><a class="btn sm" id="open-editor" href="#">Open your editor</a></p>
     </div>
-    <div class="aside">
-      <strong>Or move the domain to Cloudflare first.</strong> It's free, and takes anywhere from
-      a few minutes to a few hours. Add your domain at
-      <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">dash.cloudflare.com</a>,
-      follow what it says, and come back here once it shows as active.
-    </div>
-    <p class="fine">Not sure? Log in at dash.cloudflare.com. If your domain is listed, it's on Cloudflare.</p>
+    <p class="fine">Want the new address anyway? Move the domain to
+      <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">Cloudflare</a> (free), then come back.</p>
   </div>
 
   <div class="branch" data-branch="yes">
     <label class="field">
       <span>The address you want</span>
       <input id="host" type="text" inputmode="url" placeholder="music.yourname.com" autocomplete="off">
-      <span class="hint">Your domain with a word in front, like <strong>music.example.com</strong> or
-      <strong>listen.example.com</strong>. It must be one nothing else uses yet. Not your website's own
-      address: that stays exactly as it is.</span>
+      <span class="hint">Your domain with a word in front. Not one already in use.</span>
     </label>
     <div class="now" id="now-box">
       Your page now: <code id="now-code"></code>
@@ -120,17 +101,13 @@
     <label class="field" id="addr-field" hidden>
       <span>Your page's current address</span>
       <input id="addr" type="text" inputmode="url" placeholder="yourname.something.workers.dev" autocomplete="off">
-      <span class="hint">It ends in <strong>.workers.dev</strong> and was shown when you set up Amply. It's also
-      at the top of your editor.</span>
+      <span class="hint">Ends in .workers.dev. It's at the top of your editor.</span>
     </label>
     <div class="actions">
       <button class="btn" id="connect">Continue to Cloudflare</button>
     </div>
-    <p class="fine">
-      Cloudflare will ask you to sign in and press Allow. The list it shows is the same one as at
-      setup, and this page uses just one thing from it: adding the new address to your page. It never
-      replaces anything that already exists, and it lets go of the permission as soon as it's done.
-    </p>
+    <p class="fine">Cloudflare will ask you to allow Amply. It only adds this address, replaces nothing,
+      and lets go right after.</p>
   </div>
 </div>
 <div class="panel" data-panel="working">
@@ -244,7 +221,6 @@ function paintAddress({ editing = false } = {}) {
   $("#addr-field").hidden = !showField;
   if (known) {
     $("#now-code").textContent = state.address.trim();
-    $("#now-addr").textContent = state.address.trim();
   }
   const editor = $("#open-editor");
   if (known) editor.href = `https://${state.address.trim()}/manage`;
