@@ -14,8 +14,28 @@ import { rateOf } from "./manifest.js";
 import { SETTLE_WITHIN_DAYS, LISTEN_MIN_MICROS } from "../../spec/pricing.mjs";
 import { payableHere, networkName, networkFor, NETWORKS } from "./networks.js";
 import {
-  loadLedger, accrue, settled, rateStatus, withinLimits, recordSpend, clampRate,
+  loadLedger, accrue, settled, rateStatus, recordSpend, clampRate, spentToday, MAX_PAYMENT, DAILY_LIMIT,
 } from "./spend.js";
+import { toUsd } from "./money.js";
+
+// ── payments that may have gone out ────────────────────────────────────────
+//
+// A payment whose answer was lost may still land. Until the network says
+// whether it did, nothing more is sent to that artist, so a debt is never
+// paid twice. Kept on the device, beside the debt it belongs to.
+const UNSURE = "amply.unsure.v1";
+const readUnsure = () => { try { return JSON.parse(localStorage.getItem(UNSURE) || "{}"); } catch { return {}; } };
+const writeUnsure = (all) => { try { localStorage.setItem(UNSURE, JSON.stringify(all)); } catch { /* asked again */ } };
+export function noteUnsure(url, { micros, signature = null, at = Date.now(), looked = 0 }) {
+  writeUnsure({ ...readUnsure(), [url]: { micros, signature, at, looked } });
+}
+export function forgetUnsure(url) {
+  const all = readUnsure();
+  if (!(url in all)) return;
+  delete all[url];
+  writeUnsure(all);
+}
+export const unsureOf = (url) => readUnsure()[url] || null;
 
 let modules = null;
 
@@ -65,6 +85,9 @@ export async function machinery() {
   }
   return modules;
 }
+
+/** Tests stand in for the payment libraries here. */
+export const useMachinery = (m) => { modules = m; };
 
 /** Already loaded? Used to avoid pulling it in just to draw a screen. */
 export const loaded = () => modules;
@@ -179,18 +202,46 @@ export async function settle(pair, entry, ledger, { ending = false } = {}) {
   const recipients = (rate.recipients || []).filter((r) => r.address);
   if (!recipients.length) return { ledger, paid: null, refused: "nobody to pay" };
 
-  const allowed = withinLimits(owed.micros);
-  if (!allowed.ok) return { ledger, paid: null, refused: allowed };
-
   const { pay } = await machinery();
-  const result = await pay.payArtist(pair, recipients, owed.micros, {
-    artistName: entry.manifest.artist?.name,
-    // Their node pays the network fee if it offers to (node/src/settle.ts).
-    node: { origin: new URL(entry.url).origin },
-  });
 
-  recordSpend(owed.micros);
-  return { ledger: settled(ledger, entry.url, owed.micros), paid: { ...result, usd: owed.usd } };
+  // The last payment to them wasn't seen landing: find out before sending more.
+  const unsure = unsureOf(entry.url);
+  if (unsure && Date.now() - (unsure.looked || 0) < 30_000) return { ledger, paid: null };
+  if (unsure) {
+    noteUnsure(entry.url, { ...unsure, looked: Date.now() });
+    const landed = await pay.landedSince(pair, recipients, { since: unsure.at, signature: unsure.signature });
+    if (landed === null) return { ledger, paid: null };          // can't tell yet: wait
+    forgetUnsure(entry.url);
+    if (landed > 0) {
+      recordSpend(landed);
+      return { ledger: settled(loadLedger(), entry.url, landed), paid: { micros: landed, usd: toUsd(landed), recovered: true } };
+    }
+  }
+
+  // At most one payment's worth, and what's left of today's limit: a debt
+  // bigger than that goes in pieces, rather than never.
+  const room = DAILY_LIMIT - spentToday();
+  const micros = Math.min(owed.micros, MAX_PAYMENT, room);
+  if (micros < LISTEN_MIN_MICROS) {
+    return { ledger, paid: null, refused: { ok: false, why: "daily", limit: toUsd(DAILY_LIMIT), spent: toUsd(spentToday()) } };
+  }
+
+  let result;
+  try {
+    result = await pay.payArtist(pair, recipients, micros, {
+      artistName: entry.manifest.artist?.name,
+      // Their node pays the network fee (node/src/settle.ts).
+      node: { origin: new URL(entry.url).origin },
+    });
+  } catch (e) {
+    if (e?.kind === "unconfirmed") noteUnsure(entry.url, { micros, signature: e.signature || null });
+    throw e;
+  }
+
+  recordSpend(micros);
+  // Taken off the debt as it stands now: listening banked meanwhile, here or
+  // in another tab, still counts.
+  return { ledger: settled(loadLedger(), entry.url, micros), paid: { ...result, usd: toUsd(micros) } };
 }
 
 /**
@@ -224,3 +275,11 @@ export function totalOwed(ledger) {
 }
 
 export { loadLedger, rateStatus, clampRate };
+
+/** Run `job` in one tab at a time, across every tab of this app; a tab that
+ *  finds another already paying skips its turn rather than waiting. */
+export async function oneTabAtATime(name, job) {
+  const locks = typeof navigator !== "undefined" ? navigator.locks : null;
+  if (!locks) return job();
+  return locks.request(name, { ifAvailable: true }, (lock) => (lock ? job() : null));
+}

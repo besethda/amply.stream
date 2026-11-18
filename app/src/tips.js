@@ -59,3 +59,7 @@ export function tipBlocked(dollars, { hasWallet, balance, mismatch, feesCovered 
 }
 
 export const tipMicros = (dollars) => toMicros(Math.min(MAX_TIP, dollars));
+
+/** A tip's note on the payment, so it's never taken for paying for listening.
+ *  The artist's server expects exactly this (node/src/payment-check.ts). */
+export const tipMemo = (origin) => `amply:tip:${new URL(origin).host}`;

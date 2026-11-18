@@ -80,7 +80,8 @@ globalThis.fetch = async (url, init = {}) => {
     const item = body.item;
     const r = await settle(DB, nodeRpc, body.tx, {
       mint: network().usdc, payees,
-      ...(item === undefined ? { minMicros: 10_000, maxMicros: 2_000_000 }
+      ...(body.tip === true ? { minMicros: 100_000, maxMicros: 50_000_000, memo: `amply:tip:${u.host}` }
+        : item === undefined ? { minMicros: 10_000, maxMicros: 2_000_000 }
         : { minMicros: 8_000_000, maxMicros: 8_000_000, memo: `amply:buy:${u.host}:${item}` }),
     }, { wait: async () => {}, confirmWithinMs: 20 });
     return r.ok ? json({ signature: r.signature, confirmed: r.confirmed }) : json({ error: r.why }, r.status);
@@ -183,12 +184,19 @@ for (const [why, status] of [["a payee closed their USDC account after this serv
   ok("a bare server error: also stop, without paying twice", threw?.kind === "unconfirmed" && selfSent.length === 0);
 }
 
+{
+  reset(offering());
+  const r = await payArtist(listener, payees, 5_000_000, { memo: `amply:tip:${new URL(ORIGIN).host}`, node: { origin: ORIGIN, tip: true, extra: { tip: true } } });
+  ok("a $5 tip goes through the artist's node, above the listening cap", r.feePaidBy === "artist" && node.body.tip === true && selfSent.length === 0);
+}
+
 // ── sending money out with no SOL, through a node that pays fees ──
 {
   const withdrawOffer = { ...offering().offer, withdraw: { to: artist, fee: 50_000, newAccountFee: 500_000 } };
   const origGetBalance = Connection.prototype.getBalance, origInfo = Connection.prototype.getAccountInfo, origTok = Connection.prototype.getTokenAccountBalance;
   Connection.prototype.getBalance = async () => 0;
-  Connection.prototype.getTokenAccountBalance = async () => ({ value: { amount: "3000000" } });
+  Connection.prototype.getTokenAccountBalance = async () => { throw new Error("Indexed requests require a personal token"); };
+  Connection.prototype.getParsedAccountInfo = async () => ({ value: { data: { parsed: { info: { tokenAmount: { amount: "3000000" } } } } } });
   const dest = Keypair.generate().publicKey.toBase58();
 
   reset({ offer: withdrawOffer, destExists: false });

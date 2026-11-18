@@ -64,9 +64,9 @@ const twice = await listener(DB, A);
 ok("plays add up", twice.plays === 2);
 ok("so do seconds", twice.seconds === 500);
 await counted(DB, A, 99999);
-ok("an absurd claim is clamped to an hour", (await listener(DB, A)).seconds === 500 + 3600);
+ok("an absurd claim is clamped to three hours (a long mix, not a day)", (await listener(DB, A)).seconds === 500 + 3 * 3600);
 await counted(DB, A, -50);
-ok("a negative one counts as nothing", (await listener(DB, A)).seconds === 500 + 3600);
+ok("a negative one counts as nothing", (await listener(DB, A)).seconds === 500 + 3 * 3600);
 
 // ── the ban, and the hole that used to be in it ─────────────────────────────
 

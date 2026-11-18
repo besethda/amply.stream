@@ -287,7 +287,14 @@ export async function settle(
     // First, what would happen. A failed transaction still costs its fee,
     // so one that would fail isn't sent.
     const sim = await rpc("simulateTransaction", [signed, { encoding: "base64", sigVerify: true, commitment: "confirmed" }]);
-    if (sim?.value?.err) return refuse(422, failureOf(sim.value));
+    if (sim?.value?.err) {
+      const why = failureOf(sim.value);
+      // The fees account ran out between balance checks: that's "not paying
+      // fees right now" (409), which the app knows to wait on, not a fault.
+      // And the remembered balance goes, so the next look asks the network.
+      if (why === CANT_PAY_FEE) { balances.delete(key.address); return refuse(409, why); }
+      return refuse(422, why);
+    }
   } catch (e) {
     // Nothing was sent: the listener can safely try again, or pay otherwise.
     return refuse(502, e instanceof RpcError ? e.message : "couldn't reach the network");
@@ -321,13 +328,15 @@ export async function settle(
   return { ok: true, signature, micros: verdict.micros, confirmed: false };
 }
 
+const CANT_PAY_FEE = "this artist's node can't pay the network fee right now; nothing was sent";
+
 /** What a failed simulation means, for a listener. */
 function failureOf(value: { err?: unknown; logs?: string[] }): string {
   const logs = (value.logs || []).join("\n");
   if (/insufficient funds/i.test(logs) && /Transfer/i.test(logs)) return "there isn't enough in your wallet to pay this; nothing was sent";
   if (/Blockhash not found|BlockhashNotFound/i.test(JSON.stringify(value.err)) ) return "that payment is out of date; try again";
   if (/insufficient lamports|InsufficientFundsForFee|InsufficientFundsForRent/i.test(logs + JSON.stringify(value.err))) {
-    return "this artist's node can't pay the network fee right now; nothing was sent";
+    return CANT_PAY_FEE;
   }
   return "the network wouldn't accept that payment; nothing was sent";
 }

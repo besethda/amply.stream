@@ -15,9 +15,9 @@ import { fetchManifest, tracksOf, rateOf, verifiedDomain } from "./manifest.js";
 import { loadLibrary, saveLibrary, addArtist, addKnown, removeArtist, followedOnly, isFollowed, setFollowed, noteReach, reachable, CHECK_EVERY_MS, feesCovered } from "./library.js";
 import { createPlayer } from "./player.js";
 import {
-  loadLedger, bank, owing, settle, settleAll, backupSaved, totalOwed, hasWallet, machinery, rateStatus, mismatch,
+  loadLedger, bank, owing, settle, settleAll, backupSaved, totalOwed, hasWallet, machinery, rateStatus, mismatch, oneTabAtATime,
 } from "./paying.js";
-import { agreeRate, settled } from "./spend.js";
+import { agreeRate } from "./spend.js";
 import {
   tokenFor, reportPlayed, reportHeard, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
   manageSubscription, claimSubscription,
@@ -54,7 +54,7 @@ import { networkName } from "./networks.js";
 
 /** How long an answer about an artist's fees account stands while listening. */
 const FEES_FRESH_MS = 15 * 60_000;
-import { tipsFor, amplyTips, tipBlocked, tipMicros } from "./tips.js";
+import { tipsFor, amplyTips, tipBlocked, tipMicros, tipMemo } from "./tips.js";
 import { createUpdater, IDLE_MS as UPDATE_IDLE_MS } from "./update.js";
 import {
   behindSplash, showSplash, fontsLoaded, imagesInView, laidOut, START_MS as SPLASH_START_MS, RESUME_MS as SPLASH_RESUME_MS,
@@ -110,6 +110,7 @@ export function App() {
 
   // Refs the player reads, because it outlives any one render.
   const pending = useRef({});          // seconds listened, banked on a slower clock
+  const heardFrom = useRef(new Set());  // artists heard since the last bank
   const holder = useRef(null); holder.current = pair;
   const library = useRef(entries); library.current = entries;
   const funds = useRef(null); funds.current = balance;
@@ -183,6 +184,10 @@ export function App() {
   const player = useMemo(() => createPlayer(
     setState,
     (track, seconds) => {
+      // Every artist being heard has their page and fees account looked at
+      // again now and then (recheckArtists), free tracks included: a paused
+      // artist's songs are free, and they must be charged for once they aren't.
+      if (track?.from) heardFrom.current.add(track.from);
       if (!track?.from || !track.needsWallet) return;
       // A subscriber has paid by card; charging by the minute too would be twice.
       if (isSubscribed(originOf(track.url))) return;
@@ -270,10 +275,14 @@ export function App() {
   useEffect(() => {
     const flush = () => {
       const banked = pending.current;
+      const heard = [...heardFrom.current];
       pending.current = {};
+      heardFrom.current = new Set();
+      if (heard.length) recheckArtists(heard);
       if (!Object.keys(banked).length) return;
-      setLedger((l) => bank(l, library.current, banked));
-      recheckFees(Object.keys(banked));
+      // Onto the ledger as it's stored, which every tab shares: another tab
+      // may have banked or paid since this one last looked.
+      setLedger(bank(loadLedger(), library.current, banked));
     };
     const timer = setInterval(flush, 5000);
     document.addEventListener("visibilitychange", flush);
@@ -286,19 +295,31 @@ export function App() {
     };
   }, []);
 
-  // Whether each artist being listened to can be paid, looked at again every
-  // quarter of an hour: an artist whose fees account runs dry stops being
-  // charged for within minutes, and one who fills it starts being paid.
-  const recheckFees = useCallback(async (urls) => {
+  // Each artist being listened to, looked at again every quarter of an hour:
+  // their page (a price paused or unpaused, raised or lowered) and whether
+  // their fees account can pay. One whose account runs dry stops being
+  // charged within minutes; one who fills it starts being paid.
+  const recheckArtists = useCallback(async (urls) => {
     const now = Date.now();
     const stale = urls.filter((u) => {
       const e = library.current.find((x) => x.url === u);
-      return e && rateOf(e.manifest) && !(now - (e.feesCheckedAt || 0) < FEES_FRESH_MS);
+      return e && !(now - (e.feesCheckedAt || 0) < FEES_FRESH_MS);
     });
     if (!stale.length) return;
     // Marked as checked first, so a slow answer isn't asked for twice.
     noteFees(stale, null, now);
-    const found = await Promise.all(stale.map((u) => nodePaysFees(originOf(u), networkName())));
+    const pages = await Promise.all(stale.map((u) => fetchManifest(u).then((r) => r.manifest).catch(() => null)));
+    if (pages.some(Boolean)) {
+      setEntries((all) => {
+        const next = all.map((e) => { const i = stale.indexOf(e.url); return i >= 0 && pages[i] ? { ...e, manifest: pages[i] } : e; });
+        saveLibrary(next);
+        return next;
+      });
+    }
+    const found = await Promise.all(stale.map((u, i) => {
+      const m = pages[i] || library.current.find((x) => x.url === u)?.manifest;
+      return m && rateOf(m) ? nodePaysFees(originOf(u), networkName()) : false;
+    }));
     noteFees(stale, found, now);
   }, []);
   /** Record whether these artists can be paid (null: only when it was asked). */
@@ -409,18 +430,19 @@ export function App() {
     if (!pair || settling.current || Date.now() < retryAt.current) return;
     settling.current = true;
     let result;
-    try { result = await settleAll(pair, entries, ledger); }
-    finally { settling.current = false; }
-    // Taken off what's owed now, not what was owed when it started: listening
-    // banked while the payment was on its way still counts.
-    if (result.paid.length) {
-      setLedger((now) => result.paid.reduce((l, p) => settled(l, p.entry.url, p.micros), now));
-    }
+    try {
+      // And one tab at a time: each tab has its own copy of the page, but the
+      // debt is one, stored where they all see it. Read afresh inside the lock.
+      result = await oneTabAtATime("amply-pay", () => settleAll(pair, library.current, loadLedger()));
+    } finally { settling.current = false; }
+    if (!result) return;                       // another tab is paying
+    // What's stored is the truth: taken off what was owed as it stood then,
+    // so listening banked meanwhile (here or elsewhere) still counts.
+    setLedger(loadLedger());
     if (result.paid.length || result.failed.length) refresh();
-    if (result.failed.length) {
-      const maybeSent = result.failed.some((f) => f.kind === "unconfirmed");
-      retryAt.current = Date.now() + (maybeSent ? 30 * 60_000 : 60_000);
-    }
+    // A minute before trying again after a failure. One that may have gone
+    // through is checked on the network before anything more is sent.
+    if (result.failed.length) retryAt.current = Date.now() + 60_000;
     if (result.paid.length) {
       const first = result.paid[0];
       const total = result.paid.reduce((n, p) => n + p.usd, 0);
@@ -437,6 +459,13 @@ export function App() {
     if (!pair || !entries.some((e) => owing(e, ledger)?.due)) return;
     settleNow();
   }, [ledger, pair]);
+
+  // Another tab banked or paid: this one sees it too.
+  useEffect(() => {
+    const seen = (e) => { if (e.key === null || e.key === "amply.owed.v2") setLedger(loadLedger()); };
+    window.addEventListener("storage", seen);
+    return () => window.removeEventListener("storage", seen);
+  }, []);
 
   useEffect(() => { if (!np) viz?.stop(); }, [np]);
   // The waveform's data for the song playing, whichever screen shows it (the
@@ -520,7 +549,11 @@ export function App() {
     if (!yes) return;
     try {
       const { pay } = await machinery();
-      await pay.payArtist(pair, to.recipients, tipMicros(dollars), { artistName: to.name, node: to.origin ? { origin: to.origin } : undefined });
+      await pay.payArtist(pair, to.recipients, tipMicros(dollars), {
+        artistName: to.name,
+        // Marked as a tip, through the artist's node, which pays the fee.
+        ...(to.origin ? { memo: tipMemo(to.origin), node: { origin: to.origin, tip: true, extra: { tip: true } } } : {}),
+      });
       flash({ text: `Sent ${money(dollars)} → ${to.name}` });
       refresh();
     } catch (e) {
@@ -676,15 +709,19 @@ export function App() {
     const leaving = entries.find((e) => e.url === url);
     if (pair && leaving && owing(leaving, ledger)) {
       try {
-        const result = await settle(pair, leaving, ledger, { ending: true });
+        const result = await settle(pair, leaving, loadLedger(), { ending: true });
         if (result.refused) throw new Error(typeof result.refused === "string" ? result.refused : result.refused.message || "Payment not allowed");
-        setLedger(result.ledger);
+        setLedger(loadLedger());
         refresh();
       } catch (e) {
         flash({ bad: true, text: `Pay what you owe first: ${e.message}` });
         return;
       }
     }
+    // Something still owed that can't go now (their fees account is empty,
+    // under a cent, or a payment not yet seen landing): keep them known, out
+    // of the library, so it's paid when it can be rather than lost.
+    if (loadLedger()[url]?.micros > 0) { follow(url, false); back(); return; }
     const next = removeArtist(entries, url);
     setEntries(next);
     saveLibrary(next);

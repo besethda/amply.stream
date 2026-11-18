@@ -363,6 +363,7 @@ wallet that plays their paid tracks:</p>
 <ul>
   <li>your wallet address;</li>
   <li>how many tracks you have played, and for how many minutes in total;</li>
+  <li>what that listening cost, at the price when you heard it;</li>
   <li>when you first and last listened;</li>
   <li>whether ${name} has stopped serving that wallet.</li>
 </ul>

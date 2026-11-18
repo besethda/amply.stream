@@ -81,29 +81,51 @@ async function rpcBatch(url, calls) {
 }
 
 /**
- * Who has paid this artist, and how much.
+ * Who has paid this artist, and how much: everything newer than `until`.
  *
  * Returns micros per payer wallet, so it can sit beside the listening totals
  * the node keeps. Both are keyed by the same wallet, which is the whole reason
  * the wallet is the identity: nobody has to report anything for these to line
  * up.
+ *
+ * All of it, page by page, not the latest few hundred: an artist paid every
+ * few songs passes that in a week, and anything older would vanish, leaving
+ * fans who paid looking as though they hadn't. The editor keeps what it has
+ * read (usePayments) and asks only for what's newer each time.
+ *
+ * Only listening counts as paying for listening. A purchase or a tip carries
+ * a note (amply:buy:…, amply:tip:…), and a listener sending their own money
+ * out pays the artist a small fee in a transfer that also pays someone who
+ * isn't a payee. Those are counted apart, as `other`.
  */
-export async function paymentsTo(address, networkName = "devnet", { limit = 200, mint } = {}) {
+export async function paymentsTo(address, networkName = "devnet", { until, payees = [address], mint, pageSize = 1000 } = {}) {
   const net = NETWORKS[networkName];
   if (!net) throw new Error("No such network.");
-  if (!address) return { byWallet: {}, total: 0, count: 0 };
+  const none = { byWallet: {}, total: 0, count: 0, newest: until || null };
+  if (!address) return none;
   // `mint` is only ever passed by the proof script, which pays itself in a
   // token it minted for the purpose. Artists are paid in USDC.
   const token = mint || net.usdc;
+  const owners = new Set(payees.length ? payees : [address]);
 
   // Every Amply payment names the artist's own wallet — it opens their dollar
   // account if it doesn't exist yet, idempotently, in the same transaction —
   // so asking for the transactions that touch the wallet finds them all,
   // without first looking up which account holds the dollars. That lookup is
-  // exactly what free servers refuse to answer from a browser.
-  const signatures = await rpc(net.rpc, "getSignaturesForAddress", [address, { limit }]);
-  const wanted = (signatures || []).filter((s) => !s.err).map((s) => s.signature);
-  if (!wanted.length) return { byWallet: {}, total: 0, count: 0 };
+  // exactly what free servers refuse to answer from a browser. Finalized only,
+  // so nothing kept here can later turn out not to have happened.
+  const found = [];
+  for (let before; ;) {
+    const page = await rpc(net.rpc, "getSignaturesForAddress",
+      [address, { limit: pageSize, commitment: "finalized", ...(before ? { before } : {}), ...(until ? { until } : {}) }]);
+    found.push(...(page || []));
+    if (!page || page.length < pageSize) break;
+    before = page[page.length - 1].signature;
+    await wait(150);
+  }
+  const newest = found[0]?.signature || until || null;
+  const wanted = found.filter((s) => !s.err).map((s) => s.signature);
+  if (!wanted.length) return { ...none, newest };
 
   const byWallet = {};
   let total = 0;
@@ -115,7 +137,7 @@ export async function paymentsTo(address, networkName = "devnet", { limit = 200,
     if (i) await wait(120);
     const chunk = wanted.slice(i, i + 10).map((signature) => ({
       method: "getTransaction",
-      params: [signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 }],
+      params: [signature, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "finalized" }],
     }));
 
     for (const tx of await rpcBatch(net.rpc, chunk)) {
@@ -123,22 +145,23 @@ export async function paymentsTo(address, networkName = "devnet", { limit = 200,
 
       const keys = tx.transaction?.message?.accountKeys ?? [];
       const keyAt = (i) => (typeof keys[i] === "string" ? keys[i] : keys[i]?.pubkey);
-      const mine = new Set(
-        [...(tx.meta?.preTokenBalances ?? []), ...(tx.meta?.postTokenBalances ?? [])]
-          .filter((b) => b.owner === address && b.mint === token)
-          .map((b) => keyAt(b.accountIndex))
-          .filter(Boolean),
-      );
+      const balances = [...(tx.meta?.preTokenBalances ?? []), ...(tx.meta?.postTokenBalances ?? [])];
+      const ownerOf = new Map(balances.map((b) => [keyAt(b.accountIndex), b.owner]));
+      const mine = new Set(balances.filter((b) => b.owner === address && b.mint === token).map((b) => keyAt(b.accountIndex)).filter(Boolean));
       if (!mine.size) continue;   // touched the wallet, but not with dollars
 
       const instructions = [
         ...(tx.transaction?.message?.instructions ?? []),
         ...(tx.meta?.innerInstructions ?? []).flatMap((x) => x.instructions ?? []),
       ];
+      const transfers = instructions.map((ix) => ix?.parsed).filter((p) => p && (p.type === "transferChecked" || p.type === "transfer"));
+      const memo = instructions.find((ix) => ix?.program === "spl-memo" && typeof ix.parsed === "string")?.parsed || "";
+      // What kind of payment: a note says purchase or tip; a transfer to
+      // anyone who isn't a payee makes it someone sending money out.
+      const outward = transfers.some((p) => !owners.has(ownerOf.get(p.info?.destination)));
+      const listening = !memo && !outward;
 
-      for (const ix of instructions) {
-        const p = ix?.parsed;
-        if (!p || (p.type !== "transferChecked" && p.type !== "transfer")) continue;
+      for (const p of transfers) {
         const info = p.info ?? {};
         if (!mine.has(info.destination)) continue;
         if (info.mint && info.mint !== token) continue;
@@ -149,19 +172,33 @@ export async function paymentsTo(address, networkName = "devnet", { limit = 200,
         // The authority on the transfer is the wallet that paid, which is the
         // same wallet the node saw listening.
         const payer = info.authority || info.multisigAuthority || "unknown";
-        const had = byWallet[payer] || { micros: 0, payments: 0, last: 0 };
-        byWallet[payer] = {
-          micros: had.micros + micros,
-          payments: had.payments + 1,
-          last: Math.max(had.last, (tx.blockTime || 0) * 1000),
-        };
+        byWallet[payer] = addPaid(byWallet[payer], { micros: listening ? micros : 0, other: listening ? 0 : micros,
+          payments: listening ? 1 : 0, last: (tx.blockTime || 0) * 1000 });
         total += micros;
         count += 1;
       }
     }
   }
 
-  return { byWallet, total, count, checked: wanted.length };
+  return { byWallet, total, count, checked: wanted.length, newest };
+}
+
+/** One wallet's payments, added to another's. */
+export function addPaid(a, b) {
+  const x = a || { micros: 0, other: 0, payments: 0, last: 0 };
+  return {
+    micros: x.micros + (b.micros || 0),
+    other: (x.other || 0) + (b.other || 0),
+    payments: x.payments + (b.payments || 0),
+    last: Math.max(x.last || 0, b.last || 0),
+  };
+}
+
+/** What was read before, and what's new since: one record. */
+export function mergePayments(kept, fresh) {
+  const byWallet = { ...(kept?.byWallet || {}) };
+  for (const [w, p] of Object.entries(fresh.byWallet || {})) byWallet[w] = addPaid(byWallet[w], p);
+  return { byWallet, total: (kept?.total || 0) + (fresh.total || 0), newest: fresh.newest || kept?.newest || null };
 }
 
 /**
@@ -183,13 +220,20 @@ export function reconcile(listeners, byWallet) {
   }).sort((a, b) => (b.seconds || 0) - (a.seconds || 0));
 }
 
-/** How many dollars (USDC) a wallet holds right now, or null if unknown. */
+/**
+ * How many dollars (USDC) a wallet holds right now, or null if unknown.
+ *
+ * Its dollar account is worked out from the address and read directly: free
+ * endpoints refuse to search for a wallet's token accounts from a browser
+ * ("indexed requests require a personal token"). No account yet is $0.
+ */
 export async function usdcBalance(address, networkName = "mainnet") {
   const net = NETWORKS[networkName];
   if (!net || !address) return null;
-  const r = await rpc(net.rpc, "getTokenAccountsByOwner",
-    [address, { mint: net.usdc }, { encoding: "jsonParsed", commitment: "confirmed" }]);
-  let micros = 0;
-  for (const a of r?.value || []) micros += Number(a.account?.data?.parsed?.info?.tokenAmount?.amount || 0);
-  return micros;
+  const { tokenAccountOf } = await import("../../node/src/solana-tx.ts");
+  const account = await tokenAccountOf(address, net.usdc, TOKEN_PROGRAM, ATA_PROGRAM);
+  const r = await rpc(net.rpc, "getAccountInfo", [account, { encoding: "jsonParsed", commitment: "confirmed" }]);
+  return Number(r?.value?.data?.parsed?.info?.tokenAmount?.amount || 0);
 }
+const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";

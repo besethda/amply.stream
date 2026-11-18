@@ -240,5 +240,63 @@ walletOn("mainnet");
   is("no wallet has nothing saved", p.backupSaved(undefined), false);
 }
 
+// ── sending: in pieces, within the day, and never twice ─────────────────────
+{
+  const { spentToday, recordSpend } = await import("./src/spend.js");
+  const sent = [];
+  let landed = null, fail = null;
+  p.useMachinery({ pay: {
+    async payArtist(_pair, _r, micros) {
+      if (fail) { const e = new Error(fail.message); e.kind = fail.kind; e.signature = fail.signature; throw e; }
+      sent.push(micros); return { signature: "sig", micros };
+    },
+    async landedSince() { return landed; },
+  } });
+  const pair = { publicKey: { toBase58: () => "me" } };
+  const owe = (micros, url = URL_A) => { store.set("amply.owed.v2", JSON.stringify({ [url]: { micros, seconds: 1, since: Date.now() - 8 * 86400e3, network: "mainnet" } })); return p.loadLedger(); };
+  walletOn("mainnet");
+  const A = artist(URL_A, 0.01, 0.2);
+
+  store.delete("amply.spent.v1"); sent.length = 0;
+  let r = await p.settle(pair, A, owe(toMicros(3.5)));
+  is("a debt over one payment's worth goes in pieces, not never", sent[0], toMicros(2));
+  is("  and the rest stays owed", r.ledger[URL_A].micros, toMicros(1.5));
+
+  store.delete("amply.spent.v1"); recordSpend(toMicros(9.5)); sent.length = 0;
+  await p.settle(pair, A, owe(toMicros(3)));
+  is("near today's limit: only what's left of it", sent[0], toMicros(0.5));
+  r = await p.settle(pair, A, p.loadLedger());
+  ok("the day used up: nothing sent, the debt waits for tomorrow", sent.length === 1 && r.refused?.why === "daily");
+
+  store.delete("amply.spent.v1"); sent.length = 0;
+  fail = { kind: "unconfirmed", message: "lost", signature: "maybe" };
+  await p.settle(pair, A, owe(toMicros(0.5))).catch(() => {});
+  ok("a payment that may have gone out is remembered", p.unsureOf(URL_A)?.signature === "maybe");
+  fail = null; landed = null;
+  r = await p.settle(pair, A, p.loadLedger());
+  ok("  until the network can say, nothing more is sent", sent.length === 0 && !r.paid);
+  store.set("amply.unsure.v1", JSON.stringify({ [URL_A]: { ...p.unsureOf(URL_A), looked: 0 } }));
+  landed = toMicros(0.5);
+  r = await p.settle(pair, A, p.loadLedger());
+  ok("  it landed: taken off the debt, and not sent again", sent.length === 0 && r.paid?.recovered && !r.ledger[URL_A]);
+  ok("  and forgotten", p.unsureOf(URL_A) === null);
+
+  fail = { kind: "unconfirmed", message: "lost" };
+  await p.settle(pair, A, owe(toMicros(0.5))).catch(() => {});
+  fail = null; landed = 0;
+  store.set("amply.unsure.v1", JSON.stringify({ [URL_A]: { ...p.unsureOf(URL_A), looked: 0 } }));
+  await p.settle(pair, A, p.loadLedger());
+  is("it never landed: then it's paid", sent[0], toMicros(0.5));
+
+  // Another tab is paying: this one skips its turn.
+  let held = false;
+  Object.defineProperty(globalThis, "navigator", { configurable: true,
+    value: { locks: { request: async (_n, { ifAvailable }, fn) => fn(held && ifAvailable ? null : {}) } } });
+  held = true;
+  is("another tab paying: this one doesn't", await p.oneTabAtATime("amply-pay", async () => "paid"), null);
+  held = false;
+  is("  and when none is, it does", await p.oneTabAtATime("amply-pay", async () => "paid"), "paid");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
