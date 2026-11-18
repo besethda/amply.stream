@@ -60,6 +60,7 @@ import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, publ
 import { readTransaction, writeTransaction, base64, keyOf } from "../../node/src/solana-tx.ts";
 import { checkFeePayment } from "../../node/src/feepay.ts";
 import { SiteEditor } from "./site-editor.jsx";
+import { paymentsTo, mergePayments, usdcBalance, NETWORKS } from "./chain.js";
 import { coinbaseSolPage, coinbaseCashoutPage, sellMessage, topupUrl } from "../../app/src/topup.js";
 
 export const MAX_UPLOAD = 90 * 1024 * 1024;
@@ -1984,7 +1985,6 @@ function usePayments(payees, declared) {
     if (!addresses.length) return;
     setState((s) => ({ ...s, busy: true, error: null }));
     try {
-      const { paymentsTo, mergePayments } = await import("./chain.js");
       // Every address in the split, because a listener's payment is divided
       // between them: what the listener paid is the sum, not any one share.
       for (const address of addresses) {
@@ -2558,7 +2558,6 @@ async function sendFromPayoutWallet({ api, payees, net, dest, micros, step = () 
     if (tx.accounts[1] !== from) throw new Error("Your server prepared a transfer from a different wallet, so it wasn't sent.");
     tx.signatures[1] = await signWithSeed(seed, tx.message);
     // Checked here before it leaves this page: exactly this, nothing else.
-    const { NETWORKS } = await import("./chain.js");
     const verdict = await checkFeePayment(tx, {
       feePayer, mint: NETWORKS[net].usdc, payees: [{ address: dest, split: 100 }], minMicros: micros, maxMicros: micros,
     });
@@ -2590,7 +2589,7 @@ function SendToBank({ api, payees, network, routeName }) {
 
   useEffect(() => {
     let alive = true;
-    import("./chain.js").then(({ usdcBalance }) => usdcBalance(mine, net)).then((b) => alive && setBalance(b)).catch(() => {});
+    usdcBalance(mine, net).then((b) => alive && setBalance(b)).catch(() => {});
     return () => { alive = false; };
   }, [mine, net]);
 
@@ -2676,7 +2675,7 @@ function CoinbaseCashOut({ api, payees, network }) {
 
   useEffect(() => {
     let alive = true;
-    import("./chain.js").then(({ usdcBalance }) => usdcBalance(mine, net)).then((b) => alive && setBalance(b)).catch(() => {});
+    usdcBalance(mine, net).then((b) => alive && setBalance(b)).catch(() => {});
     return () => { alive = false; };
   }, [mine, net]);
 
