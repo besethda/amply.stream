@@ -6,8 +6,8 @@
  * copy, an ordinary MP3, so every player plays it at the right level, iPhone
  * included, with nothing to adjust while it plays (spec/loudness.mjs).
  */
-import { Mp3Encoder } from "@breezystack/lamejs";
 import { integratedLoudness, gainFor, normalize, needsStreamCopy } from "../../spec/loudness.mjs";
+import { LAME_PATH } from "../../node/src/constants.ts";
 
 export const STREAM_RATE = 44100;
 export const STREAM_KBPS = 256;
@@ -31,8 +31,21 @@ export async function decodeStereo(blob) {
 
 const breathe = () => new Promise((r) => setTimeout(r, 0));
 
+/**
+ * The MP3 encoder (lamejs), about half the editor's size: fetched from this
+ * node the first time a song needs a streaming copy, rather than carried in
+ * the editor every time it opens. The node serves it (node/src/lame.ts) and
+ * the browser keeps it.
+ */
+let encoder = null;
+export function loadEncoder(path = LAME_PATH) {
+  encoder ??= import(path).catch((e) => { encoder = null; throw e; });
+  return encoder;
+}
+
 /** Float samples to an MP3, yielding as it goes so the page stays responsive. */
 export async function encodeMp3([left, right], { kbps = STREAM_KBPS, onProgress } = {}) {
+  const { Mp3Encoder } = await loadEncoder();
   const enc = new Mp3Encoder(2, STREAM_RATE, kbps);
   const toInt = (f, from, to) => {
     const out = new Int16Array(to - from);

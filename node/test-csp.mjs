@@ -33,6 +33,7 @@ const present = (name, why) =>
 // What the editor needs to function.
 needs("default-src", "'none'", "everything is denied unless named below");
 needs("script-src", "'unsafe-inline'", "the whole editor is one inline module");
+needs("script-src", "'self'", "the MP3 encoder, fetched from this node when a song is uploaded");
 needs("style-src", "'unsafe-inline'", "the stylesheet is inlined into the page");
 needs("img-src", "'self'", "cover art and avatars are served from this node");
 needs("img-src", "data:", "small inline glyphs");
@@ -49,7 +50,12 @@ needs("connect-src", "https://dns.google", "the same, through the second resolve
 // What it must never be able to do. These are the reason the editor being
 // self-contained is a rule and not just a habit.
 forbids("script-src", "'unsafe-eval'", "no dynamic code execution, ever");
-forbids("script-src", "https:", "no code from anywhere but this page");
+forbids("script-src", "https:", "no code from anywhere but this page and this node");
+checks.push([
+  "script-src names only this page's inline script and this node",
+  "any other source is code from somewhere an artist doesn't control",
+  () => (directives.get("script-src") || []).every((v) => ["'self'", "'unsafe-inline'"].includes(v)),
+]);
 forbids("connect-src", "*", "an artist's work must not be able to leave this node");
 forbids("connect-src", "https:", "same");
 // And nothing beyond the three named above may ever creep in: an allowance

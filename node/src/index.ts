@@ -39,7 +39,8 @@ import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf, paused } from "../.
 import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
 import { ICONS, MANIFEST_PATH, studioManifest, FAVICON, FAVICON_PATH } from "./studio";
 
-import { VERSION, SPEC_VERSION, MANAGE_CSP, RELAY_ORIGIN } from "./constants";
+import { VERSION, SPEC_VERSION, MANAGE_CSP, RELAY_ORIGIN, LAME_PATH } from "./constants";
+import { LAME_JS } from "./lame";
 import { media, maxObject, MediaTooLarge, type MediaObject, type MediaObjectBody } from "./media";
 import { quotaFailure, FREE_STREAMS_A_DAY, FREE_STORAGE } from "./quota";
 
@@ -1324,6 +1325,12 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
   if (pathname === FAVICON_PATH) {
     return new Response(FAVICON, {
       status: 200, headers: withCors(new Headers({ "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=604800" })),
+    });
+  }
+  // The editor's MP3 encoder (lame.ts), fetched when a song is uploaded.
+  if (pathname === LAME_PATH) {
+    return new Response(LAME_JS, {
+      status: 200, headers: withCors(new Headers({ "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": CACHE_AUDIO })),
     });
   }
   if (ICONS[pathname]) {

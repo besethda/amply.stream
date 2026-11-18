@@ -148,6 +148,25 @@ rpcDown = false;
   ok("  the same one as amply.stream's", body === readFileSync("site/favicon.svg", "utf8").trim());
 }
 
+// ── the editor's MP3 encoder: a file of its own, kept by the browser ──
+{
+  const { readFileSync } = await import("node:fs");
+  const { LAME_PATH, MANAGE_CSP } = await import("./src/constants.ts");
+  const res = await get(LAME_PATH);
+  const body = await res.text();
+  ok("the encoder is served as a script, cached for good", res.status === 200
+    && /^text\/javascript/.test(res.headers.get("Content-Type")) && /immutable/.test(res.headers.get("Cache-Control")));
+  const lame = await import("data:text/javascript," + encodeURIComponent(body));
+  const enc = new lame.Mp3Encoder(2, 44100, 128);
+  const tone = new Int16Array(1152 * 4).map((_, i) => Math.round(Math.sin(i / 10) * 8000));
+  ok("  and it encodes", enc.encodeBuffer(tone, tone).length + enc.flush().length > 0);
+  const installed = JSON.parse(readFileSync("manage/node_modules/@breezystack/lamejs/package.json", "utf8")).version;
+  ok("  at an address named for the version installed, so a new one isn't cached as the old", LAME_PATH.includes(`-${installed}.js`), `${LAME_PATH} vs ${installed}`);
+  ok("  which the editor may load from its own node", /script-src[^;]*'self'/.test(MANAGE_CSP));
+  const editor = readFileSync("site/node-manage.html", "utf8");
+  ok("  and the editor no longer carries it", !editor.includes("extended fmt chunk not implemented") && editor.includes("Mp3Encoder"));
+}
+
 // ── the manifest is worked out once, not for every ranged piece of a song ──
 {
   const parse = JSON.parse;
