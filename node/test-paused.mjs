@@ -123,5 +123,14 @@ later(61);
 ok("  but not for long: after an hour, nobody can say, so it's paused", (await served()).paused === true);
 rpcDown = false;
 
+// ── the favicon, served by the artist's own server ──
+{
+  const { readFileSync } = await import("node:fs");
+  const res = await get("/favicon.svg");
+  const body = await res.text();
+  ok("the artist's server serves the favicon, as an SVG", res.status === 200 && res.headers.get("Content-Type") === "image/svg+xml");
+  ok("  the same one as amply.stream's", body === readFileSync("site/favicon.svg", "utf8").trim());
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -33,6 +33,7 @@ const html = `<!doctype html>
 <meta name="amply-version" content="${version}">
 <meta name="theme-color" content="#ffffff">
 <link rel="manifest" href="/studio.webmanifest">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/studio/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Your music">
