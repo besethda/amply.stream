@@ -44,7 +44,7 @@ import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, publ
 import { readTransaction, writeTransaction, base64, keyOf } from "../../node/src/solana-tx.ts";
 import { checkFeePayment } from "../../node/src/feepay.ts";
 import { SiteEditor } from "./site-editor.jsx";
-import { coinbaseSolPage, coinbaseCashoutPage, sellMessage } from "../../app/src/topup.js";
+import { coinbaseSolPage, coinbaseCashoutPage, sellMessage, topupUrl } from "../../app/src/topup.js";
 
 export const MAX_UPLOAD = 90 * 1024 * 1024;
 
@@ -764,7 +764,7 @@ function FirstSteps({ hasMusic, paid, live, url, onSettings, onAdd, folded }) {
           <>Make a release (an album, an EP or a single), then add your songs to it.{" "}
             <button class="quiet-link" onClick={onAdd}>+ Add a release</button></>)}
         {step(2, paid, "Get paid",
-          <>Make your wallet with Face ID, or take card subscriptions. Skip it and your music is free.
+          <>Make your wallet with Face ID and add $5 for network fees, or take card subscriptions. Skip it and your music is free.
             <button class="btn ghost sm step-btn" onClick={onSettings}>Open Earnings</button></>)}
         {step(3, live, "Publish",
           <>Press <b>Publish</b> at the top. Nothing is public until you do.</>)}
@@ -1496,7 +1496,7 @@ function ShowWalletKey({ payees }) {
  * isn't live yet, and let the artist check their Face ID really opens it
  * (the passkey makes the key again; only the address is compared).
  */
-function PayoutReady({ address, live }) {
+function PayoutReady({ address, live, held = false }) {
   const [check, setCheck] = useState(null);   // { ok } | { other } | { error } | "busy"
   const [canPasskey, setCanPasskey] = useState(false);
   useEffect(() => { mayOfferPasskey().then(setCanPasskey); }, []);
@@ -1515,8 +1515,10 @@ function PayoutReady({ address, live }) {
   }
   return (
     <div class="payout-ready" role="status">
-      <p><b>✓ Your payout wallet is set up</b> <span class="mono muted small">{address.slice(0, 4)}…{address.slice(-4)}</span></p>
-      {!live && <p class="warn small">Press <b>Publish</b> at the top so listeners can start paying into it.</p>}
+      <p><b>✓ Step 1: wallet ready</b> <span class="mono muted small">{address.slice(0, 4)}…{address.slice(-4)}</span></p>
+      {!live && (held
+        ? <p class="warn small">Next: add $5 for network fees, below.</p>
+        : <p class="warn small">Press <b>Publish</b> at the top so fans can start paying you.</p>)}
       {canPasskey && (
         check?.ok ? <p class="good small">Your Face ID opens this wallet. All good.</p>
           : check?.other ? <p class="warn small">That Face ID opens a different wallet ({check.other.slice(0, 4)}…{check.other.slice(-4)}).
@@ -2243,7 +2245,7 @@ function Listeners({ api, paid, rate, settleAt }) {
  * listeners pay: it holds SOL for fees and nothing else.
  */
 /** One tap to Coinbase, buying SOL straight into the fees account. */
-function BuySol({ api, label = "Add $5 with Coinbase" }) {
+function BuySol({ api, label = "Or with Coinbase" }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   if (!api?.feesOnramp) return null;
@@ -2264,18 +2266,18 @@ function BuySol({ api, label = "Add $5 with Coinbase" }) {
   }
   return (
     <div class="buy-sol">
-      <button class="btn" disabled={busy} onClick={buy}>{busy ? "Opening Coinbase…" : label}</button>
+      <button class="btn ghost sm" disabled={busy} onClick={buy}>{busy ? "Opening Coinbase…" : label}</button>
       {err && <p class="warn" role="alert">{err}</p>}
     </div>
   );
 }
 
-function FeesCard({ api, network, payees }) {
+function FeesCard({ api, network, payees, onStatus, step = false }) {
   const [fees, setFees] = useState(null);
   const [failed, setFailed] = useState(false);
   const load = useCallback(() => {
     setFailed(false);
-    api?.fees?.().then(setFees).catch(() => setFailed(true));
+    api?.fees?.().then((f) => { setFees(f); onStatus?.(!!f.offering); }).catch(() => setFailed(true));
   }, [api]);
   useEffect(load, [load]);
 
@@ -2305,7 +2307,8 @@ function FeesCard({ api, network, payees }) {
       <details class="card fees-on" id="fees">
         <summary><b>Fees account</b> <span class="pill-status on">On</span>
           <span class="muted small">{payments != null ? `about ${payments.toLocaleString()} payments left` : ""}</span></summary>
-        {real && <BuySol api={api} label="Top up $5 with Coinbase" />}
+        {real && <a class="btn sm" href={topupUrl(fees.address, { currency: "sol" })} target="_blank" rel="noopener noreferrer">Top up $5 by card</a>}
+        {real && <BuySol api={api} />}
         {byHand}
         <button class="btn ghost sm" onClick={load}>Refresh</button>
       </details>
@@ -2313,10 +2316,13 @@ function FeesCard({ api, network, payees }) {
   }
   return (
     <section class="card" id="fees">
-      <h2>Fees account <span class="pill-status off">Off</span></h2>
-      <p>Add $5 once. It pays the tiny network fee on each of your fans' payments, so they don't need anything
-        extra. It lasts months.</p>
-      {real && <BuySol api={api} />}
+      <h2>{step ? "Step 2: fees account" : "Fees account"} <span class="pill-status off">Off</span></h2>
+      <p>Add $5. It pays the network fee on every fan payment, so fans never deal with it. Lasts months.
+        {step && <> Fans can pay you once it's on.</>}</p>
+      {real && <>
+        <a class="btn" href={topupUrl(fees.address, { currency: "sol" })} target="_blank" rel="noopener noreferrer">Add $5 by card</a>
+        <BuySol api={api} />
+      </>}
       {byHand}
       <p class="muted small">It switches on a few minutes after the money arrives.
         {real ? "" : ` Test network (${fees.network}).`}{" "}
@@ -2784,6 +2790,7 @@ function GetPaid({ payees, setPayees, manifest, update, api, perMinuteOnly }) {
     <section class="card">
       <h2>{perMinuteOnly ? "Also take payments by the minute" : "Get paid"}</h2>
       <p>Fans pay into your own wallet. Cash out to Coinbase or Cash App anytime.</p>
+      {!perMinuteOnly && <p class="muted small">Step 1 of 2 · then $5 for network fees</p>}
       <PasskeyWallet onAddress={setAddress} />
       <p class="muted small">Amply: 0% · Solana network fee ~0.1¢ a payment, from your fees account</p>
       <details class="more">
@@ -2807,13 +2814,14 @@ function GetPaid({ payees, setPayees, manifest, update, api, perMinuteOnly }) {
 }
 
 /** The price and how often it's paid, one line each. */
-function Pricing({ wallet, onChange }) {
+function Pricing({ wallet, onChange, held = false }) {
   const rate = wallet.ratePerMinute ?? DEFAULT_RATE;
   const batch = batchOf(wallet);
   return (
     <section class="card pricing">
       <h2>Your price <Help at="price" about="your price">Fans pay by the minute while they listen, straight to you.
-        Half a cent a minute is a good start: about $9 a month from a fan who listens an hour a day.</Help></h2>
+        Half a cent a minute is a good start: about $9 a month from a fan who listens an hour a day.</Help>
+        {held && <span class="note">live after step 2</span>}</h2>
       <div class="price-line">
         <input type="number" class="price-input" min="0" max={RATE_MAX * 100} step="0.01"
           value={Number((rate * 100).toFixed(2))} aria-label="Price per minute, in cents"
@@ -2849,7 +2857,7 @@ function Pricing({ wallet, onChange }) {
   );
 }
 
-function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rate, network, settleAt }) {
+function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rate, network, settleAt, held = false, onFees }) {
   const paid = usePayments(payees, network);
   const [via, setViaState] = useState(readVia);
   const setVia = (v) => { setViaState(v); try { localStorage.setItem(VIA_KEY, v); } catch { /* fine */ } };
@@ -2876,15 +2884,16 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
       <div class="stack">
         {/* Only until it's published: after that the card below shows the wallet. */}
         {hasWallet && !liveAddresses.includes(payees.find((p) => p.address).address) && (
-          <PayoutReady address={payees.find((p) => p.address).address} live={false} />
+          <PayoutReady address={payees.find((p) => p.address).address} live={false} held={held} />
         )}
+        {hasWallet && held && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} step />}
         {hasWallet && <BackupReminder payees={payees} />}
         {hasWallet && <EarningsSummary paid={paid} payees={payees} />}
-        {hasWallet && <Pricing wallet={wallet} onChange={setWallet} />}
+        {hasWallet && <Pricing wallet={wallet} onChange={setWallet} held={held} />}
         {subscribing && <Subscriptions manifest={manifest} update={update} api={api} />}
         <Listeners api={api} paid={paid} rate={rate} settleAt={settleAt} />
-        {hasWallet && <CashOut api={api} payees={payees} network={network} via={via} onVia={setVia} />}
-        {hasWallet && <FeesCard api={api} network={network} payees={payees} />}
+        {hasWallet && !held && <CashOut api={api} payees={payees} network={network} via={via} onVia={setVia} />}
+        {hasWallet && !held && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} />}
         {!hasWallet && <GetPaid payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} perMinuteOnly />}
         <details class="advanced">
           <summary>More <span class="note">{[!subscribing && "card subscriptions", hasWallet && "split with bandmates", hasWallet && "test mode"].filter(Boolean).join(", ")}</span></summary>
@@ -3048,14 +3057,16 @@ export function countChanges(live, now) {
  *  folded back into its payment entry, and without releases that have no
  *  tracks yet. Those are drafts. The spec requires at least one track per
  *  release, so publishing an empty one would make the live manifest invalid. */
-export function buildManifest(manifest, payees) {
+export function buildManifest(manifest, payees, { perMinute = true } = {}) {
   const rest = (manifest.payment || []).filter((p) => p.type !== "solana-usdc");
   // An artist who fills in an address but never touches the price slider has no
   // wallet in the manifest yet. Their address still has to be published, so
   // fall back to the same defaults the settings tab shows them.
   const wallet = (manifest.payment || []).find((p) => p.type === "solana-usdc")
     || { type: "solana-usdc", ratePerMinute: DEFAULT_RATE, settleAt: settleFor(DEFAULT_BATCH, DEFAULT_RATE) };
-  const paid = writePayees(wallet, payees);
+  // Fans can only pay once the fees account pays their network fee: until
+  // then, a price would be unpayable, so none is published.
+  const paid = perMinute ? writePayees(wallet, payees) : null;
   return {
     ...manifest, amply: 1, updated: new Date().toISOString(),
     payment: paid ? [paid, ...rest] : rest,
@@ -3241,7 +3252,13 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
   const player = usePlayer();
   const newer = useUpdate(version);
 
-  const next = useMemo(() => buildManifest(manifest, payees), [manifest, payees]);
+  // The fees account must be on before a per-minute price is first published.
+  // Once it's live it stays, so publishing a song never makes music free.
+  const [feesOn, setFeesOn] = useState(null);
+  useEffect(() => { api?.fees?.().then((f) => setFeesOn(!!f.offering)).catch(() => {}); }, [api]);
+  const wasLive = !!(live?.payment || []).find((p) => p.type === "solana-usdc");
+  const perMinute = wasLive || feesOn === true || !api?.fees;
+  const next = useMemo(() => buildManifest(manifest, payees, { perMinute }), [manifest, payees, perMinute]);
   // From what will be published, not the draft: a price only charges anyone
   // once there is an address to pay, and that lives with the payees.
   const charging = useMemo(() => charges(next), [next]);
@@ -3304,7 +3321,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
   }, [api, node.url, jobsApi]);
 
   async function publish() {
-    let out = buildManifest(manifest, payees);
+    let out = buildManifest(manifest, payees, { perMinute });
 
     // Songs and albums for sale: card links from the artist's Stripe, made
     // (or kept, when the price hasn't changed) by their streaming service.
@@ -3516,6 +3533,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
           <EarningsTab
             node={node} api={api} payees={payees} setPayees={setPayees}
             manifest={manifest} update={update} live={live}
+            held={!perMinute} onFees={setFeesOn}
             // What listeners are actually charged is what is published, not
             // what is in the editor: a price changed and not yet published
             // must not make a listener look like they are underpaying.

@@ -14,7 +14,7 @@ globalThis.localStorage = {
   removeItem: (k) => store.delete(k),
 };
 
-const { transferRequest, DOLLAR_AMOUNTS, FEE_SOL, oneTapReady, topupUrl, CARD_AMOUNTS, TOPUP_PAGE } = await import("./src/topup.js");
+const { transferRequest, DOLLAR_AMOUNTS, oneTapReady, topupUrl, CARD_AMOUNTS, TOPUP_PAGE } = await import("./src/topup.js");
 const { NETWORKS } = await import("./src/networks.js");
 const pay = await import("./src/pay.js");
 const { Keypair } = await import("@solana/web3.js");
@@ -37,12 +37,6 @@ const USDC = NETWORKS.mainnet.usdc;
   ok("  for the amount asked", url.searchParams.get("amount") === "5");
   ok("  in USDC on Solana, named by its exact mint", url.searchParams.get("spl-token") === USDC);
   ok("  and it says who is asking", url.searchParams.get("label") === "Amply");
-}
-
-{
-  const url = new URL(transferRequest(ADDRESS, FEE_SOL));
-  ok("the fee link asks for SOL itself, so names no token", url.searchParams.get("spl-token") === null);
-  ok("  a small amount of it", Number(url.searchParams.get("amount")) === FEE_SOL && FEE_SOL <= 0.05);
 }
 
 ok("the dollar amounts on offer are modest", DOLLAR_AMOUNTS.every((n) => n > 0 && n <= 20));

@@ -36,7 +36,6 @@ function useSkips(state, player) {
 const REFUSED = {
   nowallet: "Add money to play",
   empty: "Add money to play",
-  nosol: "Add $1 for fees to play",
   price: "Agree to the price to play",
   subscribe: "Subscribers only",
   offline: "Artist offline",

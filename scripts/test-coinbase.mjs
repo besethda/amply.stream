@@ -56,75 +56,40 @@ const call = (path, { method = "POST", body, env = configured, origin = ORIGIN, 
   }), env);
 };
 
-const request = async (over = {}) => {
-  const signedAt = over.signedAt ?? Date.now();
-  const amount = over.amount ?? 30;
-  return { address, amount, signedAt, signature: over.signature ?? (await signFor(onrampMessage(address, signedAt))), ...over.extra };
-};
-
-// ── whether it's offered ────────────────────────────────────────────────────
+// ── Coinbase's session, for an artist's fees account ───────────────────────
 {
-  const on = await (await call("/coinbase/status", { method: "GET" })).json();
-  ok("with a key set, Coinbase is offered", on.enabled === true && on.amounts.includes(30));
-  const off = await (await call("/coinbase/status", { method: "GET", env: bare })).json();
-  ok("without one, it isn't", off.enabled === false);
-  ok("another site may not ask", (await call("/coinbase/status", { method: "GET", origin: "https://evil.test" })).status === 403);
-}
-
-// ── a good request ──────────────────────────────────────────────────────────
-{
-  const res = await call("/coinbase/onramp", { body: JSON.stringify(await request()), headers: { "CF-Connecting-IP": "203.0.113.7" } });
-  const json = await res.json();
-  ok("a signed request gets a Coinbase link", res.status === 200 && json.url?.startsWith("https://pay.coinbase.com/buy/select-asset?"), JSON.stringify(json));
-  const link = new URL(json.url);
-  ok("  with Coinbase's session", link.searchParams.get("sessionToken") === "SESSION-TOKEN");
-  ok("  for USDC on Solana", link.searchParams.get("defaultNetwork") === "solana" && link.searchParams.get("defaultAsset") === "USDC");
-  ok("  in the amount asked for", link.searchParams.get("presetFiatAmount") === "30" && link.searchParams.get("fiatCurrency") === "USD");
-  ok("  and back to the app afterwards", link.searchParams.get("redirectUrl") === "https://amply.stream/app/?added=coinbase");
-  const ref = link.searchParams.get("partnerUserRef");
-  ok("  naming the person only by a hash, not their wallet", ref && ref.length < 50 && ref !== address && !ref.includes(address));
-
+  const app = await import("../app/src/topup.js");
+  const at = Date.now();
+  sent = [];
+  const res = await relay.fetch(new Request(app.coinbaseSolPage(address, 5, at, await signFor(onrampMessage(address, at))).replace(app.RELAY, "https://relay.test"),
+    { headers: { "CF-Connecting-IP": "203.0.113.7" } }), configured);
+  ok("a signed request gets a Coinbase session", res.status === 303, String(res.status));
   const up = sent[0];
   ok("Coinbase is asked at its token endpoint", up?.url === "https://api.developer.coinbase.com/onramp/v1/token");
   const asked = JSON.parse(up?.init.body || "{}");
   ok("  for exactly this wallet, on Solana", asked.addresses?.length === 1 && asked.addresses[0].address === address && asked.addresses[0].blockchains.join() === "solana");
-  ok("  and only USDC", asked.assets?.join() === "USDC");
-  ok("  tied to the listener's connection", asked.clientIp === "203.0.113.7");
+  ok("  and only SOL", asked.assets?.join() === "SOL");
+  ok("  tied to the artist's connection", asked.clientIp === "203.0.113.7");
   ok("  with nothing else in it", Object.keys(asked).sort().join() === "addresses,assets,clientIp");
 
   const jwt = new Headers(up?.init.headers).get("Authorization")?.replace(/^Bearer /, "") || "";
-  const [h, p, s] = jwt.split(".");
+  const [h, p, sig] = jwt.split(".");
   const head = JSON.parse(new TextDecoder().decode(b64urlDecode(h)));
   const claims = JSON.parse(new TextDecoder().decode(b64urlDecode(p)));
   ok("  signed as Coinbase documents (EdDSA, the key's name)", head.alg === "EdDSA" && head.kid === configured.CDP_KEY_ID && claims.sub === configured.CDP_KEY_ID && claims.iss === "cdp");
   ok("  for this one call", claims.uri === "POST api.developer.coinbase.com/onramp/v1/token");
   ok("  for two minutes", claims.exp - claims.nbf === 120);
-  const verified = await crypto.subtle.verify({ name: "Ed25519" }, cdp.publicKey, b64urlDecode(s), new TextEncoder().encode(`${h}.${p}`));
+  const verified = await crypto.subtle.verify({ name: "Ed25519" }, cdp.publicKey, b64urlDecode(sig), new TextEncoder().encode(`${h}.${p}`));
   ok("  and the signature is the key's own", verified);
-}
-
-// ── refusals ────────────────────────────────────────────────────────────────
-{
-  const refused = async (name, body, expect = 403) => {
-    const res = await call("/coinbase/onramp", { body: typeof body === "string" ? body : JSON.stringify(body) });
-    ok(name, res.status === expect && sent.length === 0, `${res.status}, ${sent.length} sent`);
-  };
-  await refused("someone else's signature is refused", await request({ signature: await signFor(onrampMessage(address, Date.now()), (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign"])).privateKey) }));
-  const at = Date.now();
-  await refused("a signature over different words is refused", await request({ signedAt: at, signature: await signFor(`Amply: add money to ${address} (${at})`) }));
-  await refused("an old signature is refused", await request({ signedAt: Date.now() - 10 * 60_000 }));
-  await refused("an amount Amply doesn't offer is refused", await request({ amount: 1000 }));
-  await refused("an extra field is refused", await request({ extra: { blockchains: ["ethereum"] } }));
-  await refused("a body that isn't JSON is refused", "address=x", 400);
-  const res = await call("/coinbase/onramp", { body: JSON.stringify(await request()), origin: "https://evil.test" });
-  ok("another site may not ask for a session", res.status === 403 && sent.length === 0);
-  const off = await call("/coinbase/onramp", { body: JSON.stringify(await request()), env: bare });
-  ok("without a key, it says Coinbase isn't set up", off.status === 503 && sent.length === 0);
 
   reply = { status: 401, body: { message: "Unauthorized" } };
-  const bad = await call("/coinbase/onramp", { body: JSON.stringify(await request()) });
-  ok("if Coinbase refuses, that is passed on plainly", bad.status === 502 && /Unauthorized/.test((await bad.json()).error));
+  const bad = await relay.fetch(new Request(app.coinbaseSolPage(address, 5, at, await signFor(onrampMessage(address, at))).replace(app.RELAY, "https://relay.test")), configured);
+  ok("if Coinbase refuses, that is passed on plainly", bad.status === 502 && /Unauthorized/.test(await bad.text()));
   reply = { status: 200, body: { token: "SESSION-TOKEN" } };
+
+  const old = await call("/coinbase/onramp", { body: "{}" });
+  ok("listeners' Coinbase route is gone", old.status !== 200 && sent.length === 0);
+  ok("  and so is its status", (await call("/coinbase/status", { method: "GET" })).status !== 200);
 }
 
 // ── SOL for an artist's fees account, opened as a page from the editor ─────
@@ -153,12 +118,7 @@ const request = async (over = {}) => {
   ok("someone else's signature is refused", forged.status === 403 && sent.length === 0);
   const off = await relay.fetch(new Request(app.coinbaseSolPage(address, 5, Date.now(), "x").replace(app.RELAY, "https://relay.test")), bare);
   ok("without a key, it says Coinbase isn't set up", off.status === 503);
-  ok("the app offers the relay's SOL amounts", app.COINBASE_SOL_AMOUNTS.join() === (await import("../relay/src/index.ts")).COINBASE_SOL_AMOUNTS.join());
 
-  const amply = await call("/coinbase/onramp", { body: JSON.stringify({ ...(await request({ amount: 10 })), asset: "SOL" }) });
-  ok("Amply's own site may ask for SOL by the usual route too", amply.status === 200);
-  const eth = await call("/coinbase/onramp", { body: JSON.stringify({ ...(await request()), asset: "ETH" }) });
-  ok("only USDC or SOL", eth.status === 403 && sent.length === 0);
 }
 
 // ── cashing out through Coinbase (Offramp) ─────────────────────────────────
@@ -229,23 +189,11 @@ const request = async (over = {}) => {
   reply = { status: 200, body: { token: "SESSION-TOKEN" } };
 }
 
-// ── the app and the relay agree ─────────────────────────────────────────────
-{
-  const app = await import("../app/src/topup.js");
-  ok("the app signs exactly the words the relay checks", app.onrampMessage(address, 1234) === onrampMessage(address, 1234));
-  ok("  and offers the same amounts", app.COINBASE_AMOUNTS.join() === (await (await call("/coinbase/status", { method: "GET" })).json()).amounts.join());
-  let asked = null;
-  const link = await app.coinbaseLink(address, 30, (text) => signFor(text), {
-    fetchFn: async (url, init) => { asked = { url, body: JSON.parse(init.body) }; return relay.fetch(new Request(url.replace(app.RELAY, "https://relay.test"), { ...init, headers: { ...init.headers, Origin: ORIGIN } }), configured); },
-  });
-  ok("a link made by the app's own code is accepted by the relay", link.startsWith("https://pay.coinbase.com/"), link);
-  ok("  and the app sends nothing but address, amount, time and signature", Object.keys(asked.body).sort().join() === "address,amount,signature,signedAt");
-}
-
 // ── the pieces ──────────────────────────────────────────────────────────────
 ok("base58 reads a Solana address as 32 bytes", unbase58(address)?.length === 32);
 ok("and refuses what isn't base58", unbase58("0OIl") === null);
-ok("a malformed address is refused", (await onrampProblem(await request({ extra: { address: "not-an-address" } }))) === "not a Solana address");
+ok("a malformed address is refused", (await onrampProblem({ address: "not-an-address", amount: 5, asset: "SOL", signedAt: Date.now(), signature: "x" })) === "not a Solana address");
+ok("only SOL, for a fees account", (await onrampProblem({ address, amount: 30, asset: "USDC", signedAt: Date.now(), signature: "x" })) === "only SOL, for a fees account");
 let threw = false;
 try { await coinbaseJwt("k", btoa("short"), "POST", "/x"); } catch { threw = true; }
 ok("a key secret of the wrong shape is refused, not used", threw);

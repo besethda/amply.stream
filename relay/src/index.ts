@@ -181,7 +181,7 @@ const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt
 function topupPage(p: { address: string; currency: "usdc" | "sol"; amount: string | null }): string {
   const what = p.currency === "usdc"
     ? `${p.amount ? `$${p.amount} of ` : ""}USDC`
-    : "a little SOL, the currency that pays payment fees ($1 is plenty)";
+    : "about $5 of SOL for your fees account (it pays your fans' network fees, and lasts months)";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -189,15 +189,15 @@ function topupPage(p: { address: string; currency: "usdc" | "sol"; amount: strin
 <title>Add money - Amply</title></head>
 <body style="font:18px/1.5 system-ui,sans-serif;max-width:34rem;margin:0 auto;padding:32px 16px;color:#1b1813;background:#fbf8f3">
 <p style="font-weight:800;letter-spacing:-0.02em;margin:0 0 18px">amply</p>
-<h1 style="font-size:28px;margin:0 0 12px">Add money to your Amply wallet</h1>
+<h1 style="font-size:28px;margin:0 0 12px">${p.currency === "usdc" ? "Add money to your Amply wallet" : "Fill your fees account"}</h1>
 <p style="margin:0 0 16px">You're buying ${escapeHtml(what)} by card, through Stripe.${p.currency === "usdc" ? " USDC is a digital dollar: $1 of it is worth $1." : ""} Three steps:</p>
 <ol style="margin:0 0 20px;padding-left:22px">
 <li>Press the button below. We copy your wallet's address, and Stripe's page opens.</li>
 <li>When Stripe asks where to send it, paste the address. If it asks for a network, choose <b>Solana</b>.</li>
-<li>Pay by card. The first time, Stripe may ask for ID. Then go back to the Amply app.</li>
+<li>Pay by card. The first time, Stripe may ask for ID. Then go back to Amply.</li>
 </ol>
 <p style="background:#fff3e8;border:1px solid #f4c9a8;border-radius:12px;padding:12px 16px;margin:0 0 16px;font-size:16px">
-<b>Check this is your wallet.</b> Your Amply app shows the last four characters of yours under Top up. They must match
+<b>Check this is yours.</b> The Amply page you came from shows the last four characters. They must match
 <b style="font:20px ui-monospace,monospace;letter-spacing:.06em">${escapeHtml(p.address.slice(-4))}</b>.
 If they don't, or someone sent you this link, close this page: the money would go to someone else.</p>
 <p style="color:#6b6257;font-size:15px;margin:0 0 6px">The wallet the money goes to:</p>
@@ -240,24 +240,17 @@ const TOPUP_SCRIPT = String.raw`(function () {
   });
 })();`;
 
-// ── adding money through Coinbase ────────────────────────────────────────
+// ── Coinbase ─────────────────────────────────────────────────────────────
 //
-// Coinbase's onramp opens with everything filled in (the listener's wallet,
-// USDC on Solana, the amount) only through a session that Coinbase issues to
-// a server holding a developer key. That is this route, and the only key the
-// relay holds. It is Amply's own key, never anyone's data or money, and the
-// relay still keeps nothing: each call asks Coinbase for a single-use,
-// five-minute session and hands back the link.
-//
-// Coinbase asks that sessions be issued only to real users. Here that means
-// the request comes from Amply's own site (checked like every other route)
-// and is signed by the wallet the money will go to, within five minutes.
+// Coinbase's pages open with everything filled in only through a session that
+// Coinbase issues to a server holding a developer key: Amply's own key, the
+// only one the relay holds, never anyone's data or money. Two uses: an
+// artist buying SOL for their fees account, and an artist cashing out. Each
+// request must be signed by the wallet concerned, and the relay keeps nothing.
 
 const COINBASE_HOST = "api.developer.coinbase.com";
 const COINBASE_TOKEN_PATH = "/onramp/v1/token";
 const COINBASE_PAY = "https://pay.coinbase.com/buy/select-asset";
-const COINBASE_RETURN = "https://amply.stream/app/?added=coinbase";
-export const COINBASE_AMOUNTS = [20, 30, 60];
 // SOL for an artist's fees account: a few dollars lasts months.
 export const COINBASE_SOL_AMOUNTS = [5, 10];
 export type OnrampAsset = "USDC" | "SOL";
@@ -300,9 +293,8 @@ export async function onrampProblem(body: unknown, now = Date.now()): Promise<st
   const address = typeof b.address === "string" ? b.address : "";
   const key = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address) ? unbase58(address) : null;
   if (!key || key.length !== 32) return "not a Solana address";
-  const asset = b.asset ?? "USDC";
-  if (asset !== "USDC" && asset !== "SOL") return "only USDC or SOL";
-  if (!(asset === "SOL" ? COINBASE_SOL_AMOUNTS : COINBASE_AMOUNTS).includes(b.amount as number)) return "not an amount offered";
+  if (b.asset !== "SOL") return "only SOL, for a fees account";
+  if (!COINBASE_SOL_AMOUNTS.includes(b.amount as number)) return "not an amount offered";
   const signedAt = b.signedAt;
   if (typeof signedAt !== "number" || Math.abs(now - signedAt) > SIGNED_WITHIN_MS) return "the signature is too old";
   return signedBy(key, b.signature, onrampMessage(address, signedAt));
@@ -465,19 +457,17 @@ export async function coinbaseJwt(keyId: string, keySecret: string, method: stri
   return `${head}.${body}.${b64url(sig)}`;
 }
 
-/** Coinbase's page for this session: USDC on Solana, the amount, and the way back. */
-export async function onrampUrl(token: string, address: string, amount: number, asset: OnrampAsset = "USDC"): Promise<string> {
-  const ref = await refOf(address);
+/** Coinbase's page for this session: SOL on Solana, in this amount. The artist's
+ *  editor lives at its own address, which Coinbase can't know in advance, so
+ *  Coinbase shows its own "done" page. */
+export async function onrampUrl(token: string, address: string, amount: number): Promise<string> {
   const q = new URLSearchParams({
     sessionToken: token,
     defaultNetwork: "solana",
-    defaultAsset: asset,
+    defaultAsset: "SOL",
     presetFiatAmount: String(amount),
     fiatCurrency: "USD",
-    partnerUserRef: ref,
-    // An artist's editor lives at its own address, which Coinbase can't
-    // know in advance: Coinbase shows its own "done" page instead.
-    ...(asset === "USDC" ? { redirectUrl: COINBASE_RETURN } : {}),
+    partnerUserRef: await refOf(address),
   });
   return `${COINBASE_PAY}?${q}`;
 }
@@ -487,15 +477,15 @@ async function startOnramp(env: Env, body: unknown, clientIp: string | null): Pr
   if (!env.CDP_KEY_ID || !env.CDP_KEY_SECRET) return { status: 503, error: "Coinbase isn't set up here yet" };
   const problem = await onrampProblem(body);
   if (problem) return { status: 403, error: problem };
-  const { address, amount, asset = "USDC" } = body as { address: string; amount: number; asset?: OnrampAsset };
+  const { address, amount } = body as { address: string; amount: number };
   // Per connection and per wallet, so neither many wallets from one place
   // nor one wallet from many places can mint sessions without end.
   if (!(await onrampAllowed(env, `ip:${clientIp || "unknown"}`)) || !(await onrampAllowed(env, `addr:${address}`))) {
     return { status: 429, error: "too many requests; try again in a minute" };
   }
-  const session = await sessionToken(env, address, clientIp, asset);
+  const session = await sessionToken(env, address, clientIp, "SOL");
   if ("error" in session) return session;
-  return { url: await onrampUrl(session.token, address, amount, asset) };
+  return { url: await onrampUrl(session.token, address, amount) };
 }
 
 /** An artist's node on workers.dev: `<worker>.<subdomain>.workers.dev`, nothing else. */
@@ -626,23 +616,6 @@ export default {
 
     // Browsers always send Origin on cross-origin requests. No match, no service.
     if (!origin) return refuse(403, "origin not allowed", null);
-
-    // ── Coinbase ──────────────────────────────────────────────────────────
-    const coinbaseReady = !!(env.CDP_KEY_ID && env.CDP_KEY_SECRET);
-    if (url.pathname === "/coinbase/status" && request.method === "GET") {
-      return new Response(JSON.stringify({ enabled: coinbaseReady, amounts: COINBASE_AMOUNTS }), {
-        headers: cors(origin, { "Content-Type": "application/json", "Cache-Control": "no-store" }),
-      });
-    }
-    if (url.pathname === "/coinbase/onramp" && request.method === "POST") {
-      let body: unknown;
-      try { body = JSON.parse(await request.text()); } catch { return refuse(400, "body must be JSON", origin); }
-      const started = await startOnramp(env, body, request.headers.get("CF-Connecting-IP"));
-      if ("error" in started) return refuse(started.status, started.error, origin);
-      return new Response(JSON.stringify({ url: started.url }), {
-        headers: cors(origin, { "Content-Type": "application/json", "Cache-Control": "no-store" }),
-      });
-    }
 
     // ── token exchange ────────────────────────────────────────────────────
     if (url.pathname === "/token" && request.method === "POST") {

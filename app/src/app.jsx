@@ -237,7 +237,6 @@ export function App() {
           // known: a slow network is no reason to stop someone who pays.
           const b = funds.current;
           if (b && !(b.usdc > 0)) throw refuse("empty", "", data);
-          if (b && !(b.sol > 0.001) && !feesCovered(artist)) throw refuse("nosol", "", data);
           // No agreed price, no playing: otherwise never agreeing would mean
           // free listening.
           if (rate) {
@@ -451,7 +450,7 @@ export function App() {
     }
     const yes = await ask({
       title: `Tip ${to.name} ${money(dollars)}?`,
-      body: "Straight to them, plus a tiny network fee.",
+      body: "Straight to them.",
       confirm: `Send ${money(dollars)}`,
       icon: <Icon.heart size={22} />,
     });
@@ -952,7 +951,7 @@ export function App() {
     const block = !pair ? "nowallet"
       : mismatch({ network: o.wallet.network }) ? "mismatch"
       : balance && !(balance.usdc - owedAll >= o.price) ? "empty"
-      : balance && !(balance.sol > 0.001) && !feesCovered(e) ? "nosol" : null;
+      : balance && !(balance.sol > 0.001) && !feesCovered(e) ? "paused" : null;
     if (block) {
       setSheet(refusalSheet({ kind: block, message: block === "mismatch" ? mismatch({ network: o.wallet.network }) : "", name: nameOf(e) }, {
         money, go: { you: () => goYou(), topUp: () => goYou("topup"), retry: () => startBuy(e, o) },

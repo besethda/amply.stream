@@ -8,7 +8,6 @@ import { backupSaved, machinery, passkeyWallet } from "./paying.js";
 import { NETWORKS, networkName, useNetwork } from "./networks.js";
 import { isSubscribed, subscriptionUntil, originOf } from "./identify.js";
 import { nameOf } from "./screens.jsx";
-import { feesNeeded } from "./library.js";
 import { charges } from "../../spec/pricing.mjs";
 import { ask } from "./sheets.jsx";
 
@@ -58,7 +57,7 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
   if (view === "topup" && pair && !saved && network.real) {
     return <Sub title="First, save your key" onBack={back}><SaveBackup pair={pair} onSaved={() => setView("topup")} cta="Saved. Now add money" /></Sub>;
   }
-  if (view === "topup" && pair) return <Sub title="Top up" onBack={back}><TopUp address={pair.publicKey.toBase58()} balance={balance} network={network} pair={pair} needsFee={feesNeeded(entries, charges)} /></Sub>;
+  if (view === "topup" && pair) return <Sub title="Top up" onBack={back}><TopUp address={pair.publicKey.toBase58()} balance={balance} network={network} /></Sub>;
   if (view === "send" && pair) return <Sub title="Send back" onBack={back}><SendBack pair={pair} balance={balance} onRefresh={onRefresh}
     nodes={(entries || []).filter((e) => e.feesPaid).map((e) => originOf(e.url))} /></Sub>;
   if (view === "backup" && pair) return <Sub title="Backup key" onBack={back}><SaveBackup pair={pair} onSaved={back} /></Sub>;
@@ -111,7 +110,6 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
               {owed > 0 && <span class="mono-dim">{money(owed)} owed</span>}
               <button class="icon-btn dim" onClick={onRefresh} aria-label="Refresh"><Icon.refresh size={16} /></button>
             </div>
-            {balance && !(balance.sol > 0.001) && feesNeeded(entries, charges) && <span class="note-line warn-ink small"><Icon.warn size={13} /> Add $1 for payment fees before your first payment</span>}
             <div class="row">
               <button class="btn-primary sm" onClick={() => setView("topup")}><Icon.plus size={15} /> Top up</button>
               <button class="pill" onClick={() => setView("send")}><Icon.send size={15} /> Send back</button>

@@ -110,10 +110,9 @@ export function refusalSheet(r, { money, go }) {
       body: "Top up by card. It's paid out to artists as you listen, and free songs stay free.",
       primaryLabel: "Add money", primary: go.topUp,
     };
-    case "nosol": return {
-      icon: <Icon.card size={22} />, title: "One last thing: payment fees",
-      body: "Each payment needs a tiny fee, paid in a currency called SOL. A one-off $1 top-up covers thousands of payments.",
-      primaryLabel: "Add $1 for fees", primary: go.topUp,
+    case "paused": return {
+      icon: <Icon.warn size={22} />, tone: "warn", title: "Payments paused",
+      body: `${r.name || "This artist"} can't take payments right now. Nothing was charged. Try again later.`,
     };
     case "mismatch": return {
       icon: <Icon.warn size={22} />, tone: "warn", title: "Wrong network",
