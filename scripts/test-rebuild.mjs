@@ -16,7 +16,7 @@ globalThis.localStorage = {
   removeItem: (k) => store.delete(k),
 };
 
-const { provision, REPAIR_STEPS, ProvisionError } = await import("../site/js/provision.js");
+const { provision, REPAIR_STEPS, ProvisionError, fetchRelease, versionOfWorker, versionOfEditor } = await import("../site/js/provision.js");
 
 let pass = 0, fail = 0;
 const ok_ = (name, cond, detail = "") => {
@@ -38,7 +38,7 @@ function cloudflare({ accounts = [{ id: MINE, name: "Mine" }], bindings, workerI
   const log = [];
   globalThis.fetch = async (url, init = {}) => {
     if (!/^https?:/.test(url)) {
-      const body = url.includes("node-version") ? JSON.stringify({ version: "test", schema: [], migrations: [] }) : "export default {}";
+      const body = url.includes("node-version") ? JSON.stringify({ version: "test", schema: [], migrations: [] }) : 'export default {}; const VERSION = "test"; // <meta name="amply-version" content="test">';
       return new Response(body, { status: 200 });
     }
     const path = new URL(url).pathname.replace(/^\/api/, "");
@@ -127,6 +127,67 @@ const writes = (log) => log.filter((r) => r.method !== "GET");
 
 // ── what the artist is shown ────────────────────────────────────────────────
 ok_("no rebuild step says it's creating anything", REPAIR_STEPS.every((s) => !/creat/i.test(s.label)), REPAIR_STEPS.map((s) => s.label).join(" / "));
+
+// ── never a mismatched editor ────────────────────────────────────────────────
+//
+// Just after a deploy, amply.stream serves old and new files side by side, and
+// a rebuild once installed a new service with the old editor.
+{
+  const worker = (v) => `var VERSION = "${v}";`;
+  const editor = (v) => `<!doctype html><meta name="amply-version" content="${v}">`;
+  let served;   // what amply.stream hands out, call by call
+  globalThis.fetch = async (url, init = {}) => {
+    const u = String(url);
+    if (!/^https?:/.test(u)) {
+      const now = served.shift() ?? served.last;
+      served.last = now;
+      if (u.includes("node-version")) return new Response(JSON.stringify({ version: now.version, schema: [], migrations: [] }));
+      if (u.includes("manage")) return new Response(editor(now.editor));
+      return new Response(worker(now.worker));
+    }
+    return new Response(JSON.stringify(ok({})));
+  };
+  const ctx = { versionUrl: "/node-version.json", workerUrl: "/node-worker.js", editorUrl: "/node-manage" };
+  const same = { version: "2", worker: "2", editor: "2" };
+  const halfway = { version: "2", worker: "2", editor: "1" };
+
+  served = [halfway, halfway, halfway, same, same, same];
+  const got = await fetchRelease(ctx, { tries: 3, wait: 0 });
+  ok_("mid-deploy, it waits for the editor to catch up, then takes both",
+    versionOfWorker(got.worker) === "2" && versionOfEditor(got.editor) === "2", JSON.stringify(got));
+
+  served = [halfway];
+  let kind = null;
+  await fetchRelease(ctx, { tries: 3, wait: 0 }).catch((e) => { kind = e.kind; });
+  ok_("  and if it never does, stops: amply.stream is mid-update", kind === "mid_update", String(kind));
+
+  // A whole rebuild, caught mid-deploy: nothing in the account is touched.
+  served = [halfway];
+  const log = cloudflare({ bindings: [{ type: "d1", name: "DB", id: DB }, { type: "r2_bucket", name: "MEDIA", bucket_name: "b" }] });
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    if (/^https?:/.test(u)) return real(url, init);
+    return new Response(u.includes("node-version") ? JSON.stringify({ version: "2" }) : u.includes("manage") ? editor("1") : worker("2"));
+  };
+  store.clear();
+  let rebuilt = null;
+  try {
+    await provision({ token: "t", relay: "https://relay.test", artistName: "hollow", slug: "hollow", mode: "repair", withAccess: false,
+      releaseCheck: { tries: 2, wait: 0 } });
+  } catch (e) { rebuilt = e.kind; }
+  ok_("  a rebuild caught mid-deploy changes nothing in the account", rebuilt === "mid_update" && log.length === 0, `${rebuilt}, ${log.length} requests`);
+}
+
+// The files this repo builds always agree, so a deploy is never half a release.
+{
+  const { readFile } = await import("node:fs/promises");
+  const site = (f) => readFile(new URL(`../site/${f}`, import.meta.url), "utf8");
+  const v = JSON.parse(await site("node-version.json")).version;
+  const w = versionOfWorker(await site("node-worker.js"));
+  const e = versionOfEditor(await site("node-manage.html"));
+  ok_("the built service, editor and version list are one release", v && w === v && e === v, `${v} / ${w} / ${e}`);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

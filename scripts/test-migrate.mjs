@@ -39,7 +39,7 @@ function cloudflare({ migrations, applied = null, breaks = null }) {
             schema: ["CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"],
             migrations,
           })
-        : "export default {}";
+        : 'export default {}; const VERSION = "test"; // <meta name="amply-version" content="test">';
       return new Response(body, { status: 200 });
     }
 

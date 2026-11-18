@@ -158,6 +158,27 @@ cmp("an unknown local version says nothing", isNewer("3.2.0", null), false);
   await sendParts(parts, "audio/a.stream.mp3", async (k, b, progress) => progress(1), (f) => seen.push(Math.round(f * 100)));
   // 8 + 60 + 1 bytes: each part's end, as a share of the whole.
   cmp("one progress figure for all the parts, ending at the whole", seen.join(","), "12,99,100");
+
+  // The release was deleted while this song uploaded: stop between parts,
+  // and hand back what arrived, so it can be taken out of storage again.
+  const { Stopped } = await import("./src/ui.jsx");
+  const sentKeys = [];
+  let stop = false;
+  let caught = null;
+  await sendParts(parts, "audio/a.stream.mp3", async (k) => { sentKeys.push(k); stop = true; }, () => {}, () => stop)
+    .catch((e) => { caught = e; });
+  cmp("deleted mid-upload: nothing more is sent", sentKeys.join(","), "audio/a.stream.mp3");
+  cmp("  and what arrived is handed back, to remove", caught instanceof Stopped && [...caught.arrived].join(","), "audio/a.stream.mp3");
+}
+
+// ── a streaming copy that fits the storage ──────────────────────────────────
+{
+  const { fitKbps } = await import("./src/stream-copy.js");
+  const KV = 25 * 1024 * 1024;
+  cmp("a 5-minute song fits KV at full quality", fitKbps(5 * 60, KV), 256);
+  cmp("a 16-minute one drops a step so it still fits", fitKbps(16 * 60, KV), 192);
+  cmp("  never below 96 kbps: 40 minutes is too long for 25 MB", fitKbps(40 * 60, KV), null);
+  cmp("with no limit known, full quality", fitKbps(16 * 60, null), 256);
 }
 
 // ── who counts as behind on paying ──────────────────────────────────────────

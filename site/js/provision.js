@@ -517,10 +517,7 @@ async function stepWorker(ctx) {
   // name, so claim one first rather than fail here and explain two steps later.
   await ensureSubdomain(ctx, accountId, workerName).catch(() => null);
 
-  const source = await fetch(ctx.workerUrl).then((r) => {
-    if (!r.ok) throw new ProvisionError("unexpected", "Could not load the player code.");
-    return r.text();
-  });
+  const source = ctx.release.worker;
 
   const base = [
     storage === "kv"
@@ -560,10 +557,7 @@ async function stepEditor(ctx) {
   const { accountId, bucketName, storage, kvId } = ctx.progress;
   if (ctx.progress.editorDone) return;
 
-  const html = await fetch(ctx.editorUrl).then((r) => {
-    if (!r.ok) throw new ProvisionError("unexpected", "Could not load the editor.");
-    return r.text();
-  });
+  const html = ctx.release.editor;
 
   const path = storage === "kv"
     ? `/accounts/${accountId}/storage/kv/namespaces/${kvId}/values/${encodeURIComponent("manage/index.html")}`
@@ -988,6 +982,39 @@ export async function attachDomain({ token, relay, slug, hostname, onStep = () =
  * Run the whole sequence. `onStep(id, state, detail)` is called with
  * "running" | "done" | "skipped" for each step so the UI can follow along.
  */
+/** The version a file from amply.stream says it is, or null. */
+export const versionOfWorker = (text) => String(text).match(/\bVERSION\d* = "([^"]+)"/)?.[1] ?? null;
+export const versionOfEditor = (text) => String(text).match(/<meta name="amply-version" content="([^"]+)">/)?.[1] ?? null;
+
+/**
+ * The streaming service and its editor, fetched before anything is changed,
+ * and only as the version amply.stream says is current.
+ *
+ * Just after a deploy, Cloudflare serves the old and new copies of amply.stream
+ * side by side for a minute or two, a file at a time. Fetched separately, a
+ * rebuild could install the new service with the old editor, and the editor
+ * would stay old however often it was reloaded. So both are fetched together,
+ * past any cache, and must match node-version.json; until they do this waits
+ * and asks again, and after half a minute stops, having changed nothing.
+ */
+export async function fetchRelease(ctx, { tries = 6, wait = 5000 } = {}) {
+  const fresh = (url, what) => fetch(`${url}${url.includes("?") ? "&" : "?"}fresh=${Date.now()}`, { cache: "no-store" })
+    .then((r) => {
+      if (!r.ok) throw new ProvisionError("unexpected", `Could not load ${what}.`, `HTTP ${r.status}`);
+      return r.text();
+    });
+  for (let i = 1; ; i++) {
+    const version = JSON.parse(await fresh(ctx.versionUrl, "the version list")).version ?? null;
+    const [worker, editor] = await Promise.all([fresh(ctx.workerUrl, "the player code"), fresh(ctx.editorUrl, "the editor")]);
+    if (!version || (versionOfWorker(worker) === version && versionOfEditor(editor) === version)) return { worker, editor };
+    if (i >= tries) {
+      throw new ProvisionError("mid_update", "amply.stream is in the middle of an update.",
+        "Wait a minute and try again. Nothing was changed.", { fatal: true });
+    }
+    await new Promise((r) => setTimeout(r, wait));
+  }
+}
+
 export async function provision({
   token, relay, artistName, slug, email = null, withAccess = true,
   workerUrl = "/node-worker.js",
@@ -996,6 +1023,7 @@ export async function provision({
   chosenAccountId = null,
   mode = "setup",               // or "repair": rebuild the code, keep the music
   onStep = () => {},
+  releaseCheck = {},            // fetchRelease's patience; tests shorten it
 }) {
   // A rebuild starts from nothing remembered. Progress exists so an
   // interrupted setup can resume; reusing it here would skip the very steps
@@ -1014,6 +1042,7 @@ export async function provision({
     token, relay, artistName, email, workerUrl, editorUrl, chosenAccountId, progress,
     versionUrl, repair: mode === "repair",
   };
+  ctx.release = await fetchRelease(ctx, releaseCheck);
 
   for (const step of (mode === "repair" ? REPAIR_STEPS : STEPS)) {
     // Asked for but not granted, or no email to attach a policy to: skip
@@ -1195,6 +1224,7 @@ export async function provisionInstant({
   saveProgress(progress);
 
   const ctx = { relay, artistName, workerUrl, editorUrl, versionUrl, progress, preview: true, token: null };
+  ctx.release = await fetchRelease(ctx);
 
   for (const step of INSTANT_STEPS) {
     onStep(step.id, "running");

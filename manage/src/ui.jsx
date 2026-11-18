@@ -37,7 +37,7 @@ import { validate } from "../../spec/manifest-rules.mjs";
 import { charges, SETTLE_WITHIN_DAYS } from "../../spec/pricing.mjs";
 import { bareDomain, recordFor, lookup, confirms } from "../../spec/domain.mjs";
 import { makeWaves, wavesKey } from "./waves.js";
-import { prepareStream } from "./stream-copy.js";
+import { prepareStream, TooLong } from "./stream-copy.js";
 import { coverColors } from "./colors.js";
 import { shrink, COVER_PX, BANNER_PX } from "./images.js";
 import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, publicKeyOf, base58, NoPasskeySecret, signWithSeed } from "../../spec/passkey-wallet.mjs";
@@ -283,6 +283,18 @@ function SizeWarning({ advice, duration }) {
 
 // ── music ───────────────────────────────────────────────────────────────────
 
+/**
+ * Play and pause, drawn rather than typed: a ▶ character sits wherever its
+ * font puts it, a little off centre. The triangle is nudged right of the
+ * middle on purpose, because it carries its weight on the left and looks off
+ * centre when it isn't.
+ */
+function PlayIcon({ playing = false }) {
+  return playing
+    ? <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1" width="3" height="10" rx="1" fill="currentColor" /><rect x="7.5" y="1" width="3" height="10" rx="1" fill="currentColor" /></svg>
+    : <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3.5 1.2v9.6a.6.6 0 0 0 .9.5l7.2-4.8a.6.6 0 0 0 0-1L4.4.7a.6.6 0 0 0-.9.5Z" fill="currentColor" /></svg>;
+}
+
 function Track({
   track, first, last, playing, onPlay, onChange, onMove, onRemove, onReplace,
   heavy, warnOpen, onWarn, charging,
@@ -316,7 +328,7 @@ function Track({
           class={`play${playing ? " on" : ""}`} onClick={onPlay} disabled={!track.url}
           aria-label={playing ? `Pause ${track.title}` : `Play ${track.title}`}
         >
-          {playing ? "❚❚" : "▶"}
+          <PlayIcon playing={playing} />
         </button>
         <Text
           value={track.title} class="track-title" placeholder="Untitled"
@@ -383,13 +395,21 @@ function Track({
  * Upload a song's files in order, with one progress figure for all of them.
  * `required` must arrive or the whole upload fails; any other part that the
  * service refuses (too large for its storage, say) is just left out. Resolves
- * to the set of keys that arrived.
+ * to the set of keys that arrived. `stop` is asked between parts; once it
+ * says so, nothing more is sent and Stopped is thrown, carrying what arrived.
  */
-export async function sendParts(parts, required, upload, onProgress = () => {}) {
+export class Stopped extends Error { constructor() { super("stopped"); this.arrived = new Set(); } }
+
+const mb = (bytes) => `${Math.round(bytes / 1048576)} MB`;
+
+export async function sendParts(parts, required, upload, onProgress = () => {}, stop = () => false) {
   const total = parts.reduce((n, [, b]) => n + b.size, 0) || 1;
   const arrived = new Set();
   let sent = 0;
   for (const [k, b] of parts) {
+    // Stopped (the release was deleted): send nothing more, and hand back
+    // what arrived so it can be taken out again.
+    if (stop()) throw Object.assign(new Stopped(), { arrived });
     const before = sent;
     try {
       await upload(k, b, (f) => onProgress((before + f * b.size) / total));
@@ -404,9 +424,13 @@ export async function sendParts(parts, required, upload, onProgress = () => {}) 
 
 function Release({
   release, node, manifest, art, player,
-  onChange, onRemove, upload, notify, sizeOf, charging,
+  onChange, onRemove, upload, notify, sizeOf, charging, deleteObject,
 }) {
   const [problems, setProblems] = useState([]);
+  // Set when the release is deleted mid-upload: what's still to send isn't,
+  // and what already arrived is removed again, rather than left in storage.
+  const stopped = useRef(false);
+  const sent = useRef(new Set());   // files from uploads cut short by that, to take back
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState(0);
   const startJob = useJob();
@@ -428,7 +452,10 @@ function Release({
       sizeOf(t.url).then((b) => b && noteSize(t.url, b)).catch(() => {});
     }
   }, [tracks.map((t) => t.url).join("|")]);
-  const setTracks = (t) => onChange({ ...release, tracks: t });
+  // Changes are functions of the release as it is when they land, never of
+  // this render's copy: an upload finishing later must not undo what was
+  // edited, added or reordered meanwhile.
+  const setTracks = (fn) => onChange((cur) => ({ ...cur, tracks: fn(cur.tracks || []) }));
 
   /**
    * Upload a song, and beside it its waves file (spec/waves.mjs), worked out
@@ -438,12 +465,19 @@ function Release({
   async function uploadSong(file, duration, job = noJob) {
     const key = `audio/${safeKey(file.name)}`;
     const streamKey = key.replace(/\.[^./]+$/, "") + ".stream.mp3";
+    // The most the service stores in one file (25 MB on KV); an older service
+    // doesn't say, and then the old ceiling stands.
+    const maxFile = node.maxFile || MAX_UPLOAD;
     // Its loudness, and a streaming copy at the common level where it needs
-    // one (stream-copy.js). If that can't be done, the song goes up as it is.
+    // one (stream-copy.js), at a bitrate that fits the storage. An original
+    // too big to store gets a copy whatever it is. If none can be made, the
+    // song goes up as it is.
     const r = await prepareStream(file, duration, {
+      maxBytes: maxFile,
+      force: file.size > maxFile,
       onStage: (text) => job.step(text),
       onProgress: (f) => job.step("Optimizing for streaming…", f),
-    }).catch(() => null);
+    }).catch((e) => { if (e instanceof TooLong) throw e; return null; });
     job.step("Drawing its waveform…");
     const wavesBytes = await makeWaves(file, duration).catch(() => null);
     // Then everything goes up, with one bar for all of it. What listeners
@@ -453,61 +487,91 @@ function Release({
     // long one is refused there; the song still goes up, and downloads get
     // the copy instead (the node falls back to it).
     const required = r?.blob ? streamKey : key;
+    // Nothing is sent that the storage would refuse: an original that doesn't
+    // fit is left behind (downloads use the copy), and a song with nothing
+    // small enough says so before a byte goes up.
     const parts = [...(r?.blob ? [[streamKey, r.blob]] : []), [key, file],
-      ...(wavesBytes ? [[wavesKey(key), new Blob([wavesBytes], { type: "application/octet-stream" })]] : [])];
-    const arrived = await sendParts(parts, required, upload, (f) => job.step("Uploading…", f));
+      ...(wavesBytes ? [[wavesKey(key), new Blob([wavesBytes], { type: "application/octet-stream" })]] : [])]
+      .filter(([k, b]) => k === required || b.size <= maxFile);
+    const needed = parts.find(([k]) => k === required)[1];
+    if (needed.size > maxFile) {
+      throw new Error(`It's ${mb(needed.size)}, and your storage takes ${mb(maxFile)} a file. Try a shorter song, or turn on R2 storage in Cloudflare for bigger files.`);
+    }
+    let arrived;
+    try {
+      arrived = await sendParts(parts, required, upload, (f) => job.step("Uploading…", f), () => stopped.current);
+    } catch (e) {
+      if (e instanceof Stopped) for (const k of e.arrived) sent.current.add(k);
+      throw e;
+    }
     const waves = arrived.has(wavesKey(key)) ? `${node.url}/${wavesKey(key)}` : null;
     const stream = r ? { loudness: Math.round(r.lufs * 10) / 10, ...(r.blob ? { size: r.blob.size, url: `${node.url}/${streamKey}` } : {}) } : null;
     const original = arrived.has(key) ? `${node.url}/${key}` : null;
     if (original) noteSize(original, file.size);
     if (stream?.url) noteSize(stream.url, stream.size);
-    return {
+    return [{
       // Listeners stream the even copy; the original, where it fit, stays for downloads.
       url: stream?.url || original,
       ...(stream?.url && original ? { master: original } : {}),
       ...(stream?.loudness != null ? { loudness: stream.loudness } : {}),
       ...(waves ? { waves } : {}),
-    };
+    }, arrived];
   }
 
-  /** Put one audio file on the node and hand back a manifest track. */
+  /** Put one audio file on the node and hand back a manifest track, and the
+   *  files it put in storage. */
   async function ingest(file, taken, label) {
-    if (file.size > MAX_UPLOAD) {
-      throw new Error(`It is larger than ${Math.round(MAX_UPLOAD / 1048576)}MB, which is the most your streaming service accepts in one go.`);
-    }
     const title = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
     const job = startJob(label || `Adding “${title}”`);
-    let song, duration;
+    let song, keys, duration;
     try {
       job.step("Reading the song…");
       duration = await readDuration(file);
-      song = await uploadSong(file, duration, job);
+      [song, keys] = await uploadSong(file, duration, job);
     } finally {
       job.done();
     }
     const id = makeId(title, taken);
     taken.add(id);
-    return { id, title, duration, ...song };
+    return { track: { id, title, duration, ...song }, keys };
   }
 
   async function addFiles(files) {
     const taken = collectIds(manifest);
-    const added = [];
-    const failed = [];
-    setBusy(files.length);
     const list = Array.from(files);
+    setBusy((n) => n + list.length);
     for (const [n, file] of list.entries()) {
+      if (stopped.current) { setBusy((b) => b - 1); continue; }
       try {
         const name = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
-        added.push(await ingest(file, taken, list.length > 1 ? `Song ${n + 1} of ${list.length}: “${name}”` : undefined));
+        const { track, keys } = await ingest(file, taken, list.length > 1 ? `Song ${n + 1} of ${list.length}: “${name}”` : undefined);
+        // Each song joins as soon as it's up, so one that fails later in the
+        // batch can't hold back the ones that worked. One that finished just
+        // as its release was deleted has nowhere to go: take its files back.
+        if (stopped.current) for (const k of keys) sent.current.add(k);
+        else setTracks((t) => [...t, track]);
       } catch (e) {
-        failed.push({ key: `${file.name}-${Date.now()}`, file, message: e.message });
+        if (!(e instanceof Stopped)) setProblems((p) => [...p, { key: `${file.name}-${Date.now()}-${n}`, file, message: e.message }]);
       } finally {
-        setBusy((n) => n - 1);
+        setBusy((b) => b - 1);
       }
     }
-    if (added.length) setTracks([...tracks, ...added]);
-    if (failed.length) setProblems((p) => [...p, ...failed]);
+    if (stopped.current) cleanUp();
+  }
+
+  /** The release is gone: take back what uploads cut short by that left in
+   *  storage. Songs that had finished are left alone: a page published since
+   *  may still be playing them. */
+  function cleanUp() {
+    const keys = [...sent.current];
+    sent.current.clear();
+    for (const k of keys) deleteObject?.(k).catch(() => {});
+  }
+
+  function removeRelease() {
+    if (busy > 0 && !window.confirm("Songs are still uploading to this release. Delete it anyway? The uploads stop, and what's already uploaded is removed.")) return;
+    stopped.current = true;
+    onRemove();
   }
 
   async function retry(problem) {
@@ -515,37 +579,42 @@ function Release({
     await addFiles([problem.file]);
   }
 
-  async function replaceAudio(i, file) {
-    const job = startJob(`Replacing the audio on “${tracks[i].title}”`);
+  async function replaceAudio(id, file) {
+    const title = tracks.find((t) => t.id === id)?.title || "this song";
+    const job = startJob(`Replacing the audio on “${title}”`);
     try {
       setBusy((n) => n + 1);
       job.step("Reading the song…");
       const duration = await readDuration(file);
-      const song = await uploadSong(file, duration, job);
+      const [song, keys] = await uploadSong(file, duration, job);
+      if (stopped.current) { for (const k of keys) sent.current.add(k); return; }
       // The id never changes: listeners' saved state keys off it, and this is
       // the same song with a better master, not a new one. The old waves
       // belong to the old audio, so they go even if new ones couldn't be made.
-      setTracks(tracks.map((t, j) => {
-        if (j !== i) return t;
+      // By id: the song may have moved since, or been removed (then nothing).
+      setTracks((all) => all.map((t) => {
+        if (t.id !== id) return t;
         const { waves, master, loudness, ...rest } = t;
         return { ...rest, duration, ...song };
       }));
-      notify("ok", `Replaced the audio on “${tracks[i].title}”.`);
+      notify("ok", `Replaced the audio on “${title}”.`);
     } catch (e) {
-      notify("error", `Could not replace that audio: ${e.message}`);
+      if (!(e instanceof Stopped)) notify("error", `Could not replace that audio: ${e.message}`);
     } finally {
       job.done();
       setBusy((n) => n - 1);
+      if (stopped.current) cleanUp();
     }
   }
 
-  const moveTrack = (i, delta) => {
-    const t = [...tracks];
+  const moveTrack = (id, delta) => setTracks((all) => {
+    const t = [...all];
+    const i = t.findIndex((x) => x.id === id);
     const j = i + delta;
-    if (j < 0 || j >= t.length) return;
+    if (i < 0 || j < 0 || j >= t.length) return all;
     [t[i], t[j]] = [t[j], t[i]];
-    setTracks(t);
-  };
+    return t;
+  });
 
   return (
     <section class="card release">
@@ -555,9 +624,11 @@ function Release({
           onPick={(f) => art(f, async (url) => {
             // Its colours (spec/colors.mjs), for listening apps to tint
             // themselves with. A new cover's replace the old one's.
-            const { colors: _old, ...rest } = release;
             const colors = await coverColors(f);
-            onChange({ ...rest, art: url, ...(colors ? { colors } : {}) });
+            onChange((cur) => {
+              const { colors: _old, ...rest } = cur;
+              return { ...rest, art: url, ...(colors ? { colors } : {}) };
+            });
           })}
         >
           <svg width="19" height="19" viewBox="0 0 18 18" fill="none"
@@ -571,7 +642,7 @@ function Release({
         <div class="release-fields">
           <Text
             value={release.title} class="release-title" placeholder="Name this release"
-            onInput={(v) => onChange({ ...release, title: v })}
+            onInput={(v) => onChange((cur) => ({ ...cur, title: v }))}
           />
           <span class="count">
             {busy > 0
@@ -585,7 +656,7 @@ function Release({
             <span class="label">Released</span>
             <input
               type="date" value={release.date || ""}
-              onInput={(e) => onChange({ ...release, date: e.target.value || undefined })}
+              onInput={(e) => { const date = e.target.value || undefined; onChange((cur) => ({ ...cur, date })); }}
             />
           </label>
           <label class="side-field">
@@ -596,8 +667,10 @@ function Release({
                 value={release.sale?.price ?? ""} aria-label="Price to buy this album, in dollars"
                 onInput={(e) => {
                   const price = salePrice(e.target.value);
-                  const { sale: _was, ...rest } = release;
-                  onChange(price ? { ...rest, sale: { ...(release.sale || {}), price } } : rest);
+                  onChange((cur) => {
+                    const { sale: _was, ...rest } = cur;
+                    return price ? { ...rest, sale: { ...(cur.sale || {}), price } } : rest;
+                  });
                 }} />
             </span>
           </label>
@@ -615,10 +688,10 @@ function Release({
               track={t} first={i === 0} last={i === tracks.length - 1} charging={charging}
               playing={player.current === t.id && player.playing}
               onPlay={() => player.toggle(t)}
-              onMove={(d) => moveTrack(i, d)}
-              onReplace={(f) => replaceAudio(i, f)}
-              onChange={(next) => setTracks(tracks.map((x, j) => (j === i ? next : x)))}
-              onRemove={() => { player.stopIf(t.id); setTracks(tracks.filter((_, j) => j !== i)); }}
+              onMove={(d) => moveTrack(t.id, d)}
+              onReplace={(f) => replaceAudio(t.id, f)}
+              onChange={(next) => setTracks((all) => all.map((x) => (x.id === t.id ? next : x)))}
+              onRemove={() => { player.stopIf(t.id); setTracks((all) => all.filter((x) => x.id !== t.id)); }}
               heavy={!!sizeAdvice(sizes[t.url], t.duration)}
               warnOpen={warnOpen === t.id}
               onWarn={() => setWarnOpen((open) => (open === t.id ? null : t.id))}
@@ -633,7 +706,7 @@ function Release({
           <li class="track" key={p.key}>
             <div class="track-row">
               <div class="track-order" />
-              <button class="play" disabled aria-hidden="true">▶</button>
+              <button class="play" disabled aria-hidden="true"><PlayIcon /></button>
               <span class="track-title" style="opacity:.55">{p.file.name}</span>
               <span class="track-dur">–</span>
             </div>
@@ -667,7 +740,7 @@ function Release({
       </button>
 
       <div class="release-foot">
-        <button class="link" onClick={onRemove}>Delete this release</button>
+        <button class="link" onClick={removeRelease}>Delete this release</button>
       </div>
     </section>
   );
@@ -810,7 +883,7 @@ function EvenOut({ manifest, node, update, upload, readAudio, notify }) {
   );
 }
 
-function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf, charging, paid, live, onSettings, readAudio }) {
+function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf, charging, paid, live, onSettings, readAudio, deleteObject }) {
   const trackCount = (manifest.releases || []).reduce((n, r) => n + (r.tracks?.length || 0), 0);
 
   const addRelease = () => {
@@ -840,14 +913,19 @@ function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf,
         )}
         {live && trackCount > 0 && <YoureLive url={node.url} />}
         {readAudio && <EvenOut manifest={manifest} node={node} update={update} upload={upload} readAudio={readAudio} notify={notify} />}
-        {(manifest.releases || []).map((r, i) => (
+        {/* By id, and applied to the latest manifest: an upload finishing a
+            minute later must land on its own release as it is by then, not
+            on whatever now sits at its old position, and not undo edits made
+            meanwhile. A release deleted since simply isn't there to change. */}
+        {(manifest.releases || []).map((r) => (
           <Release
             key={r.id} release={r} node={node} manifest={manifest} charging={charging}
-            upload={upload} art={art} notify={notify} player={player} sizeOf={sizeOf}
-            onChange={(next) =>
-              update({ ...manifest, releases: manifest.releases.map((x, j) => (j === i ? next : x)) })}
-            onRemove={() =>
-              update({ ...manifest, releases: manifest.releases.filter((_, j) => j !== i) })}
+            upload={upload} art={art} notify={notify} player={player} sizeOf={sizeOf} deleteObject={deleteObject}
+            onChange={(change) => update((m) => ({
+              ...m,
+              releases: (m.releases || []).map((x) => (x.id === r.id ? (typeof change === "function" ? change(x) : change) : x)),
+            }))}
+            onRemove={() => update((m) => ({ ...m, releases: (m.releases || []).filter((x) => x.id !== r.id) }))}
           />
         ))}
 
@@ -2884,7 +2962,7 @@ function PlayerBar({ player }) {
           onClick={() => player.toggle(player.track)}
           aria-label={player.playing ? "Pause" : "Play"}
         >
-          {player.playing ? "❚❚" : "▶"}
+          <PlayIcon playing={player.playing} />
         </button>
         <div class="what">
           <b>{player.track.title || "Untitled"}</b>
@@ -3109,7 +3187,7 @@ function Temporary({ api, initial }) {
   );
 }
 
-export function Editor({ api, node, initial, published = true, initialTab = "home", version = null, onSignOut, temporary = null, pendingPayout = null }) {
+export function Editor({ api, node, initial, published = true, initialTab = "home", version = null, onSignOut, temporary = null, pendingPayout = null, editorBehind = false }) {
   const [manifest, setManifest] = useState(initial);
   const [payees, setPayees] = useState(() => {
     const p = readPayees(initial);
@@ -3172,13 +3250,15 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
   const update = useCallback((m) => setManifest(m), []);
 
   // Browsers only honour this after the page has been interacted with, which is
-  // exactly when there is unsaved work worth protecting.
+  // exactly when there is unsaved work worth protecting: changes not yet
+  // published, or a song still uploading (leaving would cut it off half-sent).
+  const working = jobs.length > 0;
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty && !working) return;
     const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [dirty]);
+  }, [dirty, working]);
 
   const upload = (key, file, onProgress) => api.putObject(key, file, onProgress);
 
@@ -3382,7 +3462,15 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
         <div class="toasts">
           {jobs.map((j) => <JobCard key={j.id} job={j} />)}
           <Banner kind={msg?.kind} action={msg?.action} onDismiss={() => setMsg(null)}>{msg?.text}</Banner>
-          {isNewer(newer, version) && !updateHidden && (
+          {/* The service updated, but this editor didn't come with it: only a
+              rebuild puts the matching one in place. */}
+          {editorBehind && (
+            <div class="banner update" role="status">
+              <span>Your editor is out of date.</span>
+              <a class="link" href="https://amply.stream/repair" target="_blank" rel="noopener">Rebuild</a>
+            </div>
+          )}
+          {!editorBehind && isNewer(newer, version) && !updateHidden && (
             <div class="banner update" role="status">
               <span>A newer version of Amply is ready ({newer}).</span>
               <a class="link" href="https://amply.stream/repair" target="_blank" rel="noopener">Update</a>
@@ -3407,7 +3495,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
           <MusicTab
             manifest={manifest} node={node} update={update}
             upload={upload} art={art} notify={notify} player={player}
-            sizeOf={api.sizeOf} charging={charging} readAudio={api.readAudio}
+            sizeOf={api.sizeOf} charging={charging} readAudio={api.readAudio} deleteObject={api.deleteObject}
             live={musicIsLive} onSettings={() => setTab("earnings")}
             paid={payees.some((p) => p.address) || (next.payment || []).some((p) => p.type === "stripe-subscription")}
           />

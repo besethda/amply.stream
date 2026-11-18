@@ -384,7 +384,9 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       if (claimed && !preview!.claimed) await putSetting(env.DB, PREVIEW_KEY, JSON.stringify(afterClaim(preview!)));
       temporary = previewNotice(preview!, claimed);
     }
-    return new Response(JSON.stringify({ email, version: VERSION, home, temporary }), {
+    // maxFile: the most this service stores in one file (25 MB on KV), so the
+    // editor can fit a song to it before uploading rather than be refused after.
+    return new Response(JSON.stringify({ email, version: VERSION, home, temporary, maxFile: maxObject(env) }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
     });

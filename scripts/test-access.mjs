@@ -38,7 +38,7 @@ function cloudflare({ policies, readFails = false }) {
     if (!/^https?:/.test(url)) {
       const body = url.includes("node-version")
         ? JSON.stringify({ version: "test", schema: [], migrations: [] })
-        : "export default {}";
+        : 'export default {}; const VERSION = "test"; // <meta name="amply-version" content="test">';
       return new Response(body, { status: 200 });
     }
 

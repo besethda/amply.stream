@@ -10,6 +10,7 @@ import { render } from "preact";
 import { useState, useEffect } from "preact/hooks";
 import { Editor, Banner } from "./ui.jsx";
 import { nodeApi } from "./node-api.js";
+import { VERSION as EDITOR_VERSION } from "../../node/src/constants.ts";
 
 const api = nodeApi();
 
@@ -63,7 +64,16 @@ function App() {
       // Shared as the artist's own domain once they have attached one; the
       // editor itself always lives at the workers.dev address.
       // Only ever an https address: it becomes a link, and a link can run script.
-      node={{ slug: location.host.split(".")[0], url: /^https:\/\/[^\s"<>]+$/.test(state.who?.home || "") ? state.who.home : location.origin }}
+      node={{
+        slug: location.host.split(".")[0],
+        url: /^https:\/\/[^\s"<>]+$/.test(state.who?.home || "") ? state.who.home : location.origin,
+        // The most the service stores in one file; older services don't say.
+        maxFile: Number(state.who?.maxFile) > 0 ? Number(state.who.maxFile) : null,
+      }}
+      // This editor was installed beside the service it runs on, and should
+      // be the same version. A rebuild that caught amply.stream mid-update
+      // could install an older one; say so, since only a rebuild fixes it.
+      editorBehind={!!state.who?.version && state.who.version !== EDITOR_VERSION}
       initial={state.manifest}
       // Chosen but never published: brought back, still waiting for Publish.
       pendingPayout={state.payout?.address || null}
