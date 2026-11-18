@@ -23,6 +23,20 @@ export function explain(status, text) {
   return String(said).slice(0, 300) || `Your streaming service returned ${status}.`;
 }
 
+/**
+ * The address the editor reads one of the artist's own songs from. A paid
+ * song at its public address wants a listener's pass, which the artist hasn't
+ * got, so their own copy comes through the signed-in route instead.
+ */
+export function ownAudio(url, here = location.origin) {
+  try {
+    const u = new URL(url, here);
+    return u.origin === here && u.pathname.startsWith("/audio/") ? `${here}/manage${u.pathname}${u.search}` : url;
+  } catch {
+    return url;
+  }
+}
+
 export function nodeApi() {
   const base = location.origin;
 
@@ -95,7 +109,7 @@ export function nodeApi() {
     /** A published file's size in bytes, or null. Same origin, so the
      *  Access cookie rides along and every header is readable. */
     async sizeOf(url) {
-      const res = await fetch(url, { method: "HEAD", credentials: "same-origin" });
+      const res = await fetch(ownAudio(url, base), { method: "HEAD", credentials: "same-origin" });
       if (!res.ok) return null;
       return Number(res.headers.get("Content-Length")) || null;
     },

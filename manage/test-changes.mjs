@@ -10,6 +10,8 @@
  * Run via `npm --prefix manage run test`.
  */
 import { countChanges } from "./src/ui.jsx";
+import { ownAudio } from "./src/node-api.js";
+import { paymentsTo } from "./src/chain.js";
 
 const base = () => ({
   amply: 1,
@@ -65,6 +67,35 @@ for (const [name, mutate, expected] of cases) {
   const ok = got === expected;
   ok ? pass++ : fail++;
   console.log(`${ok ? "ok  " : "FAIL"}  ${name} — expected ${expected}, got ${got}`);
+}
+
+// The editor plays and measures the artist's own songs through the signed-in
+// route: a paid song's public address wants a listener's pass.
+{
+  const here = "https://a.test";
+  const check = (name, got, want) => { const ok = got === want; ok ? pass++ : fail++; console.log(`${ok ? "ok  " : "FAIL"}  ${name} — ${got}`); };
+  check("own song, through the signed-in route", ownAudio("https://a.test/audio/x.stream.mp3", here), "https://a.test/manage/audio/x.stream.mp3");
+  check("  another site's audio is left alone", ownAudio("https://b.test/audio/x.mp3", here), "https://b.test/audio/x.mp3");
+  check("  and so is a local blob", ownAudio("blob:https://a.test/1234", here), "blob:https://a.test/1234");
+}
+
+// A free endpoint that turns a batch away (a 400) is asked one at a time.
+{
+  const real = globalThis.fetch;
+  const asked = { batches: 0, singles: 0 };
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    const ok = (result) => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }));
+    if (Array.isArray(body)) { asked.batches++; return new Response("bad request", { status: 400 }); }
+    asked.singles++;
+    return ok(body.method === "getSignaturesForAddress" ? [{ signature: "a" }, { signature: "b" }] : null);
+  };
+  try {
+    const r = await paymentsTo("Wallet1111111111111111111111111111111111111", "mainnet");
+    const good = asked.batches === 1 && r.checked === 2 && asked.singles === 3;
+    good ? pass++ : fail++;
+    console.log(`${good ? "ok  " : "FAIL"}  a refused batch falls back to single questions — ${JSON.stringify({ ...asked, checked: r.checked })}`);
+  } finally { globalThis.fetch = real; }
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

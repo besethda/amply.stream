@@ -63,11 +63,23 @@ async function rpc(url, method, params) {
  *  keeps a few hundred payments to a handful of round trips. */
 async function rpcBatch(url, calls) {
   if (!calls.length) return [];
-  const body = await send(url,
-    calls.map((c, i) => ({ jsonrpc: "2.0", id: i, method: c.method, params: c.params })));
   const out = [];
-  for (const entry of Array.isArray(body) ? body : [body]) out[entry.id] = entry.result;
-  return out;
+  try {
+    const body = await send(url,
+      calls.map((c, i) => ({ jsonrpc: "2.0", id: i, method: c.method, params: c.params })));
+    for (const entry of Array.isArray(body) ? body : [body]) out[entry.id] = entry.result;
+    return out;
+  } catch (e) {
+    // Some free endpoints turn a batch away (a 400) while answering the same
+    // questions one at a time. Slower, but it works.
+    if (calls.length < 2 || !/answered with 4\d\d/.test(String(e?.message))) throw e;
+  }
+  const single = [];
+  for (let i = 0; i < calls.length; i++) {
+    if (i) await wait(60);
+    single[i] = await rpc(url, calls[i].method, calls[i].params);
+  }
+  return single;
 }
 
 /**
