@@ -316,9 +316,10 @@ export async function feeOffer(origin, { micros, owners = [], pair, item } = {})
  * send. The signature that comes back must be the node's own over exactly
  * this payment, so a confirmed signature means this payment landed.
  *
- * Returns the signature, or null when the node didn't send it and said so
- * (it isn't paying fees just now, or refused): then nothing went out. Throws
- * where something may have gone out, so the same debt is never paid twice.
+ * Returns the signature, or null when the node said it isn't paying fees just
+ * now (409): then nothing went out. Any other refusal throws, with the node's
+ * reason; so does anything where the payment may have gone out, so the same
+ * debt is never paid twice.
  */
 /** What an artist's node charges to pay the fee on a withdrawal, or null. */
 async function withdrawOffer(origin) {
@@ -378,5 +379,9 @@ async function sendThroughNode(conn, node, tx, pair) {
   if (res.status === 422 && /enough in your wallet/.test(body.error)) {
     throw new PaymentError("funds", "There isn't enough in your wallet to pay this. Nothing was sent.");
   }
-  return null;
+  // Only this means their fees account can't pay: the node isn't offering.
+  if (res.status === 409) return null;
+  // Anything else the node turned away (busy, a limit, the network) is said
+  // as it is. Nothing was sent, and what's owed is tried again later.
+  throw new PaymentError("refused", `The artist's server didn't take this payment: ${String(body.error).slice(0, 200)}. Nothing was sent.`);
 }
