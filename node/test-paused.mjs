@@ -259,5 +259,35 @@ rpcDown = false;
     asked?.searchParams.get("nonce") === nonce && asked?.searchParams.get("amount") === "25" && asked?.searchParams.get("signature") === "sig");
 }
 
+// ── Stripe's own words stay with the artist (A5) ──
+{
+  await putSetting(DB, "stripe", JSON.stringify({
+    key: "rk_test_x", live: false, product: "prod_1", portal: "bpc_1", plans: [],
+    sales: [{ item: "r", price: 5, priceId: "price_1", linkId: "plink_1", url: "https://buy.stripe.com/x" }],
+  }));
+  const keys = await crypto.subtle.generateKey("Ed25519", true, ["sign", "verify"]);
+  const address = base58(new Uint8Array(await crypto.subtle.exportKey("raw", keys.publicKey)));
+  sqlite.prepare("INSERT INTO subscriptions (wallet, subscription, customer, until, updated) VALUES (?, 'sub_9', 'cus_9', ?, ?)").run(address, clock + 86400_000, clock);
+  const signedBody = async (extra) => {
+    const message = `amply:artist.test:${clock}:${crypto.randomUUID()}`;
+    const signature = base58(new Uint8Array(await crypto.subtle.sign("Ed25519", keys.privateKey, new TextEncoder().encode(message))));
+    return JSON.stringify({ address, message, signature, ...extra });
+  };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: { message: "secret detail about the artist's account rak_checkout_session_read" } }), { status: 403 });
+  for (const [path, extra] of [
+    ["/listen/claim", { session: "cs_test_abcdefghijkl" }],
+    ["/listen/buy/claim", { session: "cs_test_abcdefghijkl" }],
+    ["/listen/subscription", { returnTo: "https://amply.stream/app/" }],
+  ]) {
+    const res = await worker.fetch(new Request(`${ORIGIN}${path}`, {
+      method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": "192.0.2.50" }, body: await signedBody(extra),
+    }), env);
+    const said = (await res.json().catch(() => ({}))).error || "";
+    ok(`${path}: Stripe's error isn't passed to the listener`, res.status === 502 && said === "Couldn't confirm that with Stripe; try again", `${res.status} ${said}`);
+  }
+  globalThis.fetch = realFetch;
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

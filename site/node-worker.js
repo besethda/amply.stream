@@ -3291,6 +3291,7 @@ async function feeOffer(env) {
     withdraw: { to: pay.recipients[0].address, fee: WITHDRAW_FEE_MICROS, newAccountFee: NEW_ACCOUNT_FEE_MICROS }
   };
 }
+var stripeTrouble = () => fail(502, "Couldn't confirm that with Stripe; try again");
 async function handleListen(request, env, path) {
   const host = new URL(request.url).host;
   if (path === "/challenge" && request.method === "POST") {
@@ -3429,7 +3430,7 @@ async function handleListen(request, env, path) {
         headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
       });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
   const saleView = (s, wallet) => ({
@@ -3465,7 +3466,7 @@ async function handleListen(request, env, path) {
       const sale = await recordSale(env.DB, { ref: c.ref, item: c.item, buyer: proof.address, gift: body.gift === true, via: "card" });
       return json({ outcome: "recorded", ...saleView(sale, proof.address) });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
   if (path === "/buy/wallet" && request.method === "POST") {
@@ -3556,7 +3557,7 @@ async function handleListen(request, env, path) {
         headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
       });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
   if (path === "/played" && request.method === "POST") {

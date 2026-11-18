@@ -795,6 +795,11 @@ async function feeOffer(env: Env): Promise<{ feePayer: string; network: string; 
   };
 }
 
+/** Stripe's trouble, as a listener hears it. What Stripe said is about the
+ *  artist's own account (a missing permission, an inactive key) and is the
+ *  artist's to see in their editor, not every listener's. */
+const stripeTrouble = () => fail(502, "Couldn't confirm that with Stripe; try again");
+
 async function handleListen(request: Request, env: Env, path: string): Promise<Response | null> {
   const host = new URL(request.url).host;
 
@@ -944,7 +949,7 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
         status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
       });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
 
@@ -979,7 +984,7 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
       const sale = await recordSale(env.DB, { ref: c.ref, item: c.item, buyer: proof.address, gift: body.gift === true, via: "card" });
       return json({ outcome: "recorded", ...saleView(sale, proof.address) });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
 
@@ -1080,7 +1085,7 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
         status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
       });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
 

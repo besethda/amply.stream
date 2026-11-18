@@ -294,6 +294,22 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
   const more = await paymentsTo(ARTIST, "mainnet", { until: all.newest, payees: [ARTIST, BAND] });
   cmp("next time, only what's newer is read", more.byWallet[FAN].payments === 1 && pages === 1, true);
   cmp("  and added to what was kept", mergePayments(all, more).byWallet[FAN].payments, 2501);
+  cmp("  with nothing more to read", !!all.more || !!more.more, false);
+
+  // Thousands of junk transfers: one look reads at most so many, oldest
+  // first, and says there's more; the next carries on from there.
+  pages = 0;
+  const first = await paymentsTo(ARTIST, "mainnet", { payees: [ARTIST, BAND], most: 1000 });
+  cmp("one look reads at most so many transactions", first.checked, 1000);
+  cmp("  says there's more to read", first.more, true);
+  cmp("  the oldest first, so nothing is skipped", first.byWallet[FAN].payments === 1000 && first.newest === "s999", true);
+  let sum = first, rounds = 1, next = first;
+  while (next.more && rounds < 10) {
+    next = await paymentsTo(ARTIST, "mainnet", { until: sum.newest, payees: [ARTIST, BAND], most: 1000 });
+    sum = { ...mergePayments(sum, next), newest: next.newest };
+    rounds++;
+  }
+  cmp("  and the next looks carry on until all is read", JSON.stringify([sum.byWallet[FAN].payments, sum.total - all.total, rounds, next.more]), JSON.stringify([2501, 7_000, 3, false]));
   globalThis.fetch = realFetch;
 }
 

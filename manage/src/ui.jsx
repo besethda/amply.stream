@@ -1937,14 +1937,16 @@ function usePayments(payees, declared) {
       const { paymentsTo, mergePayments } = await import("./chain.js");
       // Every address in the split, because a listener's payment is divided
       // between them: what the listener paid is the sum, not any one share.
+      let more = false;
       for (const address of addresses) {
         const kept = keptOf(address);
         const fresh = await paymentsTo(address, network, { until: kept?.newest || undefined, payees: addresses });
         keep(address, mergePayments(kept, fresh));
+        more ||= !!fresh.more;
       }
       const at = Date.now();
       try { localStorage.setItem(`${key}.at`, String(at)); } catch { /* fine */ }
-      setState({ ...combine(), at, network, busy: false });
+      setState({ ...combine(), at, network, busy: false, more });
     } catch (e) {
       setState((s) => ({ ...s, busy: false, error: e.message }));
     }
@@ -2198,7 +2200,7 @@ function Listeners({ api, paid, rate, settleAt }) {
               : paid.error
                 ? "Couldn't check payments just now. Try again with the arrow."
                 : paid.at
-                  ? `Payments checked at ${new Date(paid.at).toLocaleTimeString()}.`
+                  ? `Payments checked at ${new Date(paid.at).toLocaleTimeString()}.${paid.more ? " More to read: check again with the arrow." : ""}`
                   : "Payments not checked yet."}
         </span>
         <span class="reconcile-do">
