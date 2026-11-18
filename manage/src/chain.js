@@ -61,26 +61,37 @@ async function rpc(url, method, params) {
 
 /** Several questions in one request, which public endpoints allow and which
  *  keeps a few hundred payments to a handful of round trips. */
+const noBatching = new Set();   // endpoints that turned a batch away
+
 async function rpcBatch(url, calls) {
   if (!calls.length) return [];
-  const out = [];
-  try {
-    const body = await send(url,
-      calls.map((c, i) => ({ jsonrpc: "2.0", id: i, method: c.method, params: c.params })));
-    for (const entry of Array.isArray(body) ? body : [body]) out[entry.id] = entry.result;
-    return out;
-  } catch (e) {
-    // Some free endpoints turn a batch away (a 400) while answering the same
-    // questions one at a time. Slower, but it works.
-    if (calls.length < 2 || !/answered with 4\d\d/.test(String(e?.message))) throw e;
+  if (calls.length > 1 && !noBatching.has(url)) {
+    try {
+      const body = await send(url,
+        calls.map((c, i) => ({ jsonrpc: "2.0", id: i, method: c.method, params: c.params })));
+      const out = [];
+      for (const entry of Array.isArray(body) ? body : [body]) out[entry.id] = entry.result;
+      return out;
+    } catch (e) {
+      // PublicNode allows one getTransaction to a batch (a 400 for more).
+      // Remember that, and ask one at a time, a few together.
+      if (!/answered with 4\d\d/.test(String(e?.message))) throw e;
+      noBatching.add(url);
+    }
   }
-  const single = [];
-  for (let i = 0; i < calls.length; i++) {
-    if (i) await wait(60);
-    single[i] = await rpc(url, calls[i].method, calls[i].params);
+  const out = new Array(calls.length);
+  for (let i = 0; i < calls.length; i += SINGLES_AT_ONCE) {
+    if (i) await wait(80);
+    await Promise.all(calls.slice(i, i + SINGLES_AT_ONCE).map(async (c, j) => {
+      // An answer that is an error (a transaction in a version this reader
+      // can't parse) is a gap, as in a batch; a refused or busy endpoint is not.
+      const body = await send(url, { jsonrpc: "2.0", id: 1, method: c.method, params: c.params });
+      out[i + j] = body.result;
+    }));
   }
-  return single;
+  return out;
 }
+const SINGLES_AT_ONCE = 4;
 
 /**
  * Who has paid this artist, and how much: everything newer than `until`.

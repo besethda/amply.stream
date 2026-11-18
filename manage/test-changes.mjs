@@ -88,11 +88,13 @@ for (const [name, mutate, expected] of cases) {
     const ok = (result) => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result }));
     if (Array.isArray(body)) { asked.batches++; return new Response("bad request", { status: 400 }); }
     asked.singles++;
+    if (body.method === "getTransaction" && asked.singles === 2) return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32015, message: "version 1" } }));
     return ok(body.method === "getSignaturesForAddress" ? [{ signature: "a" }, { signature: "b" }] : null);
   };
   try {
     const r = await paymentsTo("Wallet1111111111111111111111111111111111111", "mainnet");
-    const good = asked.batches === 1 && r.checked === 2 && asked.singles === 3;
+    await paymentsTo("Wallet1111111111111111111111111111111111111", "mainnet");
+    const good = asked.batches === 1 && r.checked === 2 && asked.singles === 3 + 3;   // and the refusal is remembered
     good ? pass++ : fail++;
     console.log(`${good ? "ok  " : "FAIL"}  a refused batch falls back to single questions — ${JSON.stringify({ ...asked, checked: r.checked })}`);
   } finally { globalThis.fetch = real; }
