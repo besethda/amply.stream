@@ -214,7 +214,7 @@ function Help({ about, at, children }) {
 }
 
 /** A button that confirms it did the thing, then goes quiet again. */
-function CopyButton({ text, label, className = "quiet-link" }) {
+function CopyButton({ text, label, className = "quiet-link", onCopied }) {
   const [done, setDone] = useState(false);
   useEffect(() => {
     if (!done) return;
@@ -228,9 +228,11 @@ function CopyButton({ text, label, className = "quiet-link" }) {
         try {
           await navigator.clipboard.writeText(text);
           setDone(true);
+          onCopied?.();
         } catch {
           // Clipboard access can be refused. Select it instead of failing silently.
-          window.prompt("Copy this link:", text);
+          window.prompt("Copy this:", text);
+          onCopied?.();
         }
       }}
     >
@@ -1499,7 +1501,11 @@ function ShowWalletKey({ payees }) {
 function PayoutReady({ address, live, held = false }) {
   const [check, setCheck] = useState(null);   // { ok } | { other } | { error } | "busy"
   const [canPasskey, setCanPasskey] = useState(false);
-  useEffect(() => { mayOfferPasskey().then(setCanPasskey); }, []);
+  useEffect(() => {
+    let mine = false;
+    try { mine = localStorage.getItem(PASSKEY_WALLET_KEY) === address; } catch { /* unknown */ }
+    if (mine) mayOfferPasskey().then(setCanPasskey);
+  }, []);
   async function verify() {
     setCheck("busy");
     try {
@@ -2319,7 +2325,7 @@ function BuySol({ api, label = "Or with Coinbase" }) {
 /** Payments that $5 of SOL pays the network fee on, roughly: a full bar. */
 const FEES_FULL = 6000;
 
-function FeesCard({ api, network, payees, onStatus, step = false }) {
+function FeesCard({ api, network, payees, onStatus, step = false, bare = false }) {
   const [fees, setFees] = useState(null);
   const [failed, setFailed] = useState(false);
   const load = useCallback(() => {
@@ -2371,7 +2377,7 @@ function FeesCard({ api, network, payees, onStatus, step = false }) {
   }
   return (
     <section class="card" id="fees">
-      <h2>{step ? "Step 2: fees account" : "Fees account"} <span class="pill-status off">Off</span></h2>
+      {!bare && <h2>{step ? "Step 2: fees account" : "Fees account"} <span class="pill-status off">Off</span></h2>}
       <p>Add $5 so fans can pay you. It covers every payment's network fee for months.</p>
       {real && <>
         <a class="btn" href={topupUrl(fees.address, { currency: "sol" })} target="_blank" rel="noopener noreferrer">Add $5 by card</a>
@@ -2682,12 +2688,13 @@ function CoinbaseCashOut({ api, payees, network }) {
 /** Moving money out of the payout wallet: Coinbase (most countries) or Cash App (US). */
 function CashOut({ api, payees, network, via: chosen, onVia }) {
   const [via, setVia] = useState(chosen === "cashapp" || chosen === "coinbase" ? chosen : null);
-  const [passkey, setPasskey] = useState(true);
+  // A wallet made with Face ID cashes out here; one saved by hand (or brought
+  // along) is in a wallet app like Phantom.
+  const [passkey, setPasskey] = useState(() => {
+    try { return localStorage.getItem(PASSKEY_WALLET_KEY) === payees.find((p) => p.address)?.address; } catch { return true; }
+  });
   const pick = (k) => { setVia(k); onVia?.(k); };
-  const routes = {
-    coinbase: { name: "Coinbase", where: "Most countries · to your bank or Coinbase", fee: "Coinbase shows any fee before you confirm" },
-    cashapp: { name: "Cash App", where: "US · turns into dollars by itself", fee: "Fees: 0% (for now)" },
-  };
+  const routes = CASH_ROUTES;
   return (
     <section class="card" id="cash-out">
       <h2>Cash out</h2>
@@ -2890,7 +2897,11 @@ function Pricing({ wallet, onChange, held = false }) {
             onChange(withPrice(wallet, Math.round(Math.min(Math.max(c, 0), RATE_MAX * 100) * 100) / 10000));
           }} />
         <span class="unit">¢/min</span>
-        <span class="muted">{rate > 0 ? `(${cents(rate * TYPICAL_SONG_MIN)} per song)` : "(free)"}</span>
+        <span class="muted">{rate > 0 ? `(~${cents(rate * TYPICAL_SONG_MIN)} per song)` : "(free)"}</span>
+      </div>
+      {/* Where the suggested price sits on the slider. */}
+      <div class="price-mark" aria-hidden="true">
+        <span title="Suggested" style={{ left: `calc(${toSlider(DEFAULT_RATE) / SLIDER_STEPS} * (100% - 16px) + 8px)` }}>▼</span>
       </div>
       <input type="range" min="0" max={SLIDER_STEPS} step="1" value={toSlider(rate)} aria-label="Price per minute"
         aria-valuetext={`${cents(rate)} a minute`} onInput={(e) => onChange(withPrice(wallet, fromSlider(Number(e.target.value))))} />
@@ -2913,8 +2924,218 @@ function Pricing({ wallet, onChange, held = false }) {
   );
 }
 
-function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rate, network, settleAt, held = false, onFees, feesOn = null }) {
+/**
+ * Setting up to earn: a screen of its own, step by step, like the listener's
+ * "Save your ID" (app/src/onboard.jsx). One thing per step and a back button.
+ *
+ *   1. Your key: the payout wallet, made with Face ID (the phone's keychain
+ *      keeps it); or by hand, shown once behind a warning and an "I've saved
+ *      it"; or an address they already have.
+ *   2. The fees account: $5 of SOL, so fans' payments go through.
+ *   3. How to cash out: Coinbase or Cash App, now or later.
+ *   4. Done: publish, and fans can pay.
+ */
+function EarnSetup({ api, network, payees, onAddress, onFees, onPublish, onClose, start = "key" }) {
+  const [step, setStep] = useState(start);
+  const [feesOn, setFeesOn] = useState(false);
+  const [via, setVia] = useState(readVia());
+  const address = payees.find((p) => p.address)?.address || null;
+  const order = ["key", "fees", "cashout", "done"];
+  const back = () => {
+    if (step === "manual" || step === "have") return setStep("key");
+    const i = order.indexOf(step);
+    if (i <= 0) onClose(); else setStep(order[i - 1]);
+  };
+  // Money sent to the fees account shows up by itself.
+  useEffect(() => {
+    if (step !== "fees" || feesOn || !api?.fees) return;
+    const look = () => api.fees().then((f) => { if (f.offering) { setFeesOn(true); onFees?.(true); } }).catch(() => {});
+    look();
+    const t = setInterval(look, 15_000);
+    return () => clearInterval(t);
+  }, [step, feesOn]);
+
+  const keyed = (a) => { onAddress(a); setStep("fees"); };
+
+  return (
+    <div class="setup-flow" role="dialog" aria-modal="true" aria-label="Start earning">
+      <button class="setup-back" onClick={back} aria-label="Back">←</button>
+      <div class="setup-body">
+        {step === "key" && <KeyStep onAddress={keyed} onManual={() => setStep("manual")} onHave={() => setStep("have")} />}
+        {step === "manual" && <KeyByHand onAddress={keyed} />}
+        {step === "have" && <KeyHave onAddress={keyed} />}
+
+        {step === "fees" && (
+          <>
+            <p class="setup-count">Step 2 of 3</p>
+            <h1>Cover the fees <Help about="the fees account">Every time a fan pays you, Solana charges a tiny network
+              fee, about 0.1¢. Your fees account pays it, so fans never deal with it. $5 lasts months.</Help></h1>
+            {feesOn
+              ? <p class="good">✓ Your fees account is on.</p>
+              : <FeesCard api={api} network={network} payees={payees} onStatus={(on) => { if (on) { setFeesOn(true); onFees?.(true); } }} bare />}
+            <button class="btn" disabled={!feesOn} onClick={() => setStep("cashout")}>Continue</button>
+            {!feesOn && <button class="quiet-link" onClick={() => setStep("cashout")}>Later</button>}
+          </>
+        )}
+
+        {step === "cashout" && (
+          <>
+            <p class="setup-count">Step 3 of 3</p>
+            <h1>How you'll cash out</h1>
+            <div class="pay-choices">
+              {Object.entries(CASH_ROUTES).map(([k, v]) => (
+                <button key={k} type="button" class="pay-choice" aria-pressed={via === k}
+                  onClick={() => { setVia(k); try { localStorage.setItem(VIA_KEY, k); } catch { /* asked again */ } }}>
+                  <b>{v.name}</b><span>{v.where}</span></button>
+              ))}
+            </div>
+            <button class="btn" disabled={!via} onClick={() => setStep("done")}>Continue</button>
+            <button class="quiet-link" onClick={() => setStep("done")}>Later</button>
+          </>
+        )}
+
+        {step === "done" && (
+          <>
+            <h1>You're set up</h1>
+            <p class="muted">{feesOn ? "Publish, and fans can start paying you." : "Fans can pay you once your fees account is on."}</p>
+            <button class="btn" onClick={() => { onPublish?.(); onClose(); }}>Publish</button>
+            <button class="quiet-link" onClick={onClose}>Not yet</button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Where to cash out to: the same two everywhere in the editor. */
+const CASH_ROUTES = {
+  coinbase: { name: "Coinbase", where: "Most countries · to your bank or Coinbase", fee: "Coinbase shows any fee before you confirm" },
+  cashapp: { name: "Cash App", where: "US · turns into dollars by itself", fee: "Fees: 0% (for now)" },
+};
+
+function KeyStep({ onAddress, onManual, onHave }) {
+  const [offer, setOffer] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState(null);
+  useEffect(() => { mayOfferPasskey().then(setOffer); }, []);
+  async function faceId() {
+    setBusy(true); setSaid(null);
+    try {
+      const seed = await createPasskeySeed({ name: "Amply payouts" });
+      const a = await addressOf(seed);
+      seed.fill(0);
+      try { localStorage.setItem(PASSKEY_WALLET_KEY, a); } catch { /* fine */ }
+      onAddress(a);
+    } catch (e) {
+      if (e instanceof NoPasskeySecret) setSaid("This device can't hold it. Try again and choose your phone, or save it yourself.");
+      else if (e.name !== "Cancelled" && e.name !== "NotAllowedError") setSaid(e.message);
+    } finally { setBusy(false); }
+  }
+  return (
+    <>
+      <p class="setup-count">Step 1 of 3</p>
+      <h1>Save your key <Help about="your key">Your key opens the wallet fans pay into. It lives only with you:
+        nobody, Amply included, can recover it. Saved with Face ID, your phone's keychain keeps it and brings it to
+        your other devices.</Help></h1>
+      {offer && <button class="btn" disabled={busy} onClick={faceId}>{busy ? "Waiting for you…" : "Save with Face ID"}</button>}
+      <button class={offer ? "btn ghost" : "btn"} disabled={busy} onClick={onManual}>Save it myself</button>
+      <button class="quiet-link" onClick={onHave}>I already have a wallet</button>
+      {said && <p class="warn" role="alert">{said}</p>}
+    </>
+  );
+}
+
+/** A new key, shown once; kept only once they say it's saved. */
+function KeyByHand({ onAddress }) {
+  const [made] = useState(() => {
+    const seed = crypto.getRandomValues(new Uint8Array(32));
+    return { seed };
+  });
+  const [key, setKey] = useState(null);
+  const [address, setAddress] = useState(null);
+  const [kept, setKept] = useState(false);
+  const [sure, setSure] = useState(false);
+  useEffect(() => {
+    (async () => {
+      const pub = await publicKeyOf(made.seed);
+      const secret = new Uint8Array(64);
+      secret.set(made.seed); secret.set(pub, 32);
+      // The same 64-byte key Phantom and Solflare import.
+      setKey(base58(secret));
+      setAddress(base58(pub));
+      secret.fill(0);
+    })();
+    return () => made.seed.fill(0);
+  }, []);
+  return (
+    <>
+      <p class="setup-count">Step 1 of 3</p>
+      <h1>Save your key</h1>
+      <p class="warn">If you lose it, it can't be recovered. You'll import it into a wallet app like Phantom to cash out.</p>
+      {key && <p class="setup-key mono">{key}</p>}
+      {key && <CopyButton text={key} label="Copy" className="btn ghost sm" onCopied={() => setKept(true)} />}
+      <label class="setup-check">
+        <input type="checkbox" checked={sure} onChange={(e) => setSure(e.target.checked)} />
+        <span>I've saved it somewhere safe</span>
+      </label>
+      <button class="btn" disabled={!address || !kept || !sure} onClick={() => onAddress(address)}>Continue</button>
+      {!kept && <p class="muted small">Copy it first.</p>}
+    </>
+  );
+}
+
+function KeyHave({ onAddress }) {
+  const [a, setA] = useState("");
+  const [said, setSaid] = useState(null);
+  const [busy, setBusy] = useState(false);
+  async function faceId() {
+    setBusy(true); setSaid(null);
+    try {
+      const seed = await restorePasskeySeed();
+      const addr = await addressOf(seed);
+      seed.fill(0);
+      try { localStorage.setItem(PASSKEY_WALLET_KEY, addr); } catch { /* fine */ }
+      onAddress(addr);
+    } catch (e) {
+      if (e.name !== "Cancelled" && e.name !== "NotAllowedError") setSaid(e.message);
+    } finally { setBusy(false); }
+  }
+  return (
+    <>
+      <p class="setup-count">Step 1 of 3</p>
+      <h1>Your wallet</h1>
+      <button class="btn" disabled={busy} onClick={faceId}>Use my Face ID wallet</button>
+      <input type="text" class="mono" placeholder="Or paste a Solana wallet address" value={a} onInput={(e) => setA(e.target.value.trim())} />
+      <button class="btn ghost" disabled={!keyOf(a)} onClick={() => onAddress(a)}>Continue</button>
+      {a && !keyOf(a) && <p class="warn small">That isn't a Solana address.</p>}
+      {said && <p class="warn" role="alert">{said}</p>}
+    </>
+  );
+}
+
+/** The invitation, where Earnings starts for an artist not yet set up. */
+function StartEarning({ onStart, resume = false }) {
+  return (
+    <section class="card start-earning" id={resume ? "fees" : undefined}>
+      <h2>{resume ? "Almost there" : "Start earning"}</h2>
+      <p class="muted">{resume ? "Cover the fees, and fans can pay you." : "Fans pay you as they listen, straight to you. About 5 minutes."}</p>
+      <button class="btn" onClick={onStart}>{resume ? "Continue" : "Set up"}</button>
+    </section>
+  );
+}
+
+function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rate, network, settleAt, held = false, onFees, feesOn = null, onPublish }) {
   const [cashing, setCashing] = useState(false);
+  const [setting, setSetting] = useState(null);   // the step the setup screen opens at
+  const setAddress = (a) => {
+    setPayees([{ ...(payees[0] || {}), address: a, split: payees[0]?.split ?? 100 }, ...payees.slice(1)]);
+    // Kept on the node at once: an unpublished change is otherwise lost on reload.
+    if (keyOf(a)) api?.savePayout?.(a).catch(() => {});
+  };
+  const flow = setting && (
+    <EarnSetup api={api} network={network} payees={payees} onAddress={setAddress} onFees={onFees}
+      onPublish={onPublish} onClose={() => setSetting(null)} start={setting} />
+  );
   const paid = usePayments(payees, network);
   const [via, setViaState] = useState(readVia);
   const setVia = (v) => { setViaState(v); try { localStorage.setItem(VIA_KEY, v); } catch { /* fine */ } };
@@ -2941,8 +3162,12 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
 
   if (!hasWallet && !subscribing) {
     return (<>{head}<div class="stack">
-      <GetPaid payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} />
-    </div></>);
+      <StartEarning onStart={() => setSetting("key")} />
+      <details class="advanced">
+        <summary>More <span class="note">card subscriptions</span></summary>
+        <div class="stack"><Subscriptions manifest={manifest} update={update} api={api} /></div>
+      </details>
+    </div>{flow}</>);
   }
 
   return (
@@ -2950,18 +3175,20 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
       {head}
       <div class="stack">
         {/* Only until it's published: after that the card below shows the wallet. */}
-        {hasWallet && !liveAddresses.includes(payees.find((p) => p.address).address) && (
+        {/* Setup not finished (no fees account yet): one card that carries on. */}
+        {hasWallet && held && <StartEarning resume onStart={() => setSetting("fees")} />}
+        {hasWallet && !held && !liveAddresses.includes(payees.find((p) => p.address).address) && (
           <PayoutReady address={payees.find((p) => p.address).address} live={false} held={held} />
         )}
         {canCashOut && cashing && <CashOut api={api} payees={payees} network={network} via={via} onVia={setVia} />}
-        {feesOff && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} step={held} />}
+        {feesOff && !held && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} />}
         {hasWallet && <BackupReminder payees={payees} />}
         {hasWallet && <EarningsSummary paid={paid} payees={payees} />}
         {hasWallet && <Pricing wallet={wallet} onChange={setWallet} held={held} />}
         {subscribing && <Subscriptions manifest={manifest} update={update} api={api} />}
         <Listeners api={api} paid={paid} rate={rate} settleAt={settleAt} />
         {hasWallet && !feesOff && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} />}
-        {!hasWallet && <GetPaid payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} perMinuteOnly />}
+        {!hasWallet && <StartEarning onStart={() => setSetting("key")} />}
         <details class="advanced">
           <summary>More <span class="note">{[!subscribing && "card subscriptions", hasWallet && "split with bandmates", hasWallet && "test mode"].filter(Boolean).join(", ")}</span></summary>
           <div class="stack">
@@ -2976,6 +3203,7 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
           </div>
         </details>
       </div>
+      {flow}
     </>
   );
 }
@@ -3617,7 +3845,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
           <EarningsTab
             node={node} api={api} payees={payees} setPayees={setPayees}
             manifest={manifest} update={update} live={live}
-            held={!perMinute} onFees={setFeesOn} feesOn={feesOn}
+            held={!perMinute} onFees={setFeesOn} feesOn={feesOn} onPublish={publish}
             // What listeners are actually charged is what is published, not
             // what is in the editor: a price changed and not yet published
             // must not make a listener look like they are underpaying.

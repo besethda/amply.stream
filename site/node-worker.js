@@ -2487,7 +2487,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.23.0";
+var VERSION = "3.24.1";
 var SPEC_VERSION = 1;
 var RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
 var MANAGE_CSP = [

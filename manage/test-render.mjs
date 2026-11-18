@@ -328,8 +328,8 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
     initial: manifest, published: true, initialTab: tab, onSignOut() {} }));
   const check = (name, cond) => { cond ? pass++ : fail++; console.log(`${cond ? "ok  " : "FAIL"}  ${name}`); };
   const fresh = show(empty, "earnings");
-  check("not set up: Earnings shows getting paid into your own wallet, or card subscriptions", fresh.includes(">Get paid<")
-    && fresh.includes("your own wallet") && fresh.includes("Card subscriptions"));
+  check("not set up: Earnings invites setting up, with how long it takes, and card subscriptions under More", fresh.includes(">Start earning<")
+    && fresh.includes("About 5 minutes") && fresh.includes("card subscriptions"));
   check("  and no exchange is needed to be paid", !/Paste my Coinbase address|Connect Coinbase/.test(fresh));
   check("  and no price yet", !fresh.includes("Your price") && !fresh.includes("Pays you every"));
   const paid = show(full, "earnings");

@@ -122,9 +122,11 @@ const fresh = new URLSearchParams(location.search).has("new");
 // Payments as the chain would report them, so the preview shows a real
 // Earnings tab rather than "couldn't check" (there's no network here).
 try {
-  localStorage.setItem("amply.payments.v1.7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU,9mPQ4cLXmhVYPb2M9fVd8rTgFq7WuXsKbNa1ZyEeRtUv",
-    JSON.stringify({ byWallet: { "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU": { micros: 412_000, payments: 3, last: Date.now() - 864e5 } },
-      total: 412_000, at: Date.now(), network: "mainnet" }));
+  const ARTIST = "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU", BAND = "9mPQ4cLXmhVYPb2M9fVd8rTgFq7WuXsKbNa1ZyEeRtUv";
+  localStorage.setItem(`amply.payments.v2.mainnet.${ARTIST}`, JSON.stringify({
+    byWallet: { [ARTIST]: { micros: 412_000, other: 0, payments: 3, last: Date.now() - 864e5 } }, total: 412_000, newest: "preview" }));
+  localStorage.setItem(`amply.payments.v2.mainnet.${BAND}`, JSON.stringify({ byWallet: {}, total: 0, newest: "preview" }));
+  localStorage.setItem(`amply.payments.v2.mainnet.${ARTIST},${BAND}.at`, String(Date.now()));
 } catch { /* fine */ }
 
 render(
