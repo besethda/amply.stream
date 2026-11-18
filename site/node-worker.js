@@ -110,21 +110,26 @@ function readPreviewKey(raw) {
 async function claimedYet(k, pause = 1500) {
   if (k.claimed) return true;
   if (!k.token) return null;
-  const ask = async () => {
-    try {
-      const res = await fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", {
-        headers: { Authorization: `Bearer ${k.token}` }
-      });
-      return res.status;
-    } catch {
-      return null;
-    }
-  };
-  const first = await ask();
-  if (first !== null && first >= 200 && first < 300) return false;
-  if (first !== 401) return null;
+  const first = await tokenStanding(k.token);
+  if (first === "works") return false;
+  if (first !== "gone") return null;
   await new Promise((r) => setTimeout(r, pause));
-  return await ask() === 401 ? true : null;
+  return await tokenStanding(k.token) === "gone" ? true : null;
+}
+var TOKEN_REFUSED = /* @__PURE__ */ new Set([1e3, 9109, 1e4, 10001]);
+async function tokenStanding(token) {
+  try {
+    const res = await fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = await res.json().catch(() => null);
+    if (res.ok) return Array.isArray(body?.result) && body.result.length === 0 ? "gone" : "works";
+    if (res.status === 401) return "gone";
+    if (res.status === 403 && (body?.errors || []).some((e) => TOKEN_REFUSED.has(Number(e.code)))) return "gone";
+    return null;
+  } catch {
+    return null;
+  }
 }
 var afterClaim = (k) => ({ hash: k.hash, until: k.until, claimed: true });
 function previewNotice(k, claimed, now = Date.now()) {
@@ -2432,7 +2437,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.20.1";
+var VERSION = "3.20.2";
 var SPEC_VERSION = 1;
 var RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
 var MANAGE_CSP = [
