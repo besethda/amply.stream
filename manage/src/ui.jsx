@@ -2377,18 +2377,57 @@ function BuySol({ api, label = "Or with Coinbase" }) {
 /** Payments that $5 of SOL pays the network fee on, roughly: a full bar. */
 const FEES_FULL = 6000;
 
-function FeesCard({ api, network, payees, onStatus, step = false, bare = false }) {
+/**
+ * The fees account's status, asked of the node (always a fresh look at the
+ * network there) once and shared: the banner, Earnings, the setup screen and
+ * sending all read this one, and there is one poll, not one each.
+ */
+const Fees = createContext(null);
+
+/** How often to look again: every 15 s while the setup screen's fees step is
+ *  open, every minute while it's off, and not at all once it's on. */
+export function feesPollMs(fees, setupOpen) {
+  if (fees?.offering) return null;
+  if (setupOpen) return 15_000;
+  return fees?.offering === false ? 60_000 : null;
+}
+
+function useFeesStatus(api) {
   const [fees, setFees] = useState(null);
   const [failed, setFailed] = useState(false);
-  const load = useCallback(() => {
-    setFailed(false);
-    api?.fees?.().then((f) => { setFees(f); onStatus?.(!!f.offering); }).catch(() => setFailed(true));
+  const [setupOpen, setSetupOpen] = useState(false);
+  const asking = useRef(null);
+  const askedAt = useRef(0);
+  // `ifOlderThan`: a card opening asks only if the last look wasn't just now.
+  const refresh = useCallback(({ ifOlderThan = 0 } = {}) => {
+    if (!api?.fees) return Promise.resolve(null);
+    if (asking.current) return asking.current;
+    if (ifOlderThan && Date.now() - askedAt.current < ifOlderThan) return Promise.resolve(null);
+    asking.current = api.fees()
+      .then((f) => { askedAt.current = Date.now(); setFees(f); setFailed(false); return f; })
+      .catch(() => { setFailed(true); return null; })
+      .finally(() => { asking.current = null; });
+    return asking.current;
   }, [api]);
-  useEffect(load, [load]);
+  useEffect(() => { refresh(); }, [refresh]);
+  const every = feesPollMs(fees, setupOpen);
+  useEffect(() => {
+    if (!every) return;
+    const t = setInterval(() => refresh(), every);
+    return () => clearInterval(t);
+  }, [every, refresh]);
+  return useMemo(() => ({ fees, failed, refresh, setSetupOpen }), [fees, failed, refresh]);
+}
+
+function FeesCard({ api, network, payees, step = false, bare = false }) {
+  const { fees = null, failed = false, refresh } = useContext(Fees) || {};
+  const load = () => refresh?.();
+  // Opening the card looks again, unless the last look was just now.
+  useEffect(() => { refresh?.({ ifOlderThan: 30_000 }); }, [refresh]);
 
   if (!api?.fees || !network || !payees?.length) return null;
   const head = <h2>Fees account</h2>;
-  if (failed) return (
+  if (failed && !fees) return (
     <section class="card">{head}
       <p class="muted">Couldn't check this just now. <button class="link" onClick={load}>Try again</button></p></section>
   );
@@ -2544,14 +2583,14 @@ function SendToBank({ api, payees, network, routeName }) {
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [balance, setBalance] = useState(null);
-  const [feesOn, setFeesOn] = useState(null);
+  const { fees } = useContext(Fees) || {};
+  const feesOn = fees ? !!fees.offering : null;
   const [state, setState] = useState(null);   // { busy, text } | { done, usd, signature } | { error }
   const mine = payees.find((p) => p.address)?.address;
 
   useEffect(() => {
     let alive = true;
     import("./chain.js").then(({ usdcBalance }) => usdcBalance(mine, net)).then((b) => alive && setBalance(b)).catch(() => {});
-    api?.fees?.().then((f) => alive && setFeesOn(!!f.offering)).catch(() => alive && setFeesOn(null));
     return () => { alive = false; };
   }, [mine, net]);
 
@@ -2988,9 +3027,10 @@ function Pricing({ wallet, onChange, held = false }) {
  *   3. How to cash out: Coinbase or Cash App, now or later.
  *   4. Done: publish, and fans can pay.
  */
-function EarnSetup({ api, network, payees, onAddress, onFees, onPublish, onClose, start = "key" }) {
+function EarnSetup({ api, network, payees, onAddress, onPublish, onClose, start = "key" }) {
   const [step, setStep] = useState(start);
-  const [feesOn, setFeesOn] = useState(false);
+  const { fees, refresh, setSetupOpen } = useContext(Fees) || {};
+  const feesOn = !!fees?.offering;
   const [via, setVia] = useState(readVia());
   const address = payees.find((p) => p.address)?.address || null;
   const order = ["key", "fees", "cashout", "done"];
@@ -2999,14 +3039,14 @@ function EarnSetup({ api, network, payees, onAddress, onFees, onPublish, onClose
     const i = order.indexOf(step);
     if (i <= 0) onClose(); else setStep(order[i - 1]);
   };
-  // Money sent to the fees account shows up by itself.
+  // Money sent to the fees account shows up by itself: the shared status
+  // looks more often while this step is open.
   useEffect(() => {
-    if (step !== "fees" || feesOn || !api?.fees) return;
-    const look = () => api.fees().then((f) => { if (f.offering) { setFeesOn(true); onFees?.(true); } }).catch(() => {});
-    look();
-    const t = setInterval(look, 15_000);
-    return () => clearInterval(t);
-  }, [step, feesOn]);
+    if (step !== "fees" || !setSetupOpen) return;
+    setSetupOpen(true);
+    refresh();
+    return () => setSetupOpen(false);
+  }, [step]);
 
   const keyed = (a) => { onAddress(a); setStep("fees"); };
 
@@ -3027,7 +3067,7 @@ function EarnSetup({ api, network, payees, onAddress, onFees, onPublish, onClose
               fee, about 0.1¢. Your fees account pays it, so fans never deal with it. Each $1 covers ~1,000 payments.</Help></h1>
             {feesOn
               ? <p class="good">✓ Your fees account is on.</p>
-              : <FeesCard api={api} network={network} payees={payees} onStatus={(on) => { if (on) { setFeesOn(true); onFees?.(true); } }} bare />}
+              : <FeesCard api={api} network={network} payees={payees} bare />}
             <button class="btn" disabled={!feesOn} onClick={() => setStep("cashout")}>Continue</button>
             {!feesOn && <button class="quiet-link" onClick={() => setStep("cashout")}>Later</button>}
           </>
@@ -3179,7 +3219,7 @@ function StartEarning({ onStart, resume = false }) {
   );
 }
 
-function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rate, network, settleAt, held = false, onFees, feesOn = null, onPublish }) {
+function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rate, network, settleAt, held = false, feesOn = null, onPublish }) {
   const [cashing, setCashing] = useState(false);
   const [setting, setSetting] = useState(null);   // the step the setup screen opens at
   const setAddress = (a) => {
@@ -3188,7 +3228,7 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
     if (keyOf(a)) api?.savePayout?.(a).catch(() => {});
   };
   const flow = setting && (
-    <EarnSetup api={api} network={network} payees={payees} onAddress={setAddress} onFees={onFees}
+    <EarnSetup api={api} network={network} payees={payees} onAddress={setAddress}
       onPublish={onPublish} onClose={() => setSetting(null)} start={setting} />
   );
   const paid = usePayments(payees, network);
@@ -3236,13 +3276,13 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
           <PayoutReady address={payees.find((p) => p.address).address} live={false} held={held} />
         )}
         {canCashOut && cashing && <CashOut api={api} payees={payees} network={network} via={via} onVia={setVia} />}
-        {feesOff && !held && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} />}
+        {feesOff && !held && <FeesCard api={api} network={network} payees={payees} />}
         {hasWallet && <BackupReminder payees={payees} />}
         {hasWallet && <EarningsSummary paid={paid} payees={payees} />}
         {hasWallet && <Pricing wallet={wallet} onChange={setWallet} held={held} />}
         {subscribing && <Subscriptions manifest={manifest} update={update} api={api} />}
         <Listeners api={api} paid={paid} rate={rate} settleAt={settleAt} />
-        {hasWallet && !feesOff && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} />}
+        {hasWallet && !feesOff && <FeesCard api={api} network={network} payees={payees} />}
         {!hasWallet && <StartEarning onStart={() => setSetting("key")} />}
         <details class="advanced">
           <summary>More <span class="note">{[!subscribing && "card subscriptions", hasWallet && "split with bandmates", hasWallet && "test mode"].filter(Boolean).join(", ")}</span></summary>
@@ -3623,18 +3663,13 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
 
   // The fees account must be on before a per-minute price is first published.
   // Once it's live it stays, so publishing a song never makes music free.
-  const [feesOn, setFeesOn] = useState(null);
+  // Asked once, shared with every card that shows it, and looked at again
+  // every minute while it's off: money sent to it shows up here by itself.
+  const feesStatus = useFeesStatus(api);
+  const feesOn = feesStatus.fees ? !!feesStatus.fees.offering : null;
   // The artist said they understand: kept in this browser, and not shown again.
   const [notPaidHidden, setNotPaidHidden] = useState(() => { try { return localStorage.getItem(NOT_PAID_HIDDEN) === "1"; } catch { return false; } });
   const hideNotPaid = () => { setNotPaidHidden(true); try { localStorage.setItem(NOT_PAID_HIDDEN, "1"); } catch { /* hidden for now */ } };
-  useEffect(() => { api?.fees?.().then((f) => setFeesOn(!!f.offering)).catch(() => {}); }, [api]);
-  // While it's off, look again every minute: money sent to it shows up here
-  // by itself, and the warning below goes.
-  useEffect(() => {
-    if (feesOn !== false || !api?.fees) return;
-    const t = setInterval(() => api.fees().then((f) => setFeesOn(!!f.offering)).catch(() => {}), 60_000);
-    return () => clearInterval(t);
-  }, [api, feesOn]);
   const wasLive = !!(live?.payment || []).find((p) => p.type === "solana-usdc");
   const perMinute = wasLive || feesOn === true || !api?.fees;
   const next = useMemo(() => buildManifest(manifest, payees, { perMinute }), [manifest, payees, perMinute]);
@@ -3776,6 +3811,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
 
   return (
     <Jobs.Provider value={jobsApi}>
+    <Fees.Provider value={feesStatus}>
       <header class="top">
         <div class="top-in">
           <span class="top-mark">
@@ -3921,7 +3957,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
           <EarningsTab
             node={node} api={api} payees={payees} setPayees={setPayees}
             manifest={manifest} update={update} live={live}
-            held={!perMinute} onFees={setFeesOn} feesOn={feesOn} onPublish={publish}
+            held={!perMinute} feesOn={feesOn} onPublish={publish}
             // What listeners are actually charged is what is published, not
             // what is in the editor: a price changed and not yet published
             // must not make a listener look like they are underpaying.
@@ -3933,6 +3969,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
       </main>
 
       <PlayerBar player={player} />
+    </Fees.Provider>
     </Jobs.Provider>
   );
 }

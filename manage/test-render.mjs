@@ -360,5 +360,21 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
     && row.shouldComponentUpdate({ a: 1, f: Math.min }) && row.shouldComponentUpdate({ a: 1 }));
 }
 
+// ── one look at the fees account, shared, not a poll per card ───────────────
+{
+  const { feesPollMs } = await import("./src/ui.jsx");
+  const check = (name, cond) => { cond ? pass++ : fail++; console.log(`${cond ? "ok  " : "FAIL"}  ${name}`); };
+  check("the fees account on: no polling", feesPollMs({ offering: true }, false) === null && feesPollMs({ offering: true }, true) === null);
+  check("  off: one look a minute", feesPollMs({ offering: false }, false) === 60_000);
+  check("  off, with the setup's fees step open: every 15 seconds", feesPollMs({ offering: false }, true) === 15_000 && feesPollMs(null, true) === 15_000);
+  check("  not known yet (couldn't ask): no polling outside setup", feesPollMs(null, false) === null);
+  let asked = 0;
+  const counting = { ...api, fees: async () => { asked++; return { offering: false, address: "x", network: "solana", lamports: 0 }; } };
+  for (const tab of ["home", "earnings", "music"]) {
+    renderToString(h(Editor, { api: counting, node: { slug: "coolartist", url: NODE }, initial: full, published: true, initialTab: tab, onSignOut() {} }));
+  }
+  check("  and drawing the editor asks nothing by itself", asked === 0);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
