@@ -112,6 +112,28 @@ const reset = (n) => { node = n; selfSent.length = 0; sentByNode.length = 0; };
   ok("  the fee payer is the artist's fee wallet", t.feePayer.toBase58() === feePayer);
   ok("  and the signature the app got back is that transaction's", r.signature === (await import("bs58")).default.encode(t.signature));
   ok("  split 70 / 30", r.shares[0].micros === 70_000 && r.shares[1].micros === 30_000);
+  ok("  and whether the node saw it land comes back with it", r.nodeConfirmed === true);
+}
+
+{
+  // The node sent it; then the network stops answering while the app waits
+  // to see it land. That is not "nothing was sent": it may well land.
+  reset(offering());
+  const was = Connection.prototype.getSignatureStatuses;
+  Connection.prototype.getSignatureStatuses = async () => { throw new TypeError("Failed to fetch"); };
+  const e = await payArtist(listener, payees, 100_000, { node: { origin: ORIGIN } }).catch((x) => x);
+  Connection.prototype.getSignatureStatuses = was;
+  ok("losing the network after the node sent it: unsure, not failed", e?.kind === "unconfirmed", `${e?.kind} ${e?.message}`);
+  ok("  with its signature, to look it up before paying again", typeof e?.signature === "string" && e.signature.length > 40);
+}
+
+{
+  reset(offering());
+  const was = Connection.prototype.getSignatureStatuses;
+  Connection.prototype.getSignatureStatuses = async () => ({ value: [{ confirmationStatus: "confirmed", err: { InstructionError: [0, "Custom"] } }] });
+  const e = await payArtist(listener, payees, 100_000, { node: { origin: ORIGIN } }).catch((x) => x);
+  Connection.prototype.getSignatureStatuses = was;
+  ok("failed on the network: said so, and safe to send again", e?.kind === "failed", `${e?.kind} ${e?.message}`);
   ok("  nothing about the listener but the payment was sent", Object.keys(node.body).join() === "tx");
 }
 
@@ -154,6 +176,7 @@ for (const [why, status] of [["a payee closed their USDC account after this serv
   let threw = null;
   try { await payArtist(listener, payees, 100_000, { node: { origin: ORIGIN } }); } catch (e) { threw = e; }
   ok("a signature that isn't over this payment is not believed", !!threw);
+  ok("  and, since the node may have sent it all the same, it's held as unsure", threw?.kind === "unconfirmed");
   ok("  and nothing is sent again", selfSent.length === 0);
 }
 

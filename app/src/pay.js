@@ -71,7 +71,8 @@ async function confirmed(conn, signature, { tries = 60 } = {}) {
   for (let i = 0; i < tries; i++) {
     const { value } = await conn.getSignatureStatuses([signature]);
     const s = value?.[0];
-    if (s?.err) throw new Error(`transaction failed: ${JSON.stringify(s.err)}`);
+    // Failed on the network: it took nothing, so it's safe to send again.
+    if (s?.err) throw new PaymentError("failed", `The payment failed on the network, so nothing was taken. ${JSON.stringify(s.err)}`);
     if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) return;
     await new Promise((r) => setTimeout(r, 1000));
   }
@@ -137,7 +138,7 @@ export async function sendDollarsOut(pair, destination, micros = "all", { nodes 
       tx.add(createAssociatedTokenAccountIdempotentInstruction(w.feePayer, artistAccount, artistKey, mint, TOKEN_PROGRAM_ID));
       tx.add(createTransferCheckedInstruction(from, mint, artistAccount, pair.publicKey, fee, 6, [], TOKEN_PROGRAM_ID));
       tx.feePayer = w.feePayer;
-      const sent = await sendThroughNode(conn, { origin, route: "/listen/withdraw", extra: { to: to.toBase58() } }, tx, pair);
+      const sent = (await sendThroughNode(conn, { origin, route: "/listen/withdraw", extra: { to: to.toBase58() } }, tx, pair))?.signature;
       if (sent) {
         await confirmed(conn, sent);
         return { signature: sent, micros: amount - fee, fee };
@@ -255,18 +256,27 @@ export async function payArtist(pair, recipients, micros, { artistName = "This a
     if (!offer) throw paused();
     const tx = await build(offer.feePayer);
     tx.feePayer = offer.feePayer;
-    const sent = await sendThroughNode(conn, node, tx, pair);
+    const answer = await sendThroughNode(conn, node, tx, pair);
     // The node didn't send it, and said so: nothing went out.
-    if (!sent) throw paused();
+    if (!answer) throw paused();
+    const sent = answer.signature;
     try {
       await confirmed(conn, sent);
     } catch (e) {
-      // Sent, and not yet seen landing: the signature lets the app look it
-      // up later rather than guess (paying.js, before paying again).
-      if (e instanceof PaymentError) e.signature = sent;
-      throw e;
+      // Failed on the network: nothing was taken, and nothing is unsure.
+      if (e instanceof PaymentError && e.kind === "failed") throw e;
+      // Anything else — not seen landing in time, or the network not
+      // answering while we asked — may still land. The signature lets the app
+      // look it up later rather than guess (paying.js, before paying again).
+      // Thrown as anything but "unconfirmed", it would be sent a second time.
+      const unsure = e instanceof PaymentError && e.kind === "unconfirmed" ? e
+        : new PaymentError("unconfirmed", "The network hasn't confirmed this yet. It may still go through, so it won't be sent again for now.");
+      unsure.signature = sent;
+      throw unsure;
     }
-    return { signature: sent, shares, micros, feePaidBy: "artist" };
+    // `nodeConfirmed`: whether the artist's server saw it land before it
+    // answered. If not, it may not have counted it yet (paying.js tells it).
+    return { signature: sent, shares, micros, feePaidBy: "artist", nodeConfirmed: answer.confirmed };
   }
 
   try {
@@ -383,7 +393,8 @@ export async function feeOffer(origin, { micros, owners = [], pair, item, tip = 
  * send. The signature that comes back must be the node's own over exactly
  * this payment, so a confirmed signature means this payment landed.
  *
- * Returns the signature, or null when the node said it isn't paying fees just
+ * Returns `{ signature, confirmed }` (whether the node saw it land before
+ * answering), or null when the node said it isn't paying fees just
  * now (409): then nothing went out. Any other refusal throws, with the node's
  * reason; so does anything where the payment may have gone out, so the same
  * debt is never paid twice.
@@ -428,10 +439,14 @@ async function sendThroughNode(conn, node, tx, pair) {
     const signature = String(body?.signature || "");
     let raw;
     try { raw = bs58.decode(signature); } catch { raw = null; }
-    if (!raw || raw.length !== 64) throw new PaymentError("unknown", "The artist's server gave an answer that doesn't make sense. Nothing more will be sent.");
+    // A nonsense answer to a 200 is no proof that nothing went out: the node
+    // may have sent it all the same. "unconfirmed", so the app reads its own
+    // wallet's history before sending anything more (paying.js), rather than
+    // paying the same debt again a minute later.
+    if (!raw || raw.length !== 64) throw new PaymentError("unconfirmed", "The artist's server gave an answer that doesn't make sense. Nothing more will be sent for now.");
     tx.addSignature(tx.feePayer, Buffer.from(raw));
-    if (!tx.verifySignatures()) throw new PaymentError("unknown", "The artist's server gave an answer that doesn't match this payment. Nothing more will be sent.");
-    return signature;
+    if (!tx.verifySignatures()) throw new PaymentError("unconfirmed", "The artist's server gave an answer that doesn't match this payment. Nothing more will be sent for now.");
+    return { signature, confirmed: body?.confirmed === true };
   }
   // Only the node's own refusals are safe to work around. Each is a JSON
   // error, and each comes before anything is sent, or after a payment failed
