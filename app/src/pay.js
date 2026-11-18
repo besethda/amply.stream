@@ -22,6 +22,7 @@ import {
 import bs58 from "bs58";
 import { rpc, network, networkName } from "./wallet.js";
 import { networkFor } from "./networks.js";
+import { MEMO_PROGRAM } from "../../spec/chains.mjs";
 import { toMicros, toUsd } from "./money.js";
 import { SETTLE_WITHIN_DAYS as SETTLE_AFTER_DAYS, shareOut, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS } from "../../spec/pricing.mjs";
 
@@ -195,7 +196,7 @@ function addressOf(value, whose) {
 
 /** Solana's memo program: a note on a transaction, which a purchase uses to
  *  say what it paid for, so it can't be mistaken for any other payment. */
-export const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+export { MEMO_PROGRAM };
 
 /**
  * Send one payment, splits and all, as a single transaction.

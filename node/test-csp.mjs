@@ -68,6 +68,18 @@ checks.push([
     "https://amply.stream", "https://1.1.1.1", "https://cloudflare-dns.com", "https://dns.google",
   ].includes(v)),
 ]);
+// The networks the editor reads (spec/chains.mjs, shared with the server and
+// the app) are the ones named above, and the three copies are one.
+{
+  const { SOLANA } = await import("../spec/chains.mjs");
+  const { NETWORKS: editor } = await import("../manage/src/chain.js");
+  const { NETWORKS: app } = await import("../app/src/networks.js");
+  for (const name of ["mainnet", "devnet"]) {
+    needs("connect-src", new URL(SOLANA[name].rpc).origin, `the editor reads ${name} at the address spec/chains.mjs names`);
+    checks.push([`the editor and the app use spec/chains.mjs for ${name}`, "one list of Solana's addresses, not three drifting copies",
+      () => [editor[name], app[name]].every((n) => n.rpc === SOLANA[name].rpc && n.usdc === SOLANA[name].usdc)]);
+  }
+}
 forbids("default-src", "*", "the deny-by-default floor must stay a floor");
 present("form-action", "no form may post anywhere");
 present("base-uri", "no rewriting where relative URLs resolve");

@@ -22,11 +22,12 @@
  */
 import { verifyPayment, purchaseMemo } from "./payment-check";
 import { DOWNLOADS_PER_PURCHASE, forSale, includes, walletOf } from "../../spec/pricing.mjs";
+import { SOLANA } from "../../spec/chains.mjs";
 
 /** Where a chain's payments are asked about, and which token is money there. */
 export const CHAINS: Record<string, { rpc: string; mint: string }> = {
-  solana: { rpc: "https://solana-rpc.publicnode.com", mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" },
-  devnet: { rpc: "https://api.devnet.solana.com", mint: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU" },
+  solana: { rpc: SOLANA.mainnet.rpc, mint: SOLANA.mainnet.usdc },
+  devnet: { rpc: SOLANA.devnet.rpc, mint: SOLANA.devnet.usdc },
 };
 
 export interface Sale {

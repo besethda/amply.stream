@@ -39,11 +39,9 @@
  */
 import { shareOut } from "../../spec/pricing.mjs";
 import { isSigner, isWritable, u64, verifySignature, type Transaction } from "./solana-tx";
+import { TOKEN_PROGRAM, ATA_PROGRAM, SYSTEM_PROGRAM, MEMO_PROGRAM } from "../../spec/chains.mjs";
 
-export const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
-export const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
-export const SYSTEM_PROGRAM = "11111111111111111111111111111111";
-export const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+export { TOKEN_PROGRAM, ATA_PROGRAM, SYSTEM_PROGRAM, MEMO_PROGRAM };
 
 const TRANSFER_CHECKED = 12;
 const CREATE_IDEMPOTENT = 1;

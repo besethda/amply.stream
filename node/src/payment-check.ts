@@ -10,7 +10,7 @@
  * but paid somebody else, or paid in a worthless token, or was sent by a
  * different wallet, must all fail. So must one already spent for access.
  */
-import { MEMO_PROGRAM } from "./feepay";
+import { MEMO_PROGRAM } from "../../spec/chains.mjs";
 
 export interface PaymentClaim {
   signature: string;    // the transaction

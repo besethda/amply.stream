@@ -11,25 +11,15 @@
  * uploaded into the artist's own storage and served to one person, so it stays
  * small: this is two JSON-RPC calls and some parsing.
  */
+import { SOLANA, TOKEN_PROGRAM, ATA_PROGRAM } from "../../spec/chains.mjs";
 
 export const NETWORKS = {
-  devnet: {
-    label: "Test network",
-    rpc: "https://api.devnet.solana.com",
-    usdc: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-    real: false,
-  },
-  mainnet: {
-    label: "Solana",
-    // Not api.mainnet-beta.solana.com, which refuses every request carrying a
-    // website's Origin — this editor's included. PublicNode accepts browsers,
-    // free and without a key, but refuses getTokenAccountsByOwner ("indexed
-    // requests require a personal token"), which is why paymentsTo below
-    // finds the artist's dollar account inside each transaction instead.
-    rpc: "https://solana-rpc.publicnode.com",
-    usdc: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    real: true,
-  },
+  devnet: { label: "Test network", ...SOLANA.devnet, real: false },
+  // PublicNode (spec/chains.mjs) accepts browsers, but refuses
+  // getTokenAccountsByOwner ("indexed requests require a personal token"),
+  // which is why paymentsTo below finds the artist's dollar account inside
+  // each transaction instead.
+  mainnet: { label: "Solana", ...SOLANA.mainnet, real: true },
 };
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -235,5 +225,3 @@ export async function usdcBalance(address, networkName = "mainnet") {
   const r = await rpc(net.rpc, "getAccountInfo", [account, { encoding: "jsonParsed", commitment: "confirmed" }]);
   return Number(r?.value?.data?.parsed?.info?.tokenAmount?.amount || 0);
 }
-const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
-const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
