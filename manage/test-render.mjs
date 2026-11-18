@@ -225,6 +225,22 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
     (({ short, overdue: o }) => short || o)(standing({ pubkey: "B", seconds: 99999, last_seen: 0 }, {}, RATE, POINT, NOW)), false);
 }
 
+// ── a page from before signup: the account first, then the claim ────────────
+//
+// Cloudflare's sign-up forgets the claim it came from, so the notice sends
+// the artist to make an account before they tap Keep it.
+{
+  const html = renderToString(h(Editor, { api, node: { slug: "coolartist", url: NODE }, initial: full, published: true,
+    initialTab: "home", onSignOut() {},
+    temporary: { until: new Date(Date.now() + 40 * 60_000).toISOString(), claimed: false, claim: "https://dash.cloudflare.com/claim-preview?claimToken=x" } }));
+  const check = (name, cond) => { cond ? pass++ : fail++; console.log(`${cond ? "ok  " : "FAIL"}  ${name}`); };
+  const signUp = html.indexOf("https://dash.cloudflare.com/sign-up");
+  const andThen = html.indexOf("and then");
+  const keep = html.indexOf("Keep it");
+  check("the notice offers a Cloudflare account first", signUp > 0 && html.includes("Create a Cloudflare account"));
+  check("  and then the claim, in that order", signUp < andThen && andThen < keep);
+}
+
 // ── Home only warns when someone's really short ─────────────────────────────
 {
   const html = renderToString(h(Editor, { api, node: { slug: "coolartist", url: NODE },
