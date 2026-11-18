@@ -138,6 +138,28 @@ cmp("a missing part counts as zero", isNewer("3.2", "3.2.0"), false);
 cmp("nothing to compare against says nothing", isNewer(null, "3.2.0"), false);
 cmp("an unknown local version says nothing", isNewer("3.2.0", null), false);
 
+// ── uploading a song's files ────────────────────────────────────────────────
+//
+// A long WAV is too big for a service on KV (25 MB a file), but its streaming
+// copy isn't. What listeners play must arrive; the original is a bonus.
+{
+  const { sendParts } = await import("./src/ui.jsx");
+  const blob = (size) => ({ size });
+  const parts = [["audio/a.stream.mp3", blob(8)], ["audio/a.wav", blob(60)], ["audio/a.waves", blob(1)]];
+  const tooBig = async (k) => { if (k === "audio/a.wav") throw new Error("files here can be at most 25 MB"); };
+  const got = await sendParts(parts, "audio/a.stream.mp3", tooBig);
+  cmp("an original too big for storage is left out, and the song still goes up",
+    [...got].sort().join(","), "audio/a.stream.mp3,audio/a.waves");
+  let threw = null;
+  await sendParts(parts, "audio/a.wav", tooBig).catch((e) => { threw = e.message; });
+  cmp("  but with no streaming copy, the original is the song, and its failure stops the upload",
+    threw, "files here can be at most 25 MB");
+  const seen = [];
+  await sendParts(parts, "audio/a.stream.mp3", async (k, b, progress) => progress(1), (f) => seen.push(Math.round(f * 100)));
+  // 8 + 60 + 1 bytes: each part's end, as a share of the whole.
+  cmp("one progress figure for all the parts, ending at the whole", seen.join(","), "12,99,100");
+}
+
 // ── who counts as behind on paying ──────────────────────────────────────────
 //
 // An artist decides whether to stop serving someone from this. Getting it
