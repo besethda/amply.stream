@@ -332,7 +332,12 @@ document.addEventListener("click", (e) => {
  * It is plain on purpose. Every sentence is about this artist's server; none
  * is about Amply, which holds nothing.
  */
-export function renderPrivacy(manifest: Manifest, origin: string, nonce: string): string {
+export function renderPrivacy(
+  manifest: Manifest, origin: string, nonce: string,
+  /** Whether the artist has Auto-block on: then wallets behind on paying are
+   *  refused without anyone deciding by hand, and the notice must say so. */
+  { autoBlock = false }: { autoBlock?: boolean } = {},
+): string {
   const name = esc(manifest.artist?.name || "This artist");
   const paid = charges(manifest);
   const subs = subscriptionPlans(manifest).length > 0;
@@ -365,6 +370,9 @@ wallet that plays their paid tracks:</p>
   <li>your wallet address;</li>
   <li>how many tracks you have played, and for how many minutes in total;</li>
   <li>what that listening cost, at the price when you heard it;</li>
+  <li>what you have paid for listening, as far as this server has seen: payments it sent on your
+  behalf or that your app told it about, and the totals ${name} reads from the public Solana
+  network, with a reference to each payment it counted so none counts twice;</li>
   <li>when you first and last listened;</li>
   <li>whether ${name} has stopped serving that wallet.</li>
 </ul>
@@ -379,8 +387,15 @@ by itself, but it can sometimes be linked to a person, so it is treated as perso
 <h2>On what basis</h2>
 <p>To provide the music you are paying for, and to be paid for it (a contract: GDPR Article
 6(1)(b)). Stopping service to a wallet that listens without paying is ${name}'s legitimate
-interest in being paid for their work (Article 6(1)(f)). Nobody is refused automatically:
-stopping service is a decision ${name} makes by hand.</p>
+interest in being paid for their work (Article 6(1)(f)). ${autoBlock
+    ? `${name} has turned on <strong>Auto-block</strong>: a wallet that owes for more listening
+than their app is allowed to hold back, or has owed for over a week, is not served their paid
+tracks until it pays. Nothing else is decided this way. Your app is told what you owe and can pay
+it straight away, which lifts it at once; nobody is refused while they couldn't pay (while the
+artist's account can't take payments), and subscribers never are. Any other stop is a decision
+${name} makes by hand.`
+    : `Nobody is refused automatically:
+stopping service is a decision ${name} makes by hand.`}</p>
 
 <h2>How long</h2>
 <p>A year after you last listened, after which the record is deleted automatically. If

@@ -53,7 +53,8 @@ function JobCard({ job }) {
   );
 }
 import { validate } from "../../spec/manifest-rules.mjs";
-import { charges, SETTLE_WITHIN_DAYS, LISTEN_MIN_MICROS } from "../../spec/pricing.mjs";
+import { charges } from "../../spec/pricing.mjs";
+import { behind, overdue, owedOf, autoBlock } from "../../spec/standing.mjs";
 import { bareDomain, recordFor, lookup, confirms } from "../../spec/domain.mjs";
 import { makeWaves, wavesKey } from "./waves.js";
 import { prepareStream, TooLong } from "./stream-copy.js";
@@ -2053,21 +2054,11 @@ export function withPayers(rows, paid) {
 /** Micros of a dollar, as money. */
 const fromMicros = (m) => `$${(m / 1_000_000).toFixed(m > 0 && m < 10_000 ? 4 : 2)}`;
 
-/**
- * Is this listener behind on paying, as opposed to simply not yet due?
- *
- * Their app holds back up to one payment's worth — the artist's payment
- * point — before sending. So owing less than that is the artist's own setting
- * at work, not a debt. Half a payment's slack on top absorbs rounding and a
- * price that has since changed. In micros, like everything else about money
- * here.
- */
-export function behind(owedMicros, paidMicros, settleAt) {
-  const allowance = (Number(settleAt) > 0 ? Number(settleAt) : 1) * 1_000_000;
-  return owedMicros - paidMicros > allowance * 1.5;
-}
-
-const DAY = 86_400_000;
+// Behind and overdue — whether a listener has fallen short — are the same
+// rules the artist's server applies when Auto-block is on, from one shared
+// file (spec/standing.mjs), so what this editor shows and what the server does
+// can never disagree. Re-exported for the tests that have always asked here.
+export { behind, overdue };
 
 /**
  * Where one listener stands: what their listening cost, what they've paid, and
@@ -2085,36 +2076,13 @@ export function standing(r, paid, rate, settleAt, now = Date.now()) {
   const got = (paid.byWallet || {})[r.pubkey];
   // What their listening cost, as the server priced it when it was heard: the
   // price then, nothing while it was free. Listening from before the server
-  // kept that is estimated at today's price, as it always was.
-  const before = Math.max(0, (r.seconds || 0) - (r.owed_seconds || 0));
-  const owed = (r.owed_micros || 0) + (rate > 0 ? (before / 60) * rate * 1_000_000 : 0);
+  // kept that is estimated at today's price, as it always was (owedOf).
+  const owed = owedOf(r, rate);
   const subscribed = r.subscribed_until && r.subscribed_until > now;
   const counted = !subscribed && !!paid.at;
   const short = counted && behind(owed, got?.micros || 0, settleAt);
   const late = counted && overdue(owed, got?.micros || 0, r.last_seen, now);
   return { r, got, owed, subscribed, short, overdue: late };
-}
-
-/**
- * Overdue: owing for listening that finished more than a week ago.
- *
- * The other way to fall short. Someone who plays one song owes less than the
- * artist's amount and is never "behind" — but their app must still send it
- * within a week. The artist can't see when each minute was played, only when
- * the wallet was last heard, so this is certain only once *everything* is that
- * old: last heard over a week ago (and a day's grace, since the app pays when
- * next opened), with money still unpaid.
- *
- * Unpaid means more than rounding: half a cent, or a tenth of what they owe,
- * whichever is larger — the artist's count of seconds and the listener's are
- * made separately, and today's price may not be the one they listened at.
- */
-export function overdue(owedMicros, paidMicros, lastSeen, now = Date.now()) {
-  const unpaid = owedMicros - paidMicros;
-  // Under a cent is never sent on its own (it waits for more), so it's never
-  // overdue: the slack starts there.
-  const slack = Math.max(LISTEN_MIN_MICROS, owedMicros * 0.1);
-  return unpaid > slack && now - Number(lastSeen) > (SETTLE_WITHIN_DAYS + 1) * DAY;
 }
 
 /** Who to look at first: overdue, then behind, then everyone else as they came. */
@@ -2136,6 +2104,155 @@ export function rank(a, b) {
  */
 const LISTENERS_PAGE = 10;
 
+/** The most wallets sent to the server in one request (MAX_PAID_WALLETS there). */
+const PAID_CHUNK = 1000;
+
+/**
+ * What everyone has paid for listening, as just read from the chain, in
+ * pieces the server takes: wallet → whole micros. Only real addresses, and
+ * only those who paid something.
+ */
+export function paidChunks(paid, size = PAID_CHUNK) {
+  const entries = Object.entries(paid?.byWallet || {})
+    .filter(([w, p]) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(w) && Math.round(p?.micros || 0) > 0)
+    .map(([w, p]) => [w, Math.round(p.micros)]);
+  const chunks = [];
+  for (let i = 0; i < entries.length; i += size) chunks.push(Object.fromEntries(entries.slice(i, i + size)));
+  return chunks;
+}
+
+/**
+ * Who Auto-block would stop serving, by the rules the server applies
+ * (spec/standing.mjs), with the payments just read from the chain: everyone
+ * not already blocked by hand, not subscribed, and behind or overdue.
+ */
+export function wouldAutoBlock(rows, paid, rate, settleAt, now = Date.now()) {
+  return (rows || []).filter((r) => !r.blocked && !r.paidOnly).map((r) => ({
+    r,
+    ...autoBlock(r, paid?.byWallet?.[r.pubkey]?.micros || 0, {
+      ratePerMinute: rate, settleAt, subscribed: !!(r.subscribed_until && r.subscribed_until > now), now,
+    }),
+  })).filter((s) => s.blocked);
+}
+
+/**
+ * Why Auto-block can't be turned on yet, in words for the artist, or null if
+ * it can: it needs a price by the minute and somewhere to be paid, and every
+ * payment read from the chain — not some of them, and not still reading.
+ */
+export function autoBlockWaits(rate, paid) {
+  if (!(rate > 0) || !(paid?.addresses || []).length) return "Set a price per minute and how you get paid first.";
+  if (paid.busy) return "Checking who has paid…";
+  if (!paid.at) return "Check who has paid first, with the arrow below.";
+  if (paid.more) return "There are more payments to read: check again with the arrow below first.";
+  return null;
+}
+
+/**
+ * Auto-block: when on, the artist's server stops serving listeners who are
+ * behind on paying, until they pay. Its state lives on the server; this is
+ * the switch for it.
+ *
+ * It can't be turned on until payments have been read completely: the server
+ * has seen only the payments it sent, and anyone who paid another way would be
+ * refused as if they hadn't. So turning it on sends what the chain says
+ * everyone has paid, and while it's on, every fresh reading is sent again.
+ */
+function useAutoBlock({ api, paid, rate, settleAt, rows, onChanged }) {
+  const [state, setState] = useState(null);       // { enabled, since } once known
+  const [working, setWorking] = useState(false);
+  const [problem, setProblem] = useState(null);
+  const sentAt = useRef(null);
+
+  useEffect(() => {
+    if (!api.autoblock) return;
+    api.autoblock().then(setState).catch((e) => setProblem(`Couldn't read Auto-block's setting: ${e.message}`));
+  }, []);
+
+  const on = !!state?.enabled;
+  const read = !!paid?.at && !paid?.more && !paid?.busy;
+
+  // While it's on, what the chain says is sent again after every complete
+  // reading, so anything the server missed is made good.
+  useEffect(() => {
+    if (!on || !read || sentAt.current === paid.at || !api.sendPaid) return;
+    sentAt.current = paid.at;
+    (async () => {
+      for (const chunk of paidChunks(paid)) await api.sendPaid(chunk);
+      onChanged?.();
+    })().catch(() => { sentAt.current = null; });
+  }, [on, read, paid?.at]);
+
+  const reason = on || !state ? null : autoBlockWaits(rate, paid);
+
+  async function toggle() {
+    if (!state || working) return;
+    setProblem(null);
+    if (!on) {
+      if (reason) return;
+      const caught = wouldAutoBlock(rows, paid, rate, settleAt);
+      const owed = caught.reduce((sum, s) => sum + s.owes, 0);
+      const said = caught.length
+        ? `${caught.length} listener${caught.length === 1 ? " is" : "s are"} behind right now and won't be served until they pay (${fromMicros(owed)} owed in total). Their app is told what they owe and pays it.`
+        : "Nobody is behind right now. From now on, anyone who falls behind won't be served until they pay.";
+      if (!window.confirm(`${said}\n\nTurn on Auto-block?`)) return;
+    }
+    setWorking(true);
+    try {
+      if (on) {
+        setState(await api.setAutoblock(false));
+      } else {
+        const chunks = paidChunks(paid);
+        // All but the last first, so the setting goes on with everything
+        // already there.
+        for (const chunk of chunks.slice(0, -1)) await api.sendPaid(chunk);
+        sentAt.current = paid.at;
+        setState(await api.setAutoblock(true, chunks[chunks.length - 1] || {}));
+      }
+      onChanged?.();
+    } catch (e) {
+      setProblem(`Couldn't change Auto-block: ${e.message}`);
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  return { known: !!state, on, disabled: !state || working || (!on && !!reason), reason, problem, toggle, working };
+}
+
+/** Beside a listener the server isn't serving until they pay. */
+export function AutoBlockChip({ row }) {
+  if (!row?.auto_blocked) return null;
+  return (
+    <span class="chip unpaid" title="Auto-block isn't serving them until they pay. Their app is told what they owe.">
+      Auto-blocked, owes {fromMicros(row.owes_micros || 0)}
+    </span>
+  );
+}
+
+/** The switch itself, at the right of "Your listeners". */
+export function AutoBlockSwitch({ ab }) {
+  if (!ab.known && !ab.problem) return null;
+  return (
+    <button type="button" role="switch" aria-checked={ab.on ? "true" : "false"} class={`ab-switch${ab.on ? " on" : ""}`}
+      disabled={ab.disabled} onClick={ab.toggle} aria-describedby="autoblock-help">
+      <span class="ab-knob" aria-hidden="true" />
+      <span>Auto-block</span>
+    </button>
+  );
+}
+
+export function AutoBlockHelp({ ab }) {
+  if (!ab.known && !ab.problem) return null;
+  return (
+    <p class="autoblock-help muted" id="autoblock-help">
+      Stop serving listeners who are behind on paying, until they pay. Their app is told what they owe and pays it.
+      {ab.reason && <> <strong>{ab.reason}</strong></>}
+      {ab.problem && <> <span class="bad">{ab.problem}</span></>}
+    </p>
+  );
+}
+
 function Listeners({ api, paid, rate, settleAt }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
@@ -2145,6 +2262,7 @@ function Listeners({ api, paid, rate, settleAt }) {
 
   const load = () => api.listeners().then(setRows).catch((e) => setError(e.message));
   useEffect(() => { load(); }, []);
+  const ab = useAutoBlock({ api, paid, rate, settleAt, rows, onChanged: load });
 
   /**
    * Everything held about one wallet, as a file.
@@ -2219,6 +2337,7 @@ function Listeners({ api, paid, rate, settleAt }) {
       <p class="muted">Couldn't load your listeners just now. <button class="link" onClick={() => { setError(null); load(); }}>Try again</button></p></section>
   );
   if (!rows) return <p class="muted">Looking…</p>;
+  // (Auto-block's switch appears once there's someone to apply it to.)
 
   if (!all.length) {
     return (
@@ -2232,14 +2351,20 @@ function Listeners({ api, paid, rate, settleAt }) {
 
   return (
     <section class="card">
+      <div class="listeners-head">
       <h2>Your listeners <span class="note">{all.length}</span>
         <Help at="banning" about="your listeners">Listeners don't sign up with a name, so each one is shown by a
           short code from their payment app. You see how much they listened, never what or when.
           A <strong>Paid</strong> figure in red means they're more than one payment behind. <strong>Overdue</strong>{" "}
           means they owe for listening over a week old, usually just because they haven't opened Amply since.{" "}
-          <strong>Block</strong> stops them playing your paid tracks. If someone asks for a copy of their data, use{" "}
+          <strong>Block</strong> stops them playing your paid tracks. <strong>Auto-block</strong> does it for
+          you, for anyone behind or overdue, until they pay; their app is told what they owe and pays it, and
+          nobody is stopped while your fees account can't take payments. If someone asks for a copy of their data, use{" "}
           <strong>Export</strong>; if they ask you to delete it, <strong>Delete</strong>. Records are deleted
           automatically a year after someone was last here.</Help></h2>
+        <AutoBlockSwitch ab={ab} />
+      </div>
+      <AutoBlockHelp ab={ab} />
 
       <div class="reconcile">
         <span class="muted">
@@ -2287,6 +2412,7 @@ function Listeners({ api, paid, rate, settleAt }) {
               <td title={`Their wallet code: ${r.pubkey}`}>
                 Listener {numberOf.get(r.pubkey)}
                 <span class="code mono muted small">{r.pubkey.slice(0, 4)}…{r.pubkey.slice(-4)}</span>
+                <AutoBlockChip row={r} />
               </td>
               <td>{r.plays}</td>
               <td class="wide">{listened}</td>

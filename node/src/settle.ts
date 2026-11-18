@@ -237,7 +237,7 @@ export async function feeBalance(rpc: Rpc, address: string, { fresh = false, now
 
 /** Whether today's fees of this kind still have room, without counting one.
  *  Fails closed: no table (a database built before it), no fees. */
-async function feeRoom(db: D1Database, kind: FeeKind = "pay", now = Date.now()): Promise<boolean> {
+export async function feeRoom(db: D1Database, kind: FeeKind = "pay", now = Date.now()): Promise<boolean> {
   try {
     const row = await db.prepare("SELECT count FROM fee_days WHERE day = ?").bind(dayKey(kind, now)).first<{ count: number }>();
     return (row?.count ?? 0) < capOf(kind);
@@ -288,7 +288,7 @@ async function noteOpened(db: D1Database, owner: string): Promise<void> {
 // ── settling ────────────────────────────────────────────────────────────────
 
 export type Settled =
-  | { ok: true; signature: string; micros: number; confirmed: boolean }
+  | { ok: true; signature: string; micros: number; confirmed: boolean; listener: string }
   | { ok: false; status: number; why: string };
 
 const refuse = (status: number, why: string): Settled => ({ ok: false, status, why });
@@ -375,7 +375,7 @@ export async function settle(
     // It may have gone anyway: an answer lost is not a payment unsent. So the
     // listener gets the signature to look up, never a "try again" that could
     // pay twice.
-    return { ok: true, signature, micros: verdict.micros, confirmed: false };
+    return { ok: true, signature, micros: verdict.micros, confirmed: false, listener: verdict.listener };
   }
 
   // Wait for it to land, briefly. If it hasn't yet, the listener's app can
@@ -387,11 +387,11 @@ export async function settle(
       const st = (await rpc("getSignatureStatuses", [[signature]]))?.value?.[0];
       if (st?.err) return refuse(422, "the payment failed on the network; nothing was taken");
       if (st && (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized")) {
-        return { ok: true, signature, micros: verdict.micros, confirmed: true };
+        return { ok: true, signature, micros: verdict.micros, confirmed: true, listener: verdict.listener };
       }
     } catch { /* keep waiting */ }
   }
-  return { ok: true, signature, micros: verdict.micros, confirmed: false };
+  return { ok: true, signature, micros: verdict.micros, confirmed: false, listener: verdict.listener };
 }
 
 const CANT_PAY_FEE = "this artist's node can't pay the network fee right now; nothing was sent";

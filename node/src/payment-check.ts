@@ -10,7 +10,7 @@
  * but paid somebody else, or paid in a worthless token, or was sent by a
  * different wallet, must all fail. So must one already spent for access.
  */
-import { MEMO_PROGRAM } from "../../spec/chains.mjs";
+import { MEMO_PROGRAM, TOKEN_PROGRAM } from "../../spec/chains.mjs";
 
 export interface PaymentClaim {
   signature: string;    // the transaction
@@ -137,6 +137,82 @@ export async function verifyPayment(claim: PaymentClaim, terms: PaymentTerms): P
   if (micros < terms.minMicros) return { ok: false, why: "that payment was too small", micros };
 
   return { ok: true, micros, when: tx.blockTime ?? undefined };
+}
+
+// ── a payment for listening, reported by the listener's app ────────────────
+
+export interface ListeningTerms {
+  mint: string;                       // USDC on the artist's network
+  /** Each payee's own USDC account, mapped to the payee. */
+  accounts: Map<string, string>;
+  now: number;
+  /** How old a payment may be and still be reported, in milliseconds. */
+  withinMs: number;
+}
+
+export type ListeningVerdict =
+  | { ok: true; payer: string; micros: number; when: number | null }
+  | { ok: false; why: string; retry?: boolean };
+
+/**
+ * Is this transaction, as the chain returned it (getTransaction, jsonParsed),
+ * a plain payment for listening to this artist — and who made it?
+ *
+ * Plain means what the app sends when it pays for listening, and what the
+ * editor counts as paying for listening when it reads the chain: USDC, from
+ * one wallet that signed it, into the artist's payees' own USDC accounts and
+ * nowhere else, with no note. A note marks a tip or a purchase, which are not
+ * payment for listening; a transfer anywhere else is a withdrawal or
+ * something stranger, whose fee to the artist isn't either. Nothing here is
+ * taken from the request but the signature: who paid is read off the chain,
+ * so reporting someone else's payment only ever credits them.
+ */
+export function readListeningPayment(tx: any, terms: ListeningTerms): ListeningVerdict {
+  // Not there yet: an unconfirmed send may still land, so worth asking again.
+  if (!tx) return { ok: false, retry: true, why: "that payment isn't on the network yet; try again in a minute" };
+  if (tx.meta?.err) return { ok: false, why: "that payment failed on the network" };
+  const blockMs = Number(tx.blockTime) > 0 ? Number(tx.blockTime) * 1000 : null;
+  if (blockMs !== null && terms.now - blockMs > terms.withinMs) return { ok: false, why: "that payment is too old to report" };
+
+  const all = [
+    ...(tx.transaction?.message?.instructions ?? []),
+    ...(tx.meta?.innerInstructions ?? []).flatMap((i: any) => i?.instructions ?? []),
+  ];
+  if (all.some((ix: any) => ix?.program === "spl-memo" || ix?.programId === MEMO_PROGRAM)) {
+    return { ok: false, why: "that payment carries a note: a tip or a purchase, not paying for listening" };
+  }
+
+  const keys: { pubkey: string; signer?: boolean }[] = (tx.transaction?.message?.accountKeys ?? [])
+    .map((k: any) => (typeof k === "string" ? { pubkey: k } : k));
+  let payer: string | null = null;
+  let micros = 0;
+  for (const ix of all) {
+    const p = ix?.parsed;
+    if (!p || typeof p !== "object") continue;
+    // Token transfers only: a SOL transfer (the system program's "transfer")
+    // moves no dollars and is nothing to do with this.
+    if (ix?.program !== "spl-token" && ix?.programId !== TOKEN_PROGRAM) continue;
+    if (p.type !== "transferChecked" && p.type !== "transfer") continue;
+    const info = p.info ?? {};
+    const owner = terms.accounts.get(String(info.destination));
+    if (!owner) return { ok: false, why: "that payment sends money somewhere other than this artist" };
+    // The payee's account is worked out from the USDC mint, so nothing else
+    // can be in it; a transfer that names another mint is refused all the same.
+    if (info.mint && info.mint !== terms.mint) return { ok: false, why: "that payment isn't in USDC" };
+    const from = String(info.authority || info.multisigAuthority || "");
+    if (!from) return { ok: false, why: "that payment doesn't say who sent it" };
+    if (payer !== null && from !== payer) return { ok: false, why: "that payment comes from more than one wallet" };
+    payer = from;
+    const amount = Number(info.tokenAmount?.amount ?? info.amount ?? 0);
+    if (!Number.isSafeInteger(amount) || amount <= 0) return { ok: false, why: "that payment's amount doesn't make sense" };
+    micros += amount;
+  }
+  if (!payer || micros <= 0) return { ok: false, why: "that transaction doesn't pay this artist" };
+  if ([...terms.accounts.values()].includes(payer)) return { ok: false, why: "that's the artist's own money moving, not a listener paying" };
+  const signer = keys.find((k) => k.pubkey === payer);
+  if (signer && signer.signer === false) return { ok: false, why: "the wallet it's from didn't sign it" };
+  if (!Number.isSafeInteger(micros)) return { ok: false, why: "that payment's amount doesn't make sense" };
+  return { ok: true, payer, micros, when: blockMs };
 }
 
 /**

@@ -11,10 +11,11 @@
  * What this does not check is whether the listening was paid for. It
  * identifies, and the artist's editor reads the chain to show who has listened
  * without paying, so the artist can stop serving them. A stopped wallet is
- * refused here, and loses the music within a token's lifetime.
+ * refused here, and loses the music within a token's lifetime. With Auto-block
+ * on, so is a wallet that has fallen behind (spec/standing.mjs), until it pays.
  */
 import { verifySignature, challengeIsFresh, fromBase58 } from "./identity";
-import { listener, seen, signingKey } from "./store";
+import { listener, seen, signingKey, type Listener } from "./store";
 import { needsWallet } from "../../spec/pricing.mjs";
 
 /** Half an hour. Short enough that a block takes effect soon, long enough that
@@ -67,6 +68,9 @@ export interface Introduction {
   why?: string;
   /** Set when the refusal is "too many new wallets just now", not "never". */
   busy?: boolean;
+  /** Set when the refusal is Auto-block's: what's still unpaid, in micros.
+   *  Paying it lifts the refusal by itself. */
+  unpaid?: number;
 }
 
 /**
@@ -100,6 +104,13 @@ export async function proveOwnership(
  * what keeps playback free of database reads. The cost is that a block takes up
  * to a token's lifetime to bite, which is half an hour and fine: nobody needs
  * banning within the minute.
+ *
+ * Auto-block is enforced here too, and for the same reason: a pass already
+ * handed out keeps working until it expires (at most TOKEN_LIFE), and the
+ * next one is refused until the listener has paid. Only a wallet this node
+ * has a record of can owe anything; one it has never seen is never asked.
+ * The refusal comes before `seen`, deliberately: noting the visit would make
+ * an overdue wallet look recently heard from, and so no longer overdue.
  */
 export async function introduce(
   db: D1Database,
@@ -110,6 +121,9 @@ export async function introduce(
    *  let in right now. A wallet costs nothing to make, so brand-new ones are
    *  admitted only so fast (limits.ts, RULES.newListener). */
   admitNew: () => Promise<boolean> = async () => true,
+  /** Asked for a known wallet the artist hasn't blocked: what it owes, if
+   *  Auto-block says it isn't to be served until it pays; else null. */
+  owing: (known: Listener) => Promise<number | null> = async () => null,
 ): Promise<Introduction> {
   const proof = await proveOwnership(host, body, now);
   if (!proof.ok) return { ok: false, why: proof.why };
@@ -119,6 +133,15 @@ export async function introduce(
   if (known?.blocked) return { ok: false, why: "this artist has stopped serving this wallet" };
   if (!known && !(await admitNew())) {
     return { ok: false, busy: true, why: "too many new listeners right now; try again in a minute" };
+  }
+  if (known) {
+    const owes = await owing(known);
+    if (owes !== null) {
+      return {
+        ok: false, unpaid: owes,
+        why: `you owe this artist $${(owes / 1_000_000).toFixed(2)} for listening; once it's paid, their music plays again`,
+      };
+    }
   }
 
   await seen(db, address, now);
