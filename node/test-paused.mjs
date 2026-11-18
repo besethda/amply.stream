@@ -141,6 +141,22 @@ rpcDown = false;
   ok("  turned off: the plain music page instead, the site kept", !page.includes('class="s-hero') && /<html/.test(page));
 }
 
+// ── a play reported the way the app sends it: the pass in the address ──
+{
+  later(6);
+  lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
+  await served();
+  later(2);
+  const who = "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T";
+  const token = await issueToken(DB, who);
+  const res = await worker.fetch(new Request(`${ORIGIN}/listen/played?t=${encodeURIComponent(token)}`, {
+    method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": "192.0.2.77" }, body: JSON.stringify({ seconds: 90 }),
+  }), env);
+  ok("a play reported with ?t= is counted", res.status === 204 && (await listener(DB, who))?.seconds === 90, String((await listener(DB, who))?.seconds));
+  const allowed = String((await worker.fetch(new Request(`${ORIGIN}/listen/played`, { method: "OPTIONS" }), env)).headers.get("Access-Control-Allow-Headers") || "").toLowerCase();
+  ok("  and the only header it sends (Content-Type) is one other sites may send", allowed.includes("content-type"), allowed);
+}
+
 // ── the favicon, served by the artist's own server ──
 {
   const { readFileSync } = await import("node:fs");

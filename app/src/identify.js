@@ -263,9 +263,12 @@ export async function reportPlayed(pair, origin, seconds) {
   const token = await tokenFor(pair, origin).catch(() => null);
   if (!token) return;
   try {
-    await fetch(`${origin}/listen/played`, {
+    // The pass goes in the address, as for audio and /heard: an Authorization
+    // header isn't one the artist's server lets other sites send, so the
+    // browser would refuse the report before it left.
+    await fetch(audioUrl(`${origin}/listen/played`, token), {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ seconds: Math.round(seconds) }),
       keepalive: true,
     });
