@@ -24,12 +24,14 @@ import {
 } from "./preview-key";
 import { renderPage, renderPrivacy, pageCsp, pageWebManifest } from "./page";
 import {
-  setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale, pruneHourly,
+  setting, putSetting, listeners, listener, setBlocked, counted, MAX_REPORT_S, forget, remove, pruneStale, pruneHourly,
   subscribedUntil, pruneSubscriptions, heard, songTotals, playsToday,
   paidOf, recordPaid, paidSigKnown, mergePaid, MAX_PAID_WALLETS, autoBlockSetting, setAutoBlock, owedRowOf,
+  addServed, billServed, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
   type Listener,
 } from "./store";
-import { autoBlock } from "../../spec/standing.mjs";
+import { autoBlock, owedOf, unpaidOf } from "../../spec/standing.mjs";
+import { metered, slackFor, lengthOf, takePending, forgetTallies, DELIVERED_CAP } from "./meter";
 import { fromBase58 } from "./identity";
 import { readListeningPayment } from "./payment-check";
 import { introduce, readToken, guardedKeys, masterKeys, proveOwnership } from "./listen";
@@ -110,7 +112,12 @@ function storedType(prefix: string, key: string): string {
 /** Audio and art are immutable once published; the manifest changes. */
 const CACHE_AUDIO = "public, max-age=31536000, immutable";
 /** Paid audio: the listener's own browser may keep it, but a shared cache
- *  (a CDN, an office proxy) mustn't hand it to someone without a pass. */
+ *  (a CDN, an office proxy) mustn't hand it to someone without a pass.
+ *  Metering (meter.ts) counts what's sent, so a replay from the browser's own
+ *  cache isn't counted again there; it doesn't need to be, because the app
+ *  reports every play, replays included, and the larger of the two is what's
+ *  billed. Making the browser ask again would only spend the listener's data
+ *  and the artist's requests to learn what the report already says. */
 const CACHE_AUDIO_PAID = "private, max-age=31536000, immutable";
 const CACHE_ART = "public, max-age=86400";
 const CACHE_MANIFEST = "public, max-age=300, must-revalidate";
@@ -257,7 +264,7 @@ async function manifestText(env: Env): Promise<string | null> {
  * are originals kept for downloads. Kept for the text it came from, so a
  * page, a manifest and every ranged audio request share one parse.
  */
-interface Derived { text: string; parsed: unknown; guarded?: Set<string>; masters?: Set<string> }
+interface Derived { text: string; parsed: unknown; guarded?: Set<string>; masters?: Set<string>; tracks?: TracksOf }
 let derivedStored: Derived | null = null;
 let derivedPaused: { source: string; view: Derived } | null = null;
 
@@ -269,6 +276,32 @@ function derive(text: string): Derived {
 }
 const guardedOf = (d: Derived) => (d.guarded ??= guardedKeys(d.parsed));
 const mastersOf = (d: Derived) => (d.masters ??= masterKeys(d.parsed));
+
+/** A song as metering needs it (meter.ts): its id, and its length in seconds
+ *  as published (null if the manifest doesn't say). */
+interface TrackInfo { key: string; duration: number | null }
+/** Each audio file on this node by its key, with its length (from the first
+ *  song that streams it), and each song's id to its file. Worked out once per
+ *  manifest, like guardedOf. */
+const tracksOf = (d: Derived) => (d.tracks ??= (() => {
+  const out: TracksOf = { byKey: new Map(), byId: new Map() };
+  type Track = { id?: unknown; url?: unknown; duration?: unknown };
+  for (const release of (d.parsed as { releases?: { tracks?: Track[] }[] } | null)?.releases ?? []) {
+    for (const t of release?.tracks ?? []) {
+      try {
+        const path = new URL(String(t?.url)).pathname;
+        if (!path.startsWith("/audio/")) continue;
+        const key = decodeURIComponent(path.slice("/audio/".length));
+        const duration = Number(t?.duration);
+        if (!out.byKey.has(key)) out.byKey.set(key, { key, duration: duration > 0 ? duration : null });
+        const id = String(t?.id ?? "");
+        if (id && !out.byId.has(id)) out.byId.set(id, out.byKey.get(key)!);
+      } catch { /* a URL that won't parse is nothing served */ }
+    }
+  }
+  return out;
+})());
+interface TracksOf { byKey: Map<string, TrackInfo>; byId: Map<string, TrackInfo> }
 
 /**
  * The manifest as listeners get it. While the fees account can't pay fans'
@@ -690,6 +723,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const body = await jsonBody(request);
     const pubkey = String(body?.pubkey || "");
     if (!pubkey) return fail(400, "which wallet?");
+    forgetTallies(pubkey);
     await remove(env.DB, pubkey);
     return new Response(null, { status: 204, headers: noStore() });
   }
@@ -855,6 +889,59 @@ async function whoIsAsking(request: Request, env: Env): Promise<string | null> {
   return readToken(env.DB, token);
 }
 
+/**
+ * What a minute of listening costs this wallet right now, in dollars: the
+ * artist's USDC price, or nothing while it's free to them (a subscriber, who
+ * pays by card; or payments paused, when nobody can pay). Priced as it's
+ * heard: a later change of price doesn't reprice it.
+ */
+async function perMinuteFor(env: Env, ctx: ExecutionContext | undefined, who: string): Promise<number> {
+  if (!(await takingPayments(env, ctx))) return 0;
+  const until = await subscribedUntil(env.DB, who).catch(() => null);
+  if (until !== null && until > Date.now()) return 0;
+  const priced = (await manifestNowOf(env)) as { payment?: { type?: string; ratePerMinute?: unknown }[] } | null;
+  const wallet = (priced?.payment || []).find((p) => p?.type === "solana-usdc");
+  return Math.max(0, Number(wallet?.ratePerMinute) || 0);
+}
+
+/** Work that outlives the response: ctx.waitUntil, or (a test, no ctx) just
+ *  let it run. */
+const laterOf = (ctx?: ExecutionContext) => (p: Promise<unknown>) => {
+  const quiet = p.catch(() => {});
+  if (ctx) ctx.waitUntil(quiet);
+};
+
+/** For tests: told of each metering write. */
+export const meterHooks: { onFlush?: () => void } = {};
+
+/**
+ * Count a paid track's audio as it goes to the listener (meter.ts). Only a
+ * body sent for a GET: a HEAD, a 304, a 416, an error, sends no audio.
+ * Never makes the request fail: anything wrong, and the audio goes as it is.
+ */
+function meterAudio(
+  request: Request, env: Env, ctx: ExecutionContext | undefined, res: Response, who: string, key: string, view: Derived,
+): Response {
+  try {
+    if (request.method !== "GET" || (res.status !== 200 && res.status !== 206) || !res.body) return res;
+    const length = Number(res.headers.get("Content-Length"));
+    // The whole file's size: after the slash of a range, or the length of a whole one.
+    const size = res.status === 206
+      ? Number(/\/(\d+)$/.exec(res.headers.get("Content-Range") || "")?.[1])
+      : length;
+    if (!(size > 0)) return res;
+    const body = metered(res.body, Number.isFinite(length) ? length : null, {
+      pubkey: who, track: key, size, duration: tracksOf(view).byKey.get(key)?.duration ?? null,
+    }, {
+      db: env.DB, perMinute: (p) => perMinuteFor(env, ctx, p), later: laterOf(ctx),
+      onFlush: () => meterHooks.onFlush?.(), tidy: () => pruneHourly(env.DB),
+    });
+    return new Response(body, { status: res.status, headers: res.headers });
+  } catch {
+    return res;
+  }
+}
+
 /** The artist's manifest as stored, parsed (shared: see derive), or null. */
 async function manifestNowOf(env: Env): Promise<unknown> {
   const text = await manifestText(env);
@@ -936,6 +1023,20 @@ async function owingFor(
   return owes;
 }
 
+/** What a wallet still owes, in whole micros, by the rules Auto-block uses
+ *  (spec/standing.mjs): its listening's cost less what it has paid. 0 for a
+ *  wallet this server doesn't know, without a price, while payments are
+ *  paused (nobody can pay), or without a record of payments to compare. */
+async function owesNow(env: Env, ctx: ExecutionContext | undefined, pubkey: string): Promise<number> {
+  const priced = pricing(await manifestNowOf(env));
+  if (!priced || !(await takingPayments(env, ctx).catch(() => false))) return 0;
+  const known = await listener(env.DB, pubkey);
+  if (!known) return 0;
+  const paid = await paidOf(env.DB, pubkey);
+  if (paid === null) return 0;
+  return unpaidOf(owedOf({ ...known, ...(await owedRowOf(env.DB, pubkey)) }, priced.ratePerMinute), paid);
+}
+
 /** The listeners as the editor gets them: each with what it owes by this
  *  server's count, and whether Auto-block is refusing it right now. */
 async function withStanding(env: Env, rows: Awaited<ReturnType<typeof listeners>>) {
@@ -981,6 +1082,52 @@ const REPORT_WITHIN_MS = SETTLE_WITHIN_DAYS * 86_400_000;
  *  artist's to see in their editor, not every listener's. */
 const stripeTrouble = () => fail(502, "Couldn't confirm that with Stripe; try again");
 
+/**
+ * The app's report of a play (/listen/played), added to what the node sent
+ * for that track today (meter.ts) and billed once between them: the larger
+ * of the two, less what's been billed already.
+ *
+ * Which track: the app says, by the song's id (`track`). An app from before
+ * it did sends only seconds, and the report then goes with the track sent to
+ * this wallet in the last day that is furthest ahead of what's been reported
+ * for it — almost always the one that just ended — or, with none, stands on
+ * its own (a track of "" for the day), billed as reported, as it always was.
+ * A report for a track sent yesterday and not today (a play that ran past
+ * midnight) goes with yesterday's.
+ *
+ * False when there's no table to meter with: the caller bills it as before.
+ */
+async function reportServed(env: Env, who: string, trackId: string, seconds: number, perMinute: number): Promise<boolean> {
+  const text = await manifestText(env).catch(() => null);
+  const tracks = text ? tracksOf(derive(text)) : null;
+  const now = Date.now();
+  let found = trackId ? tracks?.byId.get(trackId) ?? null : null;
+  let k;
+  try {
+    if (found) k = { pubkey: who, track: found.key, day: await servedDayFor(env.DB, who, found.key, now) };
+    else {
+      const guess = await unreportedServed(env.DB, who, now);
+      found = guess ? tracks?.byKey.get(guess.track) ?? null : null;
+      k = guess && found ? { pubkey: who, ...guess } : { pubkey: who, track: "", day: servedDay(now) };
+    }
+    // Sent by this copy of the Worker and not yet written: written now, with this.
+    const pending = found ? takePending(k) : null;
+    const length = pending?.trackSeconds ?? (found ? lengthOf(0, found.duration) : 0);
+    // A report standing on its own has nothing sent to allow for. A song
+    // whose length can't be known here gets the least slack (60 s), and no
+    // cap, which only matters for what's sent: none is added without one.
+    const slack = found ? slackFor(length) : 0;
+    await inOneGo(env.DB, [
+      addServed(env.DB, k, { delivered: pending?.seconds ?? 0, reported: seconds, cap: DELIVERED_CAP * length }),
+      ...billServed(env.DB, k, { slack, perMinute, plays: 1, now }),
+    ]);
+    return true;
+  } catch (e) {
+    if (/no such table/i.test(String((e as Error)?.message ?? e))) return false;
+    throw e;
+  }
+}
+
 /** Everything a listener can do without being the artist. */
 async function handleListen(request: Request, env: Env, path: string, ctx?: ExecutionContext): Promise<Response | null> {
   const host = new URL(request.url).host;
@@ -1022,7 +1169,15 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (!subscribed && subscriptionOnly(manifest)) {
       return fail(402, "subscribe to hear this artist's paid tracks");
     }
-    return json({ token: result.token, subscribedUntil: subscribed ? until : null });
+    // What this wallet still owes by this server's count, in micros: what
+    // its listening cost (owed, which includes what the server metered
+    // itself, meter.ts) less what it has paid — the same number Auto-block
+    // refuses with, and 0 when nothing (or nothing it could pay: a
+    // subscriber, payments paused). The app pays it when it's past the
+    // artist's payment point, even if its own ledger says less; below that,
+    // the usual settling applies.
+    const owes = subscribed ? 0 : await owesNow(env, ctx, address).catch(() => 0);
+    return json({ token: result.token, subscribedUntil: subscribed ? until : null, owes });
   }
 
   // ── paying listeners' network fees (settle.ts, feepay.ts) ────────────────
@@ -1325,13 +1480,13 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     const body = await jsonBody(request);
     // Priced now, as it's heard: a later change of price doesn't reprice it.
     // A subscriber pays by card, so their listening costs nothing here.
-    const until = await subscribedUntil(env.DB, who).catch(() => null);
-    const subscribed = until !== null && until > Date.now();
-    let perMinute = 0;
-    const priced = (await manifestNowOf(env)) as { payment?: { type?: string; ratePerMinute?: unknown }[] } | null;
-    const wallet = (priced?.payment || []).find((p) => p?.type === "solana-usdc");
-    perMinute = subscribed ? 0 : Math.max(0, Number(wallet?.ratePerMinute) || 0);
-    await counted(env.DB, who, Number(body?.seconds) || 0, Date.now(), perMinute);
+    const perMinute = await perMinuteFor(env, ctx, who);
+    const seconds = Math.max(0, Math.min(Math.round(Number(body?.seconds) || 0), MAX_REPORT_S));
+    // Beside what the node itself sent (meter.ts), so the two are billed once
+    // between them; on a database without that table, as it always was.
+    if (!(await reportServed(env, who, String(body?.track ?? ""), seconds, perMinute))) {
+      await counted(env.DB, who, seconds, Date.now(), perMinute);
+    }
     // Now and then, clear out wallets not heard from in a year. Here rather
     // than on a timer, so there is nothing for an artist to set up; and at
     // most hourly, since it reads the whole table (pruneHourly).
@@ -1384,6 +1539,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (!body) return fail(400, "bad request");
     const proof = await proveOwnership(host, body as never);
     if (!proof.ok) return fail(403, proof.why);
+    forgetTallies(proof.address);
     await forget(env.DB, proof.address);
     return new Response(null, { status: 204, headers: noStore() });
   }
@@ -1397,27 +1553,33 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     const proof = await proveOwnership(host, body as never);
     if (!proof.ok) return fail(403, proof.why);
     const row = await listener(env.DB, proof.address);
+    // What was sent to this wallet in the last three days (meter.ts), counted.
+    const servedTracks = await servedCount(env.DB, proof.address);
     return json({
       controller: host,
       wallet: proof.address,
-      held: row
+      held: row || servedTracks
         ? {
-            plays: row.plays,
-            seconds: row.seconds,
+            plays: row?.plays ?? 0,
+            seconds: row?.seconds ?? 0,
             costMicros: await env.DB.prepare("SELECT micros FROM owed WHERE pubkey = ?").bind(proof.address)
               .first<{ micros: number }>().then((o) => o?.micros ?? null).catch(() => null),
             paidMicros: await env.DB.prepare("SELECT micros FROM paid WHERE pubkey = ?").bind(proof.address)
               .first<{ micros: number }>().then((o) => o?.micros ?? null).catch(() => null),
-            firstSeen: row.first_seen ? new Date(row.first_seen).toISOString() : null,
-            lastSeen: row.last_seen ? new Date(row.last_seen).toISOString() : null,
-            servingStopped: !!row.blocked,
+            firstSeen: row?.first_seen ? new Date(row.first_seen).toISOString() : null,
+            lastSeen: row?.last_seen ? new Date(row.last_seen).toISOString() : null,
+            servingStopped: !!row?.blocked,
+            // How many (track, day) rows of seconds sent, reported and
+            // billed are held for the last three days: one per paid track
+            // sent to this wallet each day. Erasing deletes them.
+            servedTracks: servedTracks ?? 0,
           }
         : null,
       subscribedUntil: await subscribedUntil(env.DB, proof.address).then((u) => (u ? new Date(u).toISOString() : null)),
       purchases: await purchasesOf(env.DB, proof.address).then(({ owned, gifts }) =>
         [...owned, ...gifts].map((s) => ({ item: s.item, paidWith: s.via, when: new Date(s.created).toISOString(), gift: !s.owner }))).catch(() => []),
-      notHeld: "Which tracks you played, and when. This server never records that.",
-      keptFor: "A year after you were last here, then deleted automatically.",
+      notHeld: "A history of what you played, or when. For the last three days only, this server keeps how many seconds of each paid track it sent you each day, to charge for listening fairly; then it deletes them.",
+      keptFor: "Totals: a year after you were last here. What was sent: three days. Then deleted automatically.",
       exported: new Date().toISOString(),
     }, 200, 2);
   }
@@ -1583,7 +1745,12 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
       if (!who) {
         return fail(401, "this track is for listeners who have said who they are");
       }
-      return serveObject(env, request, key, CACHE_AUDIO_PAID, "audio/mpeg");
+      // Kept privately by the listener's browser for a year, and replayed
+      // from there without asking: that's fine for metering (meter.ts), since
+      // what's replayed was counted when it was sent, and the app's report
+      // of the replay is what bills it. A shared cache still can't keep it.
+      const served = await serveObject(env, request, key, CACHE_AUDIO_PAID, "audio/mpeg");
+      return meterAudio(request, env, ctx, served, who, key.slice("audio/".length), view);
     }
     // Free right now only because payments are paused: still the artist's
     // paid music, and kept for a year, so not left in shared caches to be

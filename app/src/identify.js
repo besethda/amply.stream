@@ -11,7 +11,7 @@
 import { machinery } from "./paying.js";
 import { NETWORKS, networkFor } from "./networks.js";
 import { FEES_READY_LAMPORTS } from "../../spec/pricing.mjs";
-import { unpaidRefusal, reported, markReported, dropCredit } from "./owes.js";
+import { unpaidRefusal, passOwes, reported, markReported, dropCredit } from "./owes.js";
 
 const TOKENS = "amply.tokens.v1";
 
@@ -153,12 +153,30 @@ export async function tokenFor(pair, origin) {
   }
   if (!res.ok) return null;
 
-  const { token, subscribedUntil = null } = await res.json();
+  const body = await res.json();
+  const { token, subscribedUntil = null } = body;
   // The node's tokens last half an hour; keep ours a little shorter. Whether
   // the wallet is subscribed comes with it, so there is nothing extra to ask.
-  all[origin] = { token, until: Date.now() + 25 * 60_000, subscribedUntil };
+  // So does what the node says is still unpaid (`owes`, micros), kept until
+  // the app looks at it once (takePassOwes): the node meters what it sends,
+  // so it may know of listening this device never banked.
+  all[origin] = { token, until: Date.now() + 25 * 60_000, subscribedUntil, owes: passOwes(body) };
   write(all);
   return token;
+}
+
+/**
+ * What the node said was still owed when it last handed out a pass, in
+ * micros, or null; then forgotten, so it's acted on once per pass and an old
+ * number can't be paid again after it has been paid.
+ */
+export function takePassOwes(origin) {
+  const all = read();
+  const owes = all[origin]?.owes;
+  if (owes == null) return null;
+  all[origin] = { ...all[origin], owes: null };
+  write(all);
+  return owes;
 }
 
 /**
@@ -300,8 +318,11 @@ export async function reportPaid(origin, signature) {
   return false;
 }
 
-/** Tell the node a track finished, so the artist can see how much was played. */
-export async function reportPlayed(pair, origin, seconds) {
+/** Tell the node a track finished, so the artist can see how much was played,
+ *  and which song (its id): the node bills the larger of this and what it
+ *  sent for that song, so naming it is what keeps the two from both being
+ *  charged. */
+export async function reportPlayed(pair, origin, seconds, track = null) {
   const token = await tokenFor(pair, origin).catch(() => null);
   if (!token) return;
   try {
@@ -311,7 +332,7 @@ export async function reportPlayed(pair, origin, seconds) {
     await fetch(audioUrl(`${origin}/listen/played`, token), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ seconds: Math.round(seconds) }),
+      body: JSON.stringify(track ? { seconds: Math.round(seconds), track: String(track) } : { seconds: Math.round(seconds) }),
       keepalive: true,
     });
   } catch { /* the artist's tally is not worth interrupting playback for */ }

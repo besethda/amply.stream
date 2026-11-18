@@ -18,10 +18,10 @@ import {
   loadLedger, bank, owing, settle, settleAll, backupSaved, totalOwed, hasWallet, machinery, rateStatus, mismatch, exclusive, payClaim,
 } from "./paying.js";
 import { agreeRate } from "./spend.js";
-import { claimOf, noteClaim, claimDue, wakeClaims } from "./owes.js";
+import { claimOf, noteClaim, claimDue, wakeClaims, claimFromPass, passOwesDue } from "./owes.js";
 import {
   tokenFor, reportPlayed, reportHeard, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
-  manageSubscription, claimSubscription, reportPaid,
+  manageSubscription, claimSubscription, reportPaid, takePassOwes,
 } from "./identify.js";
 import { perMinute, subscriptionOnly, plans as plansOf } from "../../spec/pricing.mjs";
 import { Icon } from "./icons.jsx";
@@ -250,6 +250,10 @@ export function App() {
           throw refuse(e.subscribe ? "subscribe" : "refused", e.message, data);
         }
         if (!token) throw refuse("offline", "", data);
+        // The pass may say what their server counts as still owed (it meters
+        // what it sends). Past the artist's payment point, that's paid as if
+        // the pass had been refused for it — but the song plays meanwhile.
+        if (artist && claimFromPass(artist, takePassOwes(origin))) setTimeout(() => settleRef.current?.(), 0);
 
         // An artist who can't be paid right now (their fees account is
         // empty) is free to hear: no money needed, no price to agree to.
@@ -288,7 +292,7 @@ export function App() {
         // Listening that costs nothing isn't reported as listening owed for.
         const artist = library.current.find((e) => e.url === track.from);
         if (!isSubscribed(originOf(track.url)) && !(artist && rateOf(artist.manifest) && feesCovered(artist))) return;
-        reportPlayed(holder.current, originOf(track.url), seconds);
+        reportPlayed(holder.current, originOf(track.url), seconds, track.id);
       },
     },
   ), []);
@@ -470,6 +474,15 @@ export function App() {
       forgetToken(origin);
       const t = await tokenFor(holder.current, origin);
       if (!t) throw new Error("Their streaming service isn't answering. Amply will ask again shortly.");
+      // A pass that still says enough is owed is taken as a refusal saying
+      // so (paying.js payClaim): noted and paid at the next try, not now.
+      const entry = library.current.find((e) => originOf(e.url) === origin);
+      const owes = takePassOwes(origin);
+      if (entry && passOwesDue(owes, entry.manifest)) {
+        const e = new Error("Their server still counts listening as unpaid.");
+        e.unpaid = true; e.owes = owes;
+        throw e;
+      }
       return t;
     },
     balanceMicros: funds.current && Number.isFinite(funds.current.usdc) ? Math.floor(funds.current.usdc * 1e6) : null,

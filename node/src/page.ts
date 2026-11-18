@@ -374,11 +374,16 @@ wallet that plays their paid tracks:</p>
   behalf or that your app told it about, and the totals ${name} reads from the public Solana
   network, with a reference to each payment it counted so none counts twice;</li>
   <li>when you first and last listened;</li>
-  <li>whether ${name} has stopped serving that wallet.</li>
+  <li>whether ${name} has stopped serving that wallet;</li>
+  <li>for the last three days only: how many seconds of each paid track it sent to your wallet
+  on each day, and how many your app said you played. Listening is charged by the larger of the
+  two (allowing for what a player loads ahead and doesn't play), so it is paid for even when an
+  app doesn't report it. These are deleted automatically after three days.</li>
 </ul>
-<p><strong>What is not kept:</strong> which tracks you played, or when you played any one of
-them. This server does not record that at all. Nothing is kept for tracks ${name} has made
-free, which anyone can play without a wallet.</p>
+<p><strong>What is not kept:</strong> a history of which tracks you played, or when you played
+any one of them: beyond those three days of what was sent, by the day and never the time, this
+server does not record it at all. Nothing is kept for tracks ${name} has made free, which anyone
+can play without a wallet.</p>
 <p>Separately, each song keeps a count of how often it has been played by everyone together, so
 ${name} can see what's popular. It holds no wallet and nothing about who played it.</p>
 <p>No account, email address or name is asked for. A wallet address does not say who you are
@@ -398,7 +403,8 @@ ${name} makes by hand.`
 stopping service is a decision ${name} makes by hand.`}</p>
 
 <h2>How long</h2>
-<p>A year after you last listened, after which the record is deleted automatically. If
+<p>A year after you last listened, after which the record is deleted automatically; what
+was sent to you, after three days. If
 ${name} has stopped serving your wallet, the wallet address and that decision are kept for as
 long as it stands — with every other figure removed.</p>
 
