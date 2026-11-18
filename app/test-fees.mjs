@@ -132,7 +132,13 @@ await neverSelf("a node that isn't paying fees: nothing sent, payments paused", 
 await neverSelf("an offer on another network: the same", { offer: { feePayer, network: nodeNet() === "solana" ? "devnet" : "solana", minMicros: 10_000, maxMicros: 2_000_000 } });
 await neverSelf("an offer naming a payee as fee payer: the same", { offer: { feePayer: artist, network: nodeNet(), minMicros: 10_000, maxMicros: 2_000_000 } });
 await neverSelf("a payment above the most one can be: refused, nothing sent", offering(), 3_000_000);
-await neverSelf("a node that refuses before sending: nothing sent by the listener", { ...offering(), answer: () => json({ error: "this artist's node has paid all the fees it will today" }, 503) }, 100_000, 1);
+await neverSelf("a node saying it isn't paying fees right now (409): paused", { ...offering(), answer: () => json({ error: "this artist's node isn't paying network fees right now" }, 409) }, 100_000, 1);
+for (const [why, status] of [["a payee closed their USDC account after this server opened it", 403], ["too many payments from this wallet; try again in a minute", 429], ["couldn't reach the network", 502]]) {
+  reset({ ...offering(), answer: () => json({ error: why }, status) });
+  const e = await payArtist(listener, payees, 100_000, { node: { origin: ORIGIN } }).catch((x) => x);
+  ok(`any other refusal (${status}) isn't "can't pay fees": it says why, and nothing is sent`,
+    e?.kind === "refused" && e.message.includes(why) && selfSent.length === 0 && sentByNode.length === 0, e?.kind + " " + e?.message);
+}
 {
   reset(offering());
   const e = await payArtist(listener, payees, 5_000, { node: { origin: ORIGIN } }).catch((x) => x);

@@ -17,7 +17,7 @@ import { createPlayer } from "./player.js";
 import {
   loadLedger, bank, owing, settle, settleAll, backupSaved, totalOwed, hasWallet, machinery, rateStatus, mismatch,
 } from "./paying.js";
-import { agreeRate } from "./spend.js";
+import { agreeRate, settled } from "./spend.js";
 import {
   tokenFor, reportPlayed, reportHeard, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
   manageSubscription, claimSubscription,
@@ -393,11 +393,34 @@ export function App() {
     return () => document.removeEventListener("visibilitychange", back);
   }, [refresh]);
 
-  /** Pay whoever is due: at the artist's amount, or a week after listening. */
+  /**
+   * Pay whoever is due: at the artist's amount, or a week after listening.
+   *
+   * One payment at a time. Listening is banked every few seconds, and each
+   * time the debt is looked at again; a payment takes that long and more to
+   * confirm, and until it does the debt is still on the books. Without this,
+   * the same debt would be sent a second time while the first was on its way.
+   * After a failure it waits a minute before trying again, and after one that
+   * may still have gone through, half an hour, so it can't be paid twice.
+   */
+  const settling = useRef(false);
+  const retryAt = useRef(0);
   const settleNow = useCallback(async () => {
-    if (!pair) return;
-    const result = await settleAll(pair, entries, ledger);
-    if (result.paid.length || result.failed.length) { setLedger(result.ledger); refresh(); }
+    if (!pair || settling.current || Date.now() < retryAt.current) return;
+    settling.current = true;
+    let result;
+    try { result = await settleAll(pair, entries, ledger); }
+    finally { settling.current = false; }
+    // Taken off what's owed now, not what was owed when it started: listening
+    // banked while the payment was on its way still counts.
+    if (result.paid.length) {
+      setLedger((now) => result.paid.reduce((l, p) => settled(l, p.entry.url, p.micros), now));
+    }
+    if (result.paid.length || result.failed.length) refresh();
+    if (result.failed.length) {
+      const maybeSent = result.failed.some((f) => f.kind === "unconfirmed");
+      retryAt.current = Date.now() + (maybeSent ? 30 * 60_000 : 60_000);
+    }
     if (result.paid.length) {
       const first = result.paid[0];
       const total = result.paid.reduce((n, p) => n + p.usd, 0);
@@ -408,7 +431,7 @@ export function App() {
     const refused = result.failed.filter((f) => f.kind === "paused").map((f) => f.entry.url);
     if (refused.length) noteFees(refused, refused.map(() => false));
     if (result.failed.length) flash({ bad: true, text: result.failed[0].message });
-  }, [pair, entries, ledger, refresh]);
+  }, [pair, entries, ledger, refresh, noteFees]);
 
   useEffect(() => {
     if (!pair || !entries.some((e) => owing(e, ledger)?.due)) return;
