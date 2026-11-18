@@ -10,60 +10,29 @@
  * node/prove-access/run.mjs runs it in the real runtime rather than in Node.
  */
 
-const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+import { unbase58, verifySignature as verifyBytes } from "./solana-tx";
 
-/** Solana addresses and signatures are base58. No dependencies for 40 lines. */
-export function fromBase58(text: string): Uint8Array | null {
-  // Decoding is bignum arithmetic and therefore quadratic in the length of the
-  // input, which a stranger chooses. An address is 44 characters and a
-  // signature 88; anything beyond this is not a slightly odd key, it is someone
-  // trying to spend the node's processor time.
-  if (typeof text !== "string" || text.length > 128) return null;
-  let n = 0n;
-  for (const ch of text) {
-    const i = B58.indexOf(ch);
-    if (i < 0) return null;
-    n = n * 58n + BigInt(i);
-  }
-  const bytes: number[] = [];
-  while (n > 0n) {
-    bytes.unshift(Number(n % 256n));
-    n /= 256n;
-  }
-  for (const ch of text) {
-    if (ch === B58[0]) bytes.unshift(0);
-    else break;
-  }
-  return Uint8Array.from(bytes);
-}
+/** Solana addresses and signatures are base58 (solana-tx.ts decodes it, and
+ *  refuses anything longer than a key or signature could be). */
+export const fromBase58 = unbase58;
 
 /**
  * Does `signature` prove that the holder of `address` signed `message`?
  *
  * Ed25519 is what Solana signs with, and what WebCrypto calls "Ed25519". A
  * wrong key, a tampered message or a malformed input all come back false
- * rather than throwing: this is called with whatever a stranger sent.
+ * rather than throwing: this is called with whatever a stranger sent. The
+ * check itself is solana-tx.ts's, on bytes; this takes the strings a
+ * listener's app sends.
  */
 export async function verifySignature(
   address: string,
   message: string,
   signature: string,
 ): Promise<boolean> {
-  const key = fromBase58(address);
-  const sig = fromBase58(signature);
-  if (!key || key.length !== 32 || !sig || sig.length !== 64) return false;
-
-  try {
-    const publicKey = await crypto.subtle.importKey("raw", key, { name: "Ed25519" }, false, ["verify"]);
-    return await crypto.subtle.verify(
-      { name: "Ed25519" },
-      publicKey,
-      sig,
-      new TextEncoder().encode(message),
-    );
-  } catch {
-    return false;   // unsupported curve, bad key material, anything
-  }
+  const sig = unbase58(signature);
+  if (!sig) return false;
+  return verifyBytes(address, sig, new TextEncoder().encode(message));
 }
 
 /**

@@ -187,6 +187,11 @@ ok_("no rebuild step says it's creating anything", REPAIR_STEPS.every((s) => !/c
   const w = versionOfWorker(await site("node-worker.js"));
   const e = versionOfEditor(await site("node-manage.html"));
   ok_("the built service, editor and version list are one release", v && w === v && e === v, `${v} / ${w} / ${e}`);
+  // Minified, and still a Worker that runs and knows what it is.
+  const built = await site("node-worker.js");
+  const worker = (await import("data:text/javascript," + encodeURIComponent(built))).default;
+  const said = await (await worker.fetch(new Request("https://artist.test/version"), {})).json().catch(() => null);
+  ok_("  the minified service still runs, and says the same version", said?.version === v, JSON.stringify(said));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

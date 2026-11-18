@@ -1,41 +1,25 @@
 /**
  * Which chain the money is on.
  *
- * Its own file, with no imports, on purpose. The wallet needs the Solana
- * libraries and they are 344kB; deciding whether an artist can be paid here is
- * a string comparison, and every screen in the app needs to do it. Putting
- * this next to the wallet would pull the whole payment stack into the bundle
- * of somebody who is only listening.
+ * Its own file, importing only spec/chains.mjs (plain strings), on purpose.
+ * The wallet needs the Solana libraries and they are 344kB; deciding whether
+ * an artist can be paid here is a string comparison, and every screen in the
+ * app needs to do it. Putting this next to the wallet would pull the whole
+ * payment stack into the bundle of somebody who is only listening.
  */
+import { SOLANA } from "../../spec/chains.mjs";
 
 const NET = "amply.network.v1";
 
+// Where to ask, and which token is dollars: spec/chains.mjs, shared with the
+// artist's server and editor.
 export const NETWORKS = {
-  mainnet: {
-    label: "Solana",
-    // Not api.mainnet-beta.solana.com: Solana's public mainnet server answers
-    // every request from a website with "403 Access forbidden" (devnet's does
-    // not). PublicNode is free, needs no key and accepts browsers; it is a
-    // third party with no guarantee, so this is the line to change if it stops.
-    rpc: "https://solana-rpc.publicnode.com",
-    usdc: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    real: true,
-  },
-  devnet: {
-    label: "Test network",
-    rpc: "https://api.devnet.solana.com",
-    usdc: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-    real: false,
-  },
+  mainnet: { label: "Solana", ...SOLANA.mainnet, real: true },
+  devnet: { label: "Test network", ...SOLANA.devnet, real: false },
   // A second test cluster with its own faucet. Here only because devnet's is
   // frequently dry, and proving the payment path needs one that answers. No
   // manifest can ask for it: the spec offers real money or devnet.
-  testnet: {
-    label: "Test network (testnet)",
-    rpc: "https://api.testnet.solana.com",
-    usdc: "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
-    real: false,
-  },
+  testnet: { label: "Test network (testnet)", ...SOLANA.testnet, real: false },
 };
 
 /**

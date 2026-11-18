@@ -6,8 +6,13 @@
  * checks MANAGE_CSP.
  */
 
-export const VERSION = "3.24.6";
+export const VERSION = "3.24.7";
 export const SPEC_VERSION = 1;
+
+/** Where the node serves the editor's MP3 encoder (lame.ts). Named for the
+ *  library's version, because it's cached as immutable: a new version is a
+ *  new address. node/test-paused.mjs keeps it equal to the installed one. */
+export const LAME_PATH = "/studio/lame-1.2.7.js";
 
 /** Amply's relay, which holds Amply's Coinbase key (relay/src/index.ts). */
 export const RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
@@ -21,16 +26,20 @@ export const RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
  * lacked blob: and every upload failed at the first step.
  *
  * The editor is self-contained by construction. This makes that a rule rather
- * than a property: it cannot load code from anywhere, and its requests can go
- * only to this node and the few read-only hosts below. It is not a seal. The
- * editor is one inline script, so inline script is allowed (and with it inline
- * handlers), and nothing here stops a page navigating away with data in the
- * address. What keeps a hostile script out is that nothing in the editor puts
- * outside text into the page as markup.
+ * than a property: it cannot load code from anywhere but this node, and its
+ * requests can go only to this node and the few read-only hosts below. It is
+ * not a seal. The editor is one inline script, so inline script is allowed
+ * (and with it inline handlers), and nothing here stops a page navigating away
+ * with data in the address. What keeps a hostile script out is that nothing in
+ * the editor puts outside text into the page as markup.
  */
 export const MANAGE_CSP = [
   "default-src 'none'",
-  "script-src 'unsafe-inline'",
+  // 'self' for one file: the MP3 encoder, fetched only when a song is
+  // uploaded (LAME_PATH). Nothing else on this node can run as a script:
+  // every stored file is served as audio, an image or octet-stream, with
+  // nosniff, and a browser runs a script only if it's served as one.
+  "script-src 'self' 'unsafe-inline'",
   "style-src 'unsafe-inline'",
   "img-src 'self' data:",
   // blob: is load-bearing, not slack. Before an upload starts, the editor reads

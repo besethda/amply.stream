@@ -359,5 +359,38 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
   check("  the email is for GDPR compliance", profile.includes("Email for GDPR compliance"));
 }
 
+// ── previewing a song doesn't redraw the editor as it plays ─────────────────
+{
+  const { memo, usePlayer } = await import("./src/ui.jsx");
+  const check = (name, cond) => { cond ? pass++ : fail++; console.log(`${cond ? "ok  " : "FAIL"}  ${name}`); };
+  let player;
+  renderToString(h(() => { player = usePlayer(); return null; }));
+  check("the player the editor holds is which track and whether it plays, not where it is",
+    "current" in player && "playing" in player && typeof player.toggle === "function" && typeof player.stop === "function"
+    && !("at" in player) && !("of" in player));
+  const Row = memo(() => null);
+  const row = new Row({ a: 1, f: Math.max });
+  row.props = { a: 1, f: Math.max };
+  check("  and releases and tracks redraw only when their own props change",
+    !row.shouldComponentUpdate({ a: 1, f: Math.max }) && row.shouldComponentUpdate({ a: 2, f: Math.max })
+    && row.shouldComponentUpdate({ a: 1, f: Math.min }) && row.shouldComponentUpdate({ a: 1 }));
+}
+
+// ── one look at the fees account, shared, not a poll per card ───────────────
+{
+  const { feesPollMs } = await import("./src/ui.jsx");
+  const check = (name, cond) => { cond ? pass++ : fail++; console.log(`${cond ? "ok  " : "FAIL"}  ${name}`); };
+  check("the fees account on: no polling", feesPollMs({ offering: true }, false) === null && feesPollMs({ offering: true }, true) === null);
+  check("  off: one look a minute", feesPollMs({ offering: false }, false) === 60_000);
+  check("  off, with the setup's fees step open: every 15 seconds", feesPollMs({ offering: false }, true) === 15_000 && feesPollMs(null, true) === 15_000);
+  check("  not known yet (couldn't ask): no polling outside setup", feesPollMs(null, false) === null);
+  let asked = 0;
+  const counting = { ...api, fees: async () => { asked++; return { offering: false, address: "x", network: "solana", lamports: 0 }; } };
+  for (const tab of ["home", "earnings", "music"]) {
+    renderToString(h(Editor, { api: counting, node: { slug: "coolartist", url: NODE }, initial: full, published: true, initialTab: tab, onSignOut() {} }));
+  }
+  check("  and drawing the editor asks nothing by itself", asked === 0);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

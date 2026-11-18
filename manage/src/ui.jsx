@@ -2,16 +2,19 @@
  * The artist's workspace.
  *
  * It runs in exactly one place: on the artist's own node, behind Cloudflare
- * Access. There is no hosted copy, Amply is not involved in an artist editing
- * their own music, and a second way of doing it would quietly undo that.
+ * Access (or, before the artist has claimed the page, the one-hour key from
+ * setup: node/src/preview-key.ts). There is no hosted copy, Amply is not
+ * involved in an artist editing their own music, and a second way of doing it
+ * would quietly undo that.
  *
- * Three tabs on one page rather than routes, because routing is another thing
- * the node would have to serve and this is one file either way.
+ * Five tabs (Home, Website, Music, Earnings, Profile) on one page rather than
+ * routes, because routing is another thing the node would have to serve and
+ * this is one file either way.
  *
  * Talks to an injected `api` adapter rather than fetching directly, so the
  * interface stays testable without a live node.
  */
-import { createContext, Fragment } from "preact";
+import { createContext, Fragment, Component } from "preact";
 import { useState, useEffect, useCallback, useRef, useMemo, useContext } from "preact/hooks";
 
 /**
@@ -21,6 +24,22 @@ import { useState, useEffect, useCallback, useRef, useMemo, useContext } from "p
  */
 const Jobs = createContext(null);
 const noJob = { step() {}, done() {} };
+/**
+ * A component that renders again only when one of its props changes (by
+ * identity), like preact/compat's memo without pulling in compat.
+ */
+export function memo(Inner) {
+  return class Memo extends Component {
+    shouldComponentUpdate(next) {
+      const was = this.props;
+      for (const k in next) if (next[k] !== was[k]) return true;
+      for (const k in was) if (!(k in next)) return true;
+      return false;
+    }
+    render(props) { return <Inner {...props} />; }
+  };
+}
+
 const useJob = () => { const jobs = useContext(Jobs); return (title) => (jobs ? jobs.start(title) : noJob); };
 
 function JobCard({ job }) {
@@ -44,9 +63,10 @@ import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, addressOf, publ
 import { readTransaction, writeTransaction, base64, keyOf } from "../../node/src/solana-tx.ts";
 import { checkFeePayment } from "../../node/src/feepay.ts";
 import { SiteEditor } from "./site-editor.jsx";
+import { paymentsTo, mergePayments, usdcBalance, NETWORKS } from "./chain.js";
 import { coinbaseSolPage, coinbaseCashoutPage, sellMessage, sellNonce, cashoutProblem, topupUrl } from "../../app/src/topup.js";
 
-export const MAX_UPLOAD = 90 * 1024 * 1024;
+const MAX_UPLOAD = 90 * 1024 * 1024;
 
 /**
  * What the audio pickers offer, as explicit extensions and types.
@@ -75,8 +95,6 @@ const TYPICAL_SONG_MIN = 4;
  * only a few dollars a month for a fan who listens every day.
  */
 export const DEFAULT_RATE = 0.005;
-/** What a stream typically pays elsewhere, in dollars, for the comparison beside the price. */
-const STREAM_PAYS_ELSEWHERE = 0.004;
 
 /** Price input to dollars: a number to the cent, or null for "not for sale". */
 export function salePrice(text) {
@@ -146,7 +164,7 @@ export function cents(usd) {
  * 400kbps sits above every lossy format anyone exports and below every
  * lossless one (CD-quality WAV is 1,411kbps, FLAC usually 700 to 1,000).
  */
-export const STREAM_KBPS_LIMIT = 400;
+const STREAM_KBPS_LIMIT = 400;
 const TARGET_KBPS = 256;
 
 export function sizeAdvice(bytes, duration) {
@@ -297,10 +315,13 @@ function PlayIcon({ playing = false }) {
     : <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3.5 1.2v9.6a.6.6 0 0 0 .9.5l7.2-4.8a.6.6 0 0 0 0-1L4.4.7a.6.6 0 0 0-.9.5Z" fill="currentColor" /></svg>;
 }
 
-function Track({
-  track, first, last, playing, onPlay, onChange, onMove, onRemove, onReplace,
+/** One track's row. Its callbacks are the release's, stable and taking the
+ *  track (or its id), so a row redraws only when its own props change. */
+const Track = memo(function Track({
+  track, first, last, playing, onPlay, onChange: changeTrack, onMove, onRemove, onReplace,
   heavy, warnOpen, onWarn, charging,
 }) {
+  const onChange = (next) => changeTrack(track.id, next);
   // If the artist charges, every track is paid for unless they make it free —
   // the same rule their server enforces (spec/pricing.mjs). Free is the choice
   // an artist makes, one track at a time; paid is simply what charging means.
@@ -323,11 +344,11 @@ function Track({
     <div class={`track-block${open ? " open" : ""}`}>
       <div class="track-row">
         <div class="track-order">
-          <button class="icon stack2" disabled={first} onClick={() => onMove(-1)} aria-label="Move up">▲</button>
-          <button class="icon stack2" disabled={last} onClick={() => onMove(1)} aria-label="Move down">▼</button>
+          <button class="icon stack2" disabled={first} onClick={() => onMove(track.id, -1)} aria-label="Move up">▲</button>
+          <button class="icon stack2" disabled={last} onClick={() => onMove(track.id, 1)} aria-label="Move down">▼</button>
         </div>
         <button
-          class={`play${playing ? " on" : ""}`} onClick={onPlay} disabled={!track.url}
+          class={`play${playing ? " on" : ""}`} onClick={() => onPlay(track)} disabled={!track.url}
           aria-label={playing ? `Pause ${track.title}` : `Play ${track.title}`}
         >
           <PlayIcon playing={playing} />
@@ -345,7 +366,7 @@ function Track({
           {track.sale?.price > 0 && <span class="track-mark sale" title="What it costs to buy and keep">${track.sale.price.toFixed(2)}</span>}
           {heavy && (
             <button
-              class="warn-toggle" aria-expanded={warnOpen} onClick={onWarn}
+              class="warn-toggle" aria-expanded={warnOpen} onClick={() => onWarn(track.id)}
               aria-label={`${track.title || "This track"} is too large to stream properly. ${warnOpen ? "Hide" : "Show"} why.`}
               title="Too large to stream properly"
             >! too large</button>
@@ -358,7 +379,7 @@ function Track({
         </button>
         <input
           ref={ref} type="file" accept={AUDIO_ACCEPT} hidden
-          onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) onReplace(f); }}
+          onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) onReplace(track.id, f); }}
         />
       </div>
 
@@ -386,12 +407,12 @@ function Track({
             >{free ? "Charge for this" : "Make free"}</button>
           )}
           <button class="btn ghost" onClick={() => ref.current.click()}>Replace audio</button>
-          <button class="btn ghost danger" onClick={onRemove}>Remove</button>
+          <button class="btn ghost danger" onClick={() => onRemove(track.id)}>Remove</button>
         </div>
       )}
     </div>
   );
-}
+});
 
 /**
  * Upload a song's files in order, with one progress figure for all of them.
@@ -424,7 +445,10 @@ export async function sendParts(parts, required, upload, onProgress = () => {}, 
   return arrived;
 }
 
-function Release({
+/** A release and its tracks. Drawn again only when its props change: the
+ *  music tab hands it stable callbacks, so playing a song or a toast
+ *  appearing doesn't redraw every release. */
+const Release = memo(function Release({
   release, node, manifest, art, player,
   onChange, onRemove, upload, notify, sizeOf, charging, deleteObject,
 }) {
@@ -618,6 +642,19 @@ function Release({
     return t;
   });
 
+  // The tracks' callbacks, the same functions every render (so each Track
+  // can skip redrawing), always reaching this render's state.
+  const latest = useRef(null);
+  latest.current = { player, moveTrack, replaceAudio, setTracks };
+  const trackDo = useMemo(() => ({
+    play: (t) => latest.current.player.toggle(t),
+    move: (id, d) => latest.current.moveTrack(id, d),
+    replace: (id, f) => latest.current.replaceAudio(id, f),
+    change: (id, next) => latest.current.setTracks((all) => all.map((x) => (x.id === id ? next : x))),
+    remove: (id) => { latest.current.player.stopIf(id); latest.current.setTracks((all) => all.filter((x) => x.id !== id)); },
+    warn: (id) => setWarnOpen((open) => (open === id ? null : id)),
+  }), []);
+
   return (
     <section class="card release">
       <div class="release-head">
@@ -689,14 +726,14 @@ function Release({
             <Track
               track={t} first={i === 0} last={i === tracks.length - 1} charging={charging}
               playing={player.current === t.id && player.playing}
-              onPlay={() => player.toggle(t)}
-              onMove={(d) => moveTrack(t.id, d)}
-              onReplace={(f) => replaceAudio(t.id, f)}
-              onChange={(next) => setTracks((all) => all.map((x) => (x.id === t.id ? next : x)))}
-              onRemove={() => { player.stopIf(t.id); setTracks((all) => all.filter((x) => x.id !== t.id)); }}
+              onPlay={trackDo.play}
+              onMove={trackDo.move}
+              onReplace={trackDo.replace}
+              onChange={trackDo.change}
+              onRemove={trackDo.remove}
               heavy={!!sizeAdvice(sizes[t.url], t.duration)}
               warnOpen={warnOpen === t.id}
-              onWarn={() => setWarnOpen((open) => (open === t.id ? null : t.id))}
+              onWarn={trackDo.warn}
             />
             {warnOpen === t.id && sizeAdvice(sizes[t.url], t.duration) && (
               <SizeWarning advice={sizeAdvice(sizes[t.url], t.duration)} duration={t.duration} />
@@ -746,7 +783,7 @@ function Release({
       </div>
     </section>
   );
-}
+});
 
 /**
  * What a new artist does, in order, until their music is live: shown at the
@@ -887,6 +924,25 @@ function EvenOut({ manifest, node, update, upload, readAudio, notify }) {
 
 function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf, charging, paid, live, onSettings, readAudio, deleteObject }) {
   const trackCount = (manifest.releases || []).reduce((n, r) => n + (r.tracks?.length || 0), 0);
+  // Each release's callbacks, made once per release id, so Release can skip
+  // redrawing when nothing of its own changed.
+  const latestUpdate = useRef(update);
+  latestUpdate.current = update;
+  const handlers = useRef(new Map());
+  const handlersFor = (id) => {
+    let made = handlers.current.get(id);
+    if (!made) {
+      made = {
+        onChange: (change) => latestUpdate.current((m) => ({
+          ...m,
+          releases: (m.releases || []).map((x) => (x.id === id ? (typeof change === "function" ? change(x) : change) : x)),
+        })),
+        onRemove: () => latestUpdate.current((m) => ({ ...m, releases: (m.releases || []).filter((x) => x.id !== id) })),
+      };
+      handlers.current.set(id, made);
+    }
+    return made;
+  };
 
   const addRelease = () => {
     const taken = collectIds(manifest);
@@ -925,11 +981,7 @@ function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf,
           <Release
             key={r.id} release={r} node={node} manifest={manifest} charging={charging}
             upload={upload} art={art} notify={notify} player={player} sizeOf={sizeOf} deleteObject={deleteObject}
-            onChange={(change) => update((m) => ({
-              ...m,
-              releases: (m.releases || []).map((x) => (x.id === r.id ? (typeof change === "function" ? change(x) : change) : x)),
-            }))}
-            onRemove={() => update((m) => ({ ...m, releases: (m.releases || []).filter((x) => x.id !== r.id) }))}
+            onChange={handlersFor(r.id).onChange} onRemove={handlersFor(r.id).onRemove}
           />
         ))}
 
@@ -1500,7 +1552,7 @@ function ShowWalletKey({ payees }) {
  * isn't live yet, and let the artist check their Face ID really opens it
  * (the passkey makes the key again; only the address is compared).
  */
-function PayoutReady({ address, live, held = false }) {
+function PayoutReady({ address, live }) {
   const [check, setCheck] = useState(null);   // { ok } | { other } | { error } | "busy"
   const [canPasskey, setCanPasskey] = useState(false);
   useEffect(() => {
@@ -1524,9 +1576,7 @@ function PayoutReady({ address, live, held = false }) {
   return (
     <div class="payout-ready" role="status">
       <p><b>✓ Step 1: wallet ready</b> <span class="mono muted small">{address.slice(0, 4)}…{address.slice(-4)}</span></p>
-      {!live && (held
-        ? <p class="warn small">Next: add $5 for network fees, below.</p>
-        : <p class="warn small">Press <b>Publish</b> at the top so fans can start paying you.</p>)}
+      {!live && <p class="warn small">Press <b>Publish</b> at the top so fans can start paying you.</p>}
       {canPasskey && (
         check?.ok ? <p class="good small">Your Face ID opens this wallet. All good.</p>
           : check?.other ? <p class="warn small">That Face ID opens a different wallet ({check.other.slice(0, 4)}…{check.other.slice(-4)}).
@@ -1934,7 +1984,6 @@ function usePayments(payees, declared) {
     if (!addresses.length) return;
     setState((s) => ({ ...s, busy: true, error: null }));
     try {
-      const { paymentsTo, mergePayments } = await import("./chain.js");
       // Every address in the split, because a listener's payment is divided
       // between them: what the listener paid is the sum, not any one share.
       let more = false;
@@ -2291,13 +2340,6 @@ function Listeners({ api, paid, rate, settleAt }) {
   );
 }
 
-/**
- * Listeners' network fees, paid by this service (node/src/settle.ts). Every
- * Solana payment needs a fee of a fraction of a cent, in SOL. When this
- * service's fee wallet holds a little SOL, it pays that for every listener,
- * so they never need any. It's a wallet of its own, separate from where
- * listeners pay: it holds SOL for fees and nothing else.
- */
 /** One tap to Coinbase, buying SOL straight into the fees account. */
 function BuySol({ api, label = "Or with Coinbase" }) {
   const [busy, setBusy] = useState(false);
@@ -2329,18 +2371,64 @@ function BuySol({ api, label = "Or with Coinbase" }) {
 /** Payments that $5 of SOL pays the network fee on, roughly: a full bar. */
 const FEES_FULL = 6000;
 
-function FeesCard({ api, network, payees, onStatus, step = false, bare = false }) {
+/**
+ * The fees account's status, asked of the node (always a fresh look at the
+ * network there) once and shared: the banner, Earnings, the setup screen and
+ * sending all read this one, and there is one poll, not one each.
+ */
+const Fees = createContext(null);
+
+/** How often to look again: every 15 s while the setup screen's fees step is
+ *  open, every minute while it's off, and not at all once it's on. */
+export function feesPollMs(fees, setupOpen) {
+  if (fees?.offering) return null;
+  if (setupOpen) return 15_000;
+  return fees?.offering === false ? 60_000 : null;
+}
+
+function useFeesStatus(api) {
   const [fees, setFees] = useState(null);
   const [failed, setFailed] = useState(false);
-  const load = useCallback(() => {
-    setFailed(false);
-    api?.fees?.().then((f) => { setFees(f); onStatus?.(!!f.offering); }).catch(() => setFailed(true));
+  const [setupOpen, setSetupOpen] = useState(false);
+  const asking = useRef(null);
+  const askedAt = useRef(0);
+  // `ifOlderThan`: a card opening asks only if the last look wasn't just now.
+  const refresh = useCallback(({ ifOlderThan = 0 } = {}) => {
+    if (!api?.fees) return Promise.resolve(null);
+    if (asking.current) return asking.current;
+    if (ifOlderThan && Date.now() - askedAt.current < ifOlderThan) return Promise.resolve(null);
+    asking.current = api.fees()
+      .then((f) => { askedAt.current = Date.now(); setFees(f); setFailed(false); return f; })
+      .catch(() => { setFailed(true); return null; })
+      .finally(() => { asking.current = null; });
+    return asking.current;
   }, [api]);
-  useEffect(load, [load]);
+  useEffect(() => { refresh(); }, [refresh]);
+  const every = feesPollMs(fees, setupOpen);
+  useEffect(() => {
+    if (!every) return;
+    const t = setInterval(() => refresh(), every);
+    return () => clearInterval(t);
+  }, [every, refresh]);
+  return useMemo(() => ({ fees, failed, refresh, setSetupOpen }), [fees, failed, refresh]);
+}
+
+/**
+ * Listeners' network fees, paid by this service (node/src/settle.ts). Every
+ * Solana payment needs a fee of a fraction of a cent, in SOL. When this
+ * service's fee wallet holds a little SOL, it pays that for every listener,
+ * so they never need any. It's a wallet of its own, separate from where
+ * listeners pay: it holds SOL for fees and nothing else.
+ */
+function FeesCard({ api, network, payees, bare = false }) {
+  const { fees = null, failed = false, refresh } = useContext(Fees) || {};
+  const load = () => refresh?.();
+  // Opening the card looks again, unless the last look was just now.
+  useEffect(() => { refresh?.({ ifOlderThan: 30_000 }); }, [refresh]);
 
   if (!api?.fees || !network || !payees?.length) return null;
   const head = <h2>Fees account</h2>;
-  if (failed) return (
+  if (failed && !fees) return (
     <section class="card">{head}
       <p class="muted">Couldn't check this just now. <button class="link" onClick={load}>Try again</button></p></section>
   );
@@ -2381,7 +2469,7 @@ function FeesCard({ api, network, payees, onStatus, step = false, bare = false }
   }
   return (
     <section class="card" id="fees">
-      {!bare && <h2>{step ? "Step 2: fees account" : "Fees account"} <span class="pill-status off">Off</span></h2>}
+      {!bare && <h2>Fees account <span class="pill-status off">Off</span></h2>}
       <p>Add $5 so fans can pay you. Each $1 covers ~1,000 payments' network fees.</p>
       {real && <>
         <a class="btn" href={topupUrl(fees.address, { currency: "sol" })} target="_blank" rel="noopener noreferrer">Add $5 by card</a>
@@ -2471,7 +2559,6 @@ async function sendFromPayoutWallet({ api, payees, net, dest, micros, step = () 
     if (tx.accounts[1] !== from) throw new Error("Your server prepared a transfer from a different wallet, so it wasn't sent.");
     tx.signatures[1] = await signWithSeed(seed, tx.message);
     // Checked here before it leaves this page: exactly this, nothing else.
-    const { NETWORKS } = await import("./chain.js");
     const verdict = await checkFeePayment(tx, {
       feePayer, mint: NETWORKS[net].usdc, payees: [{ address: dest, split: 100 }], minMicros: micros, maxMicros: micros,
     });
@@ -2496,14 +2583,14 @@ function SendToBank({ api, payees, network, routeName }) {
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [balance, setBalance] = useState(null);
-  const [feesOn, setFeesOn] = useState(null);
+  const { fees } = useContext(Fees) || {};
+  const feesOn = fees ? !!fees.offering : null;
   const [state, setState] = useState(null);   // { busy, text } | { done, usd, signature } | { error }
   const mine = payees.find((p) => p.address)?.address;
 
   useEffect(() => {
     let alive = true;
-    import("./chain.js").then(({ usdcBalance }) => usdcBalance(mine, net)).then((b) => alive && setBalance(b)).catch(() => {});
-    api?.fees?.().then((f) => alive && setFeesOn(!!f.offering)).catch(() => alive && setFeesOn(null));
+    usdcBalance(mine, net).then((b) => alive && setBalance(b)).catch(() => {});
     return () => { alive = false; };
   }, [mine, net]);
 
@@ -2591,7 +2678,7 @@ function CoinbaseCashOut({ api, payees, network }) {
 
   useEffect(() => {
     let alive = true;
-    import("./chain.js").then(({ usdcBalance }) => usdcBalance(mine, net)).then((b) => alive && setBalance(b)).catch(() => {});
+    usdcBalance(mine, net).then((b) => alive && setBalance(b)).catch(() => {});
     return () => { alive = false; };
   }, [mine, net]);
 
@@ -2856,46 +2943,6 @@ const VIA_KEY = "amply.editor.payout-via";
 const NOT_PAID_HIDDEN = "amply.editor.not-paid-hidden";
 const readVia = () => { try { return localStorage.getItem(VIA_KEY); } catch { return null; } };
 
-/**
- * Before anything is set up. Fans pay into the artist's own wallet, made with
- * Face ID: the same in every country, with no exchange in between and so no
- * exchange's forms about each fan. Coinbase or Cash App is only where the
- * artist moves it later (CashOut). Card subscriptions are the other way in.
- */
-function GetPaid({ payees, setPayees, manifest, update, api, perMinuteOnly }) {
-  const [cards, setCards] = useState(false);
-  const setAddress = (a) => {
-    setPayees([{ ...payees[0], address: a }, ...payees.slice(1)]);
-    // Kept on the node at once: an unpublished change is otherwise lost on reload.
-    if (keyOf(a)) api?.savePayout?.(a).catch(() => {});
-  };
-  return (
-    <section class="card">
-      <h2>{perMinuteOnly ? "Also take payments by the minute" : "Get paid"}</h2>
-      <p>Fans pay into your own wallet. Cash out to Coinbase or Cash App anytime.</p>
-      {!perMinuteOnly && <p class="muted small">Step 1 of 2 · then $5 for network fees</p>}
-      <PasskeyWallet onAddress={setAddress} />
-      <p class="muted small">Amply: 0% · Solana network fee ~0.1¢ a payment, from your fees account</p>
-      <details class="more">
-        <summary>Already have a Solana wallet?</summary>
-        <Field label="Paste its address">
-          <Text value={payees[0]?.address || ""} class="mono" placeholder="Your wallet address" onInput={(v) => setAddress(v.trim())} />
-        </Field>
-      </details>
-      {!perMinuteOnly && <>
-        <div class="pay-choices">
-          <button type="button" class="pay-choice" aria-pressed={cards} onClick={() => setCards(!cards)}>
-            <b>Card subscriptions</b><span>Stripe · fans subscribe by card</span>
-            <span class="fee">Fees: ~3.6% + 30¢ a payment (US cards) · no network fee</span>
-          </button>
-        </div>
-        {cards && <Subscriptions manifest={manifest} update={update} api={api} />}
-        <p class="muted small">Until then, your music is free.</p>
-      </>}
-    </section>
-  );
-}
-
 /** The price and how often it's paid, one line each. */
 function Pricing({ wallet, onChange, held = false }) {
   const rate = wallet.ratePerMinute ?? DEFAULT_RATE;
@@ -2952,9 +2999,10 @@ function Pricing({ wallet, onChange, held = false }) {
  *   3. How to cash out: Coinbase or Cash App, now or later.
  *   4. Done: publish, and fans can pay.
  */
-function EarnSetup({ api, network, payees, onAddress, onFees, onPublish, onClose, start = "key" }) {
+function EarnSetup({ api, network, payees, onAddress, onPublish, onClose, start = "key" }) {
   const [step, setStep] = useState(start);
-  const [feesOn, setFeesOn] = useState(false);
+  const { fees, refresh, setSetupOpen } = useContext(Fees) || {};
+  const feesOn = !!fees?.offering;
   const [via, setVia] = useState(readVia());
   const address = payees.find((p) => p.address)?.address || null;
   const order = ["key", "fees", "cashout", "done"];
@@ -2963,14 +3011,14 @@ function EarnSetup({ api, network, payees, onAddress, onFees, onPublish, onClose
     const i = order.indexOf(step);
     if (i <= 0) onClose(); else setStep(order[i - 1]);
   };
-  // Money sent to the fees account shows up by itself.
+  // Money sent to the fees account shows up by itself: the shared status
+  // looks more often while this step is open.
   useEffect(() => {
-    if (step !== "fees" || feesOn || !api?.fees) return;
-    const look = () => api.fees().then((f) => { if (f.offering) { setFeesOn(true); onFees?.(true); } }).catch(() => {});
-    look();
-    const t = setInterval(look, 15_000);
-    return () => clearInterval(t);
-  }, [step, feesOn]);
+    if (step !== "fees" || !setSetupOpen) return;
+    setSetupOpen(true);
+    refresh();
+    return () => setSetupOpen(false);
+  }, [step]);
 
   const keyed = (a) => { onAddress(a); setStep("fees"); };
 
@@ -2991,7 +3039,7 @@ function EarnSetup({ api, network, payees, onAddress, onFees, onPublish, onClose
               fee, about 0.1¢. Your fees account pays it, so fans never deal with it. Each $1 covers ~1,000 payments.</Help></h1>
             {feesOn
               ? <p class="good">✓ Your fees account is on.</p>
-              : <FeesCard api={api} network={network} payees={payees} onStatus={(on) => { if (on) { setFeesOn(true); onFees?.(true); } }} bare />}
+              : <FeesCard api={api} network={network} payees={payees} bare />}
             <button class="btn" disabled={!feesOn} onClick={() => setStep("cashout")}>Continue</button>
             {!feesOn && <button class="quiet-link" onClick={() => setStep("cashout")}>Later</button>}
           </>
@@ -3143,7 +3191,7 @@ function StartEarning({ onStart, resume = false }) {
   );
 }
 
-function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rate, network, settleAt, held = false, onFees, feesOn = null, onPublish }) {
+function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rate, network, settleAt, held = false, feesOn = null, onPublish }) {
   const [cashing, setCashing] = useState(false);
   const [setting, setSetting] = useState(null);   // the step the setup screen opens at
   const setAddress = (a) => {
@@ -3152,7 +3200,7 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
     if (keyOf(a)) api?.savePayout?.(a).catch(() => {});
   };
   const flow = setting && (
-    <EarnSetup api={api} network={network} payees={payees} onAddress={setAddress} onFees={onFees}
+    <EarnSetup api={api} network={network} payees={payees} onAddress={setAddress}
       onPublish={onPublish} onClose={() => setSetting(null)} start={setting} />
   );
   const paid = usePayments(payees, network);
@@ -3197,16 +3245,16 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
         {/* Setup not finished (no fees account yet): one card that carries on. */}
         {hasWallet && held && <StartEarning resume onStart={() => setSetting("fees")} />}
         {hasWallet && !held && !liveAddresses.includes(payees.find((p) => p.address).address) && (
-          <PayoutReady address={payees.find((p) => p.address).address} live={false} held={held} />
+          <PayoutReady address={payees.find((p) => p.address).address} live={false} />
         )}
         {canCashOut && cashing && <CashOut api={api} payees={payees} network={network} via={via} onVia={setVia} />}
-        {feesOff && !held && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} />}
+        {feesOff && !held && <FeesCard api={api} network={network} payees={payees} />}
         {hasWallet && <BackupReminder payees={payees} />}
         {hasWallet && <EarningsSummary paid={paid} payees={payees} />}
         {hasWallet && <Pricing wallet={wallet} onChange={setWallet} held={held} />}
         {subscribing && <Subscriptions manifest={manifest} update={update} api={api} />}
         <Listeners api={api} paid={paid} rate={rate} settleAt={settleAt} />
-        {hasWallet && !feesOff && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} />}
+        {hasWallet && !feesOff && <FeesCard api={api} network={network} payees={payees} />}
         {!hasWallet && <StartEarning onStart={() => setSetting("key")} />}
         <details class="advanced">
           <summary>More <span class="note">{[!subscribing && "card subscriptions", hasWallet && "split with bandmates", hasWallet && "test mode"].filter(Boolean).join(", ")}</span></summary>
@@ -3229,54 +3277,71 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
 
 // ── the player ──────────────────────────────────────────────────────────────
 
-function usePlayer() {
+/**
+ * The preview player: which track, and whether it's playing. The same object
+ * until one of those changes. Where it is in the song is PlayerBar's alone,
+ * so the time ticking doesn't redraw the editor four times a second.
+ */
+export function usePlayer() {
   const audio = useRef(null);
   const [current, setCurrent] = useState(null);
   const [playing, setPlaying] = useState(false);
-  const [at, setAt] = useState(0);
-  const [of, setOf] = useState(0);
+  const now = useRef(null);
+  now.current = current;
 
   useEffect(() => {
     const a = new Audio();
     a.preload = "none";
     audio.current = a;
-    const tick = () => { setAt(a.currentTime); setOf(a.duration || 0); };
-    a.addEventListener("timeupdate", tick);
-    a.addEventListener("loadedmetadata", tick);
-    a.addEventListener("ended", () => { setPlaying(false); setAt(0); });
+    a.addEventListener("ended", () => setPlaying(false));
     a.addEventListener("pause", () => setPlaying(false));
     a.addEventListener("play", () => setPlaying(true));
     return () => { a.pause(); a.src = ""; };
   }, []);
 
-  const toggle = (track) => {
-    const a = audio.current;
-    if (!a || !track.url) return;
-    if (current?.id === track.id) {
-      if (a.paused) a.play().catch(() => {}); else a.pause();
-      return;
-    }
-    a.src = track.url;
-    setCurrent(track);
-    setAt(0);
-    a.play().catch(() => {});
-  };
+  const controls = useMemo(() => {
+    const stop = () => {
+      audio.current?.pause();
+      setCurrent(null);
+    };
+    const toggle = (track) => {
+      const a = audio.current;
+      if (!a || !track.url) return;
+      if (now.current?.id === track.id) {
+        if (a.paused) a.play().catch(() => {}); else a.pause();
+        return;
+      }
+      a.src = track.url;
+      setCurrent(track);
+      a.play().catch(() => {});
+    };
+    return { toggle, stop, stopIf: (id) => { if (now.current?.id === id) stop(); } };
+  }, []);
 
-  const stop = () => {
-    audio.current?.pause();
-    setCurrent(null);
-  };
-
-  return {
-    current: current?.id ?? null, track: current, playing, at, of,
-    toggle, stop,
-    stopIf: (id) => { if (current?.id === id) stop(); },
-  };
+  return useMemo(() => ({ current: current?.id ?? null, track: current, playing, audio, ...controls }), [current, playing, controls]);
 }
 
 function PlayerBar({ player }) {
+  const [at, setAt] = useState(0);
+  const [of, setOf] = useState(0);
+  // Listens to the audio element itself, for as long as a track is up.
+  const a = player.audio?.current;
+  useEffect(() => {
+    if (!a || !player.track) return;
+    const tick = () => { setAt(a.currentTime || 0); setOf(a.duration || 0); };
+    const ended = () => setAt(0);
+    tick();
+    a.addEventListener("timeupdate", tick);
+    a.addEventListener("loadedmetadata", tick);
+    a.addEventListener("ended", ended);
+    return () => {
+      a.removeEventListener("timeupdate", tick);
+      a.removeEventListener("loadedmetadata", tick);
+      a.removeEventListener("ended", ended);
+    };
+  }, [a, player.track]);
   if (!player.track) return null;
-  const pct = player.of ? (player.at / player.of) * 100 : 0;
+  const pct = of ? (at / of) * 100 : 0;
   return (
     <div class="player">
       <div class="player-track"><i style={`width:${pct}%`} /></div>
@@ -3292,7 +3357,7 @@ function PlayerBar({ player }) {
           <b>{player.track.title || "Untitled"}</b>
           <span>doesn't count as a listen</span>
         </div>
-        <span class="time">{mmss(player.at)} / {mmss(player.of || player.track.duration)}</span>
+        <span class="time">{mmss(at)} / {mmss(of || player.track.duration)}</span>
         <button class="close" onClick={player.stop} aria-label="Close the player">×</button>
       </div>
     </div>
@@ -3570,18 +3635,13 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
 
   // The fees account must be on before a per-minute price is first published.
   // Once it's live it stays, so publishing a song never makes music free.
-  const [feesOn, setFeesOn] = useState(null);
+  // Asked once, shared with every card that shows it, and looked at again
+  // every minute while it's off: money sent to it shows up here by itself.
+  const feesStatus = useFeesStatus(api);
+  const feesOn = feesStatus.fees ? !!feesStatus.fees.offering : null;
   // The artist said they understand: kept in this browser, and not shown again.
   const [notPaidHidden, setNotPaidHidden] = useState(() => { try { return localStorage.getItem(NOT_PAID_HIDDEN) === "1"; } catch { return false; } });
   const hideNotPaid = () => { setNotPaidHidden(true); try { localStorage.setItem(NOT_PAID_HIDDEN, "1"); } catch { /* hidden for now */ } };
-  useEffect(() => { api?.fees?.().then((f) => setFeesOn(!!f.offering)).catch(() => {}); }, [api]);
-  // While it's off, look again every minute: money sent to it shows up here
-  // by itself, and the warning below goes.
-  useEffect(() => {
-    if (feesOn !== false || !api?.fees) return;
-    const t = setInterval(() => api.fees().then((f) => setFeesOn(!!f.offering)).catch(() => {}), 60_000);
-    return () => clearInterval(t);
-  }, [api, feesOn]);
   const wasLive = !!(live?.payment || []).find((p) => p.type === "solana-usdc");
   const perMinute = wasLive || feesOn === true || !api?.fees;
   const next = useMemo(() => buildManifest(manifest, payees, { perMinute }), [manifest, payees, perMinute]);
@@ -3593,7 +3653,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
   const changes = manifestChanges + (siteDirty ? 1 : 0);
   const dirty = live === null || changes > 0;
 
-  const notify = (kind, text, action = null) => setMsg({ kind, text, action });
+  const notify = useCallback((kind, text, action = null) => setMsg({ kind, text, action }), []);
   const update = useCallback((m) => setManifest(m), []);
 
   // Browsers only honour this after the page has been interacted with, which is
@@ -3607,7 +3667,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty, working]);
 
-  const upload = (key, file, onProgress) => api.putObject(key, file, onProgress);
+  const upload = useCallback((key, file, onProgress) => api.putObject(key, file, onProgress), [api]);
 
   /**
    * Put an image on the node and hand its public URL back to the caller —
@@ -3723,6 +3783,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
 
   return (
     <Jobs.Provider value={jobsApi}>
+    <Fees.Provider value={feesStatus}>
       <header class="top">
         <div class="top-in">
           <span class="top-mark">
@@ -3868,7 +3929,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
           <EarningsTab
             node={node} api={api} payees={payees} setPayees={setPayees}
             manifest={manifest} update={update} live={live}
-            held={!perMinute} onFees={setFeesOn} feesOn={feesOn} onPublish={publish}
+            held={!perMinute} feesOn={feesOn} onPublish={publish}
             // What listeners are actually charged is what is published, not
             // what is in the editor: a price changed and not yet published
             // must not make a listener look like they are underpaying.
@@ -3880,13 +3941,14 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
       </main>
 
       <PlayerBar player={player} />
+    </Fees.Provider>
     </Jobs.Provider>
   );
 }
 
 /** Read duration from the file itself, the manifest requires it, and a player
  *  must never download audio just to learn how long a track is. */
-export function readDuration(file) {
+function readDuration(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const audio = new Audio();

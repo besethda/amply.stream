@@ -46,11 +46,14 @@ const MEDIA_KV = {
 const env = { DB, MEDIA_KV };
 
 // The network: only the fees account's balance is ever asked here.
-let lamports = 0, rpcDown = false;
+let lamports = 0, rpcDown = false, rpcHangs = false, asked = 0;
 globalThis.fetch = async (url, init) => {
   const body = JSON.parse(init?.body || "{}");
   if (body.method !== "getBalance") throw new Error(`unexpected ${url} ${body.method}`);
+  asked++;
   if (rpcDown) throw new TypeError("fetch failed");
+  // An outage that doesn't refuse, just never answers: only the timeout ends it.
+  if (rpcHangs) return new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason)));
   return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { value: lamports } }));
 };
 // The balance is remembered a few minutes; the clock moves past that.
@@ -145,6 +148,120 @@ rpcDown = false;
   const body = await res.text();
   ok("the artist's server serves the favicon, as an SVG", res.status === 200 && res.headers.get("Content-Type") === "image/svg+xml");
   ok("  the same one as amply.stream's", body === readFileSync("site/favicon.svg", "utf8").trim());
+}
+
+// ── every JSON answer: never cached, readable from any origin ──
+{
+  const post = (path) => worker.fetch(new Request(`${ORIGIN}${path}`, { method: "POST" }), env);
+  for (const [name, res] of [["/version", await get("/version")], ["/listen/challenge", await post("/listen/challenge")], ["/listen/fees", await get("/listen/fees")]]) {
+    ok(`${name} is JSON, not cached, open to any origin`, res.status === 200 && /^application\/json/.test(res.headers.get("Content-Type"))
+      && res.headers.get("Cache-Control") === "no-store" && res.headers.get("Access-Control-Allow-Origin") === "*" && (await res.json()) !== null);
+  }
+  for (const path of ["/", "/privacy"]) {
+    const res = await get(path);
+    const nonce = /'nonce-([^']+)'/.exec(res.headers.get("Content-Security-Policy") || "")?.[1];
+    const html = await res.text();
+    ok(`${path}: a fresh nonce in its CSP, on its scripts, not cached`, !!nonce && html.includes(`nonce="${nonce}"`) && res.headers.get("Cache-Control") === "no-store"
+      && /^text\/html/.test(res.headers.get("Content-Type")));
+  }
+}
+
+// ── the editor's MP3 encoder: a file of its own, kept by the browser ──
+{
+  const { readFileSync } = await import("node:fs");
+  const { LAME_PATH, MANAGE_CSP } = await import("./src/constants.ts");
+  const res = await get(LAME_PATH);
+  const body = await res.text();
+  ok("the encoder is served as a script, cached for good", res.status === 200
+    && /^text\/javascript/.test(res.headers.get("Content-Type")) && /immutable/.test(res.headers.get("Cache-Control")));
+  const lame = await import("data:text/javascript," + encodeURIComponent(body));
+  const enc = new lame.Mp3Encoder(2, 44100, 128);
+  const tone = new Int16Array(1152 * 4).map((_, i) => Math.round(Math.sin(i / 10) * 8000));
+  ok("  and it encodes", enc.encodeBuffer(tone, tone).length + enc.flush().length > 0);
+  const installed = JSON.parse(readFileSync("manage/node_modules/@breezystack/lamejs/package.json", "utf8")).version;
+  ok("  at an address named for the version installed, so a new one isn't cached as the old", LAME_PATH.includes(`-${installed}.js`), `${LAME_PATH} vs ${installed}`);
+  ok("  which the editor may load from its own node", /script-src[^;]*'self'/.test(MANAGE_CSP));
+  const editor = readFileSync("site/node-manage.html", "utf8");
+  ok("  and the editor no longer carries it", !editor.includes("extended fmt chunk not implemented") && editor.includes("Mp3Encoder"));
+}
+
+// ── the manifest is worked out once, not for every ranged piece of a song ──
+{
+  const parse = JSON.parse;
+  let parses = 0;
+  const pieces = async () => {
+    await get("/audio/song.mp3", { Range: "bytes=0-1" });   // warms the cache
+    parses = 0;
+    JSON.parse = (...a) => { parses++; return parse(...a); };
+    for (let i = 0; i < 5; i++) await get("/audio/song.mp3", { Range: `bytes=${i}-${i + 1}` });
+    await get("/manifest.json");
+    JSON.parse = parse;
+    return parses;
+  };
+  later(6);
+  lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
+  ok("ranged audio and the manifest share one reading of it", (await pieces()) === 0, `${parses} parses`);
+  later(6);
+  lamports = 0;
+  ok("  paused too", (await pieces()) === 0 && (await served()).paused === true, `${parses} parses`);
+}
+
+// ── the editor's fees status says what listeners see ──
+{
+  const { PREVIEW_KEY, hashKey } = await import("./src/preview-key.ts");
+  const { countFee } = await import("./src/settle.ts");
+  const KEY = "A".repeat(42) + "w";
+  const fees = async () => (await get("/manage/fees", { Cookie: `amply_preview=${KEY}` })).json();
+  lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
+  later(24 * 60);   // another day, by the Worker's clock
+  await putSetting(DB, PREVIEW_KEY, JSON.stringify({ hash: await hashKey(KEY), until: clock + 30 * 60_000 }));
+  await countFee(DB, Date.now());
+  const on = await fees();
+  ok("the editor's fees status: on while listeners are offered it", on.offering === true && (await served()).paused === undefined, JSON.stringify(on));
+  ok("  and today's count is the day the fees were counted under", on.paidToday === 1, JSON.stringify(on));
+  // A payee that is the fees account itself: listeners aren't offered it.
+  const feeWallet = await feeAddress(DB);
+  await putSetting(DB, "manifest", JSON.stringify({ ...manifest, payment: [{ ...manifest.payment[0], address: feeWallet }] }));
+  later(1);   // past the brief cache
+  ok("  a payee that's the fees account: off in the editor, as for listeners", (await fees()).offering === false && (await served()).paused === true);
+  await putSetting(DB, "manifest", stored);
+  later(1);
+}
+
+// ── Solana not answering at all, with no balance known ──
+{
+  later(61);   // anything known is over an hour old: nobody can say
+  rpcHangs = true;
+  // Node doesn't stay up for AbortSignal.timeout's timer alone; a Worker would.
+  const awake = setInterval(() => {}, 1_000);
+  const before = asked;
+  let t = performance.now();
+  const first = await served();
+  const firstMs = performance.now() - t;
+  ok("Solana hanging, nothing known: paused, after a short wait rather than ten seconds", first.paused === true && firstMs < 9_000, `${Math.round(firstMs)} ms`);
+  t = performance.now();
+  const second = await served();
+  const audio = await get("/audio/song.mp3");
+  const secondMs = performance.now() - t;
+  ok("  the next requests don't wait on it again", second.paused === true && audio.status !== 401 && secondMs < 1_000 && asked === before + 1,
+    `${Math.round(secondMs)} ms, asked ${asked - before}`);
+  clearInterval(awake);
+  later(1);   // past the half minute a failure is remembered
+  rpcHangs = false;
+  lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
+  ok("  half a minute on, it asks again", (await served()).paused === undefined && asked === before + 2);
+}
+
+// ── a balance a few minutes old: used at once, refreshed in the background ──
+{
+  later(6);
+  lamports = 0;
+  const waiting = [];
+  const ctx = { waitUntil: (p) => waiting.push(p), passThroughOnException() {} };
+  const res = await worker.fetch(new Request(`${ORIGIN}/manifest.json`), env, ctx);
+  ok("a stale balance is used straight away", (await res.json()).payment[0].paused === undefined && waiting.length === 1);
+  await Promise.all(waiting);
+  ok("  and the background check is what the next request sees", (await served()).paused === true);
 }
 
 // ── the database's daily allowance: plays reported by anyone (A1) ──

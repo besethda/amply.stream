@@ -14,7 +14,7 @@
  * artist actually has — who is listening a lot and paying nothing — without
  * building a record of anybody's taste. What is not collected cannot leak, be
  * demanded, or be mishandled by someone who never wanted to be a data
- * controller. See docs/identity.md.
+ * controller.
  *
  * D1 rather than KV because KV allows a thousand writes a day on the free plan
  * and a single enthusiastic listener would spend a tenth of that in an evening.
@@ -325,7 +325,7 @@ async function forgetOwed(db: D1Database, pubkey?: string): Promise<void> {
  * record of a barred wallet is kept regardless, holding nothing but the bar —
  * see forget().
  */
-export const KEEP_FOR = 365 * 86400_000;
+const KEEP_FOR = 365 * 86400_000;
 
 /**
  * Delete the totals of wallets not heard from within KEEP_FOR.

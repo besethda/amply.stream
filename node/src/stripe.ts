@@ -79,7 +79,7 @@ export class StripeError extends Error {
  * names them — which is not how its errors name them. An artist told "lacks
  * rak_plan_write" has no way to know that means the Prices row.
  */
-export const PERMISSIONS: Record<string, string> = {
+const PERMISSIONS: Record<string, string> = {
   product_write: "Products — Write (under Core)",
   product_read: "Products — Write (under Core)",
   plan_write: "Prices — Write (under Billing)",

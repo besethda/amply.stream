@@ -473,27 +473,6 @@ table.perms td:nth-child(2) { font-weight: 600; }
 .checkbox input { width: auto; }
 
 /* price */
-.price-grid { display: flex; gap: 28px; flex-wrap: wrap; align-items: flex-start; margin-top: 22px; }
-.price-set { flex: 1 1 320px; min-width: 0; }
-.price-now { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
-.price-now .price-input,
-.price-now .unit {
-  font-size: 54px; font-weight: 800; letter-spacing: -0.045em; color: var(--orange);
-  line-height: 1; font-variant-numeric: tabular-nums;
-}
-.price-now .price-input {
-  width: 3.4ch; padding: 0; border: 0; background: none; text-align: right;
-  font-family: var(--sans); -moz-appearance: textfield; appearance: textfield;
-}
-/* The spinners would sit on top of a 54px figure and there is a slider for
-   nudging it. */
-.price-now .price-input::-webkit-outer-spin-button,
-.price-now .price-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.price-now .price-input:hover { background: none; }
-.price-now .price-input:focus-visible { outline-offset: 3px; }
-.price-now .unit { margin-left: 1px; }
-.price-now span:not(.unit) { font-size: 18px; font-weight: 600; margin-left: 8px; }
-
 input[type=range] {
   width: 100%; accent-color: var(--orange); margin: 0; height: 24px;
 }
@@ -501,15 +480,6 @@ input[type=range] {
   display: flex; justify-content: space-between;
   font-family: var(--mono); font-size: 13px; color: var(--ink3); margin-top: 2px;
 }
-.price-pending {
-  background: rgba(246, 113, 30, .09); border-radius: var(--r);
-  padding: 14px 18px; font-size: 15.5px; color: var(--ink); margin: 16px 0 0;
-}
-.price-says {
-  flex: 1 1 280px; background: var(--bg2); border-radius: var(--r); padding: 22px 24px;
-}
-.price-says b { display: block; font-size: 18px; font-weight: 700; margin-bottom: 8px; }
-.price-says p { margin: 0; font-size: 16px; }
 
 /* choice pills, for how often listeners pay */
 .choices { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
@@ -522,8 +492,6 @@ input[type=range] {
 .choice[aria-pressed="true"] {
   background: var(--deep); color: var(--on-deep); border-color: var(--deep);
 }
-
-.payout-says { margin: 16px 0 0; font-size: 16px; color: var(--ink2); }
 
 /* splits */
 .split-bar {
@@ -671,7 +639,6 @@ input[type=range] {
   .track-dur { font-size: 13px; }
   .track-row .icon:not(.stack2) { width: 32px; height: 32px; }
   .dropzone, .track-problem, .track-warn { margin-left: 20px; margin-right: 20px; width: calc(100% - 40px); }
-  .price-now .price-input, .price-now .unit { font-size: 44px; }
   .link-row { flex-wrap: wrap; }
   .link-row .what, .link-row .where { flex: 1 1 100%; }
   .payee-split { flex-wrap: wrap; }
@@ -762,9 +729,7 @@ details.advanced > .stack { margin-top: 20px; }
 .earnings-top .earned b { font-size: 40px; line-height: 1.1; color: var(--ink); }
 .earnings-top .btn { margin-top: 6px; }
 
-/* Covering listeners' fees: on or off at a glance. */
-.fee-status { padding: 10px 14px; border-radius: 12px; background: var(--bg2); margin: 4px 0 12px; }
-.fee-status.on b { color: var(--good); }
+/* Covering listeners' fees. */
 .buy-sol { margin: 14px 0 0; }
 .fee-how { margin: 14px 0; }
 .fee-how > summary, .cash-out-passkey > summary { cursor: pointer; font-weight: 600; color: var(--ink); }
@@ -779,18 +744,15 @@ details.testing > summary .note { font-weight: 400; color: var(--ink3); margin-l
 details.testing .test-money { margin-top: 12px; }
 
 .lead { margin: 4px 0 10px; }
-.fee-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pill-status { display: inline-block; padding: 2px 10px; border-radius: 99px; font-size: 13px; font-weight: 700; }
 .pill-status.on { background: rgba(44, 107, 69, .15); color: var(--good); }
 .pill-status.off { background: var(--line); color: var(--ink3); }
 .payout-where { margin: 8px 0; }
 .payout-where code { font-size: 13px; }
 .cash-steps { padding-left: 22px; display: grid; gap: 8px; margin: 12px 0; }
-.send-how { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; display: grid; gap: 8px; }
 
 /* The heavy-file mark, now with a word: a pill rather than a dot. */
 .warn-toggle, .track-tags .warn-toggle { width: auto; padding: 0 10px; border-radius: 99px; white-space: nowrap; font-size: 13px; }
-.listener-key { margin: 10px 0 0; }
 details.testing { padding: 16px 20px; }
 /* The album price box has room for its "Not for sale" hint. */
 .track-price input[placeholder="Not for sale"], input[placeholder="Not for sale"] { min-width: 8.5em; }
@@ -805,11 +767,8 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .send-amount { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .send-amount .money input { width: 8em; }
 .send-done { margin: 10px 0; }
-.cash-steps .send-how { border-top: 0; margin-top: 8px; padding-top: 0; }
-.send-how .quiet-link { justify-self: start; text-align: left; }
 .send-setup { display: grid; gap: 8px; justify-items: start; margin: 10px 0; padding: 14px 16px; border-radius: 12px; background: var(--bg2); max-width: 560px; }
 .send-setup p { margin: 0; }
-.send-how > .btn { justify-self: start; }
 
 /* ── Home: the numbers at a glance ───────────────────────────────── */
 .stat-row { display: grid; gap: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -936,7 +895,6 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .se-btn:disabled { opacity: .4; cursor: default; }
 .se-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; }
 .se-panel > .se-btn { margin-top: 12px; }
-.se-upload { margin-top: 10px; }
 
 .se-f { display: block; margin: 0 0 14px; }
 .se-f > span { display: block; font-size: 13.5px; font-weight: 600; color: #d1d5db; margin-bottom: 6px; }
@@ -948,8 +906,6 @@ select { max-width: 100%; text-overflow: ellipsis; }
 }
 .se-side textarea { min-height: 120px; }
 .se-side input::placeholder { color: #6b7280; }
-.se-check { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; cursor: pointer; font-weight: 600; }
-.se-check input { width: 18px; height: 18px; accent-color: #f6711e; }
 
 .se-pic img, .se-pic-empty { width: 100%; max-height: 150px; object-fit: cover; border-radius: 10px; display: block; }
 .se-pic-empty { height: 80px; display: grid; place-items: center; background: #0b1220; border: 1.5px dashed #374151; color: #9ca3af; font-size: 14px; }
@@ -1060,13 +1016,6 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .pay-choice span { font-size: 14px; color: var(--ink3); }
 .pay-choice .fee { font-size: 13px; color: var(--ink2, var(--ink3)); border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; }
 .pay-choice[aria-pressed="true"] { border-color: var(--orange); box-shadow: 0 0 0 3px rgba(246, 113, 30, .18); }
-.pay-next { display: grid; gap: 12px; margin-bottom: 10px; }
-.connect-coinbase { display: grid; gap: 8px; justify-items: start; }
-.connect-coinbase .paste-row { display: flex; gap: 8px; width: 100%; }
-.connect-coinbase .paste-row input { flex: 1; min-width: 0; }
-.connect-coinbase .cash-steps { margin: 0; }
-.connect-coinbase p { margin: 0; }
-.pay-next p { margin: 0; }
 .pricing .price-line { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 .pricing .price-input {
   font-family: var(--sans); font-weight: 800; letter-spacing: -0.04em; color: var(--orange);
