@@ -379,6 +379,29 @@ function Track({
   );
 }
 
+/**
+ * Upload a song's files in order, with one progress figure for all of them.
+ * `required` must arrive or the whole upload fails; any other part that the
+ * service refuses (too large for its storage, say) is just left out. Resolves
+ * to the set of keys that arrived.
+ */
+export async function sendParts(parts, required, upload, onProgress = () => {}) {
+  const total = parts.reduce((n, [, b]) => n + b.size, 0) || 1;
+  const arrived = new Set();
+  let sent = 0;
+  for (const [k, b] of parts) {
+    const before = sent;
+    try {
+      await upload(k, b, (f) => onProgress((before + f * b.size) / total));
+      arrived.add(k);
+    } catch (e) {
+      if (k === required) throw e;
+    }
+    sent += b.size;
+  }
+  return arrived;
+}
+
 function Release({
   release, node, manifest, art, player,
   onChange, onRemove, upload, notify, sizeOf, charging,
@@ -423,29 +446,25 @@ function Release({
     }).catch(() => null);
     job.step("Drawing its waveform…");
     const wavesBytes = await makeWaves(file, duration).catch(() => null);
-    // Then everything goes up, with one bar for all of it.
-    const parts = [[key, file], ...(r?.blob ? [[streamKey, r.blob]] : []),
+    // Then everything goes up, with one bar for all of it. What listeners
+    // play must arrive: the streaming copy when there is one, else the
+    // original. With a copy, the original is kept for downloads if it fits.
+    // A WAV is ~10 MB a minute, and a service on KV takes 25 MB a file, so a
+    // long one is refused there; the song still goes up, and downloads get
+    // the copy instead (the node falls back to it).
+    const required = r?.blob ? streamKey : key;
+    const parts = [...(r?.blob ? [[streamKey, r.blob]] : []), [key, file],
       ...(wavesBytes ? [[wavesKey(key), new Blob([wavesBytes], { type: "application/octet-stream" })]] : [])];
-    const total = parts.reduce((n, [, b]) => n + b.size, 0) || 1;
-    let sent = 0;
-    for (const [k, b] of parts) {
-      const before = sent;
-      try {
-        await upload(k, b, (f) => job.step("Uploading…", (before + f * b.size) / total));
-      } catch (e) {
-        if (k === key) throw e;   // the song itself must arrive; the extras may not
-      }
-      sent += b.size;
-    }
-    const waves = wavesBytes ? `${node.url}/${wavesKey(key)}` : null;
+    const arrived = await sendParts(parts, required, upload, (f) => job.step("Uploading…", f));
+    const waves = arrived.has(wavesKey(key)) ? `${node.url}/${wavesKey(key)}` : null;
     const stream = r ? { loudness: Math.round(r.lufs * 10) / 10, ...(r.blob ? { size: r.blob.size, url: `${node.url}/${streamKey}` } : {}) } : null;
-    const original = `${node.url}/${key}`;
-    noteSize(original, file.size);
+    const original = arrived.has(key) ? `${node.url}/${key}` : null;
+    if (original) noteSize(original, file.size);
     if (stream?.url) noteSize(stream.url, stream.size);
     return {
-      // Listeners stream the even copy; the original stays for downloads.
+      // Listeners stream the even copy; the original, where it fit, stays for downloads.
       url: stream?.url || original,
-      ...(stream?.url ? { master: original } : {}),
+      ...(stream?.url && original ? { master: original } : {}),
       ...(stream?.loudness != null ? { loudness: stream.loudness } : {}),
       ...(waves ? { waves } : {}),
     };
