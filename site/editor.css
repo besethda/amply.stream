@@ -1141,7 +1141,11 @@ select { max-width: 100%; text-overflow: ellipsis; }
   position: fixed; inset: 0; z-index: 90; background: var(--bg); overflow-y: auto;
   padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px calc(env(safe-area-inset-bottom, 0px) + 24px);
 }
-.setup-back { width: 44px; height: 44px; border-radius: 999px; font-size: 22px; color: var(--ink); background: none; border: 0; box-shadow: none; }
+.setup-back {
+  display: grid; place-items: center; width: 44px; height: 44px; padding: 0; margin: 0;
+  border-radius: 999px; color: var(--ink); background: none; border: 0; box-shadow: none; cursor: pointer;
+}
+.setup-back svg { display: block; margin-left: -2px; }   /* a chevron looks centred a touch left of centre */
 .setup-back:hover { background: var(--bg2); }
 .setup-body {
   max-width: 440px; margin: 0 auto; min-height: calc(100% - 56px);
