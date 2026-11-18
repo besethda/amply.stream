@@ -181,7 +181,7 @@ const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt
 function topupPage(p: { address: string; currency: "usdc" | "sol"; amount: string | null }): string {
   const what = p.currency === "usdc"
     ? `${p.amount ? `$${p.amount} of ` : ""}USDC`
-    : "about $5 of SOL for your fees account (it pays your fans' network fees, and lasts months)";
+    : "$5 of SOL for your fees account (it pays your fans' network fees: each $1 covers ~1,000 payments)";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -223,7 +223,9 @@ const TOPUP_SCRIPT = String.raw`(function () {
     supported_destination_currencies: [p.currency],
     supported_destination_networks: ["solana"]
   };
+  // A fees account starts at $5: Stripe's page opens there, not at its own default.
   if (p.amount) options.amount = { source_amount: p.amount };
+  else if (p.currency === "sol") options.amount = { source_amount: "5" };
   var link = null;
   try { link = window.StripeOnramp && window.StripeOnramp.Standalone(options).getUrl(); } catch (e) { link = null; }
   if (!link || !/^https:\/\/([a-z0-9-]+\.)*(stripe|link)\.com(\/|\?|$)/.test(link)) {

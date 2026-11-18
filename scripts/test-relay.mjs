@@ -113,9 +113,9 @@ const call = (path, { method = "POST", body, headers = {}, origin = ORIGIN } = {
   // Run the page's script against a stand-in for Stripe's, in a fake page.
   const js = await (await relay.fetch(new Request("https://relay.test/topup.js"), env)).text();
   const params = JSON.parse(html.match(/<script id="params" type="application\/json">(.*?)<\/script>/s)[1]);
-  const run = (getUrl) => {
+  const run = (getUrl, given = params) => {
     const els = {
-      params: { textContent: JSON.stringify(params) },
+      params: { textContent: JSON.stringify(given) },
       go: { disabled: true, listeners: {}, addEventListener(t, f) { this.listeners[t] = f; } },
       said: { textContent: "Loading" },
     };
@@ -136,6 +136,10 @@ const call = (path, { method = "POST", body, headers = {}, origin = ORIGIN } = {
   await new Promise((r) => setTimeout(r, 0));
   ok("  which copies the address", good.copied() === ADDR);
   ok("  and goes to Stripe", good.went() === "https://crypto.link.com/?ref=x");
+
+  const fees = run(() => "https://crypto.link.com/?ref=x", { address: ADDR, currency: "sol", amount: null });
+  ok("a fees account opens Stripe at $5 of SOL, not Stripe's own $10", fees.asked()?.destination_currency === "sol" && fees.asked()?.amount?.source_amount === "5");
+  ok("  and the page says what $1 covers, not \"months\"", /covers ~1,000 payments/.test(await (await page(`address=${ADDR}&currency=sol`)).text()));
 
   const bare = run(() => "https://crypto.link.com?ref=x");
   ok("  a link with no path is still Stripe's", bare.els.go.disabled === false);
