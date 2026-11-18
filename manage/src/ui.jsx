@@ -34,7 +34,7 @@ function JobCard({ job }) {
   );
 }
 import { validate } from "../../spec/manifest-rules.mjs";
-import { charges, SETTLE_WITHIN_DAYS } from "../../spec/pricing.mjs";
+import { charges, SETTLE_WITHIN_DAYS, LISTEN_MIN_MICROS } from "../../spec/pricing.mjs";
 import { bareDomain, recordFor, lookup, confirms } from "../../spec/domain.mjs";
 import { makeWaves, wavesKey } from "./waves.js";
 import { prepareStream, TooLong } from "./stream-copy.js";
@@ -1896,7 +1896,7 @@ function SettingsTab({ manifest, payees, setPayees, update, art, everPublished, 
  * Kept from the last look so the tab opens with something in it, since the
  * public endpoint is slow and rate-limited.
  */
-const KEPT = "amply.payments.v1";
+const KEPT = "amply.payments.v2";
 
 function usePayments(payees, declared) {
   // Whichever chain the artist publishes is the one their listeners pay on, so
@@ -1906,37 +1906,37 @@ function usePayments(payees, declared) {
   const network = declared === "devnet" ? "devnet" : "mainnet";
 
   const addresses = (payees || []).map((p) => p.address).filter(Boolean);
-  const key = `${KEPT}.${addresses.join(",")}`;
+  const key = `${KEPT}.${network}.${addresses.join(",")}`;
+  // Each address's payments, kept as read so far: only what's newer is asked
+  // for next time, so years of payments stay one quick look.
+  const keptOf = (address) => { try { return JSON.parse(localStorage.getItem(`${KEPT}.${network}.${address}`)) || null; } catch { return null; } };
+  const keep = (address, v) => { try { localStorage.setItem(`${KEPT}.${network}.${address}`, JSON.stringify(v)); } catch { /* read again next time */ } };
 
+  const combine = () => {
+    const { mergePaymentsSync } = combineHelpers;
+    return mergePaymentsSync(addresses.map(keptOf));
+  };
   const [state, setState] = useState(() => {
-    try { return { ...JSON.parse(localStorage.getItem(key)), busy: false }; }
-    catch { return { busy: false }; }
+    let at = 0;
+    try { at = Number(localStorage.getItem(`${key}.at`)) || 0; } catch { /* none kept */ }
+    return { ...combine(), at: at || undefined, busy: false };
   });
 
-  async function look(net = network) {
+  async function look() {
     if (!addresses.length) return;
     setState((s) => ({ ...s, busy: true, error: null }));
     try {
-      const { paymentsTo } = await import("./chain.js");
-      const byWallet = {};
-      let total = 0;
+      const { paymentsTo, mergePayments } = await import("./chain.js");
       // Every address in the split, because a listener's payment is divided
       // between them: what the listener paid is the sum, not any one share.
       for (const address of addresses) {
-        const one = await paymentsTo(address, net);
-        total += one.total;
-        for (const [wallet, sum] of Object.entries(one.byWallet)) {
-          const had = byWallet[wallet] || { micros: 0, payments: 0, last: 0 };
-          byWallet[wallet] = {
-            micros: had.micros + sum.micros,
-            payments: Math.max(had.payments, sum.payments),
-            last: Math.max(had.last, sum.last),
-          };
-        }
+        const kept = keptOf(address);
+        const fresh = await paymentsTo(address, network, { until: kept?.newest || undefined, payees: addresses });
+        keep(address, mergePayments(kept, fresh));
       }
-      const next = { byWallet, total, at: Date.now(), network: net };
-      try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* fine */ }
-      setState({ ...next, busy: false });
+      const at = Date.now();
+      try { localStorage.setItem(`${key}.at`, String(at)); } catch { /* fine */ }
+      setState({ ...combine(), at, network, busy: false });
     } catch (e) {
       setState((s) => ({ ...s, busy: false, error: e.message }));
     }
@@ -1950,6 +1950,44 @@ function usePayments(payees, declared) {
   }, [key]);
 
   return { ...state, network, look: () => look(), addresses };
+}
+
+/** The split's payments as one: per wallet summed across every payee, the
+ *  total, and what reached the first payee (the artist) on their own. */
+const combineHelpers = {
+  mergePaymentsSync(kepts) {
+    const byWallet = {};
+    let total = 0;
+    kepts.forEach((k) => {
+      if (!k) return;
+      total += k.total || 0;
+      for (const [w, p] of Object.entries(k.byWallet || {})) {
+        const had = byWallet[w] || { micros: 0, other: 0, payments: 0, last: 0 };
+        byWallet[w] = {
+          micros: had.micros + (p.micros || 0),
+          other: had.other + (p.other || 0),
+          // One payment reaches every payee: counted once, not per share.
+          payments: Math.max(had.payments, p.payments || 0),
+          last: Math.max(had.last, p.last || 0),
+        };
+      }
+    });
+    return { byWallet, total, mine: kepts[0]?.total || 0 };
+  },
+};
+
+/**
+ * Everyone the artist should see: who listened, by the server's count, and
+ * anyone who paid without a play being counted yet (plays are counted when a
+ * song ends; a payment can come first). Shown, so money never arrives from
+ * someone the editor says isn't there.
+ */
+export function withPayers(rows, paid) {
+  const known = new Set((rows || []).map((r) => r.pubkey));
+  const extra = Object.entries(paid?.byWallet || {})
+    .filter(([w, p]) => !known.has(w) && w !== "unknown" && ((p.micros || 0) + (p.other || 0)) > 0)
+    .map(([w, p]) => ({ pubkey: w, plays: 0, seconds: 0, first_seen: p.last, last_seen: p.last, blocked: 0, paidOnly: true }));
+  return [...(rows || []), ...extra];
 }
 
 /** Micros of a dollar, as money. */
@@ -1985,10 +2023,11 @@ const DAY = 86_400_000;
  */
 export function standing(r, paid, rate, settleAt, now = Date.now()) {
   const got = (paid.byWallet || {})[r.pubkey];
-  // What the time they listened would have cost at today's rate. Approximate
-  // on purpose: the price may have changed since, and free tracks are never
-  // counted here at all.
-  const owed = rate > 0 ? ((r.seconds || 0) / 60) * rate * 1_000_000 : 0;
+  // What their listening cost, as the server priced it when it was heard: the
+  // price then, nothing while it was free. Listening from before the server
+  // kept that is estimated at today's price, as it always was.
+  const before = Math.max(0, (r.seconds || 0) - (r.owed_seconds || 0));
+  const owed = (r.owed_micros || 0) + (rate > 0 ? (before / 60) * rate * 1_000_000 : 0);
   const subscribed = r.subscribed_until && r.subscribed_until > now;
   const counted = !subscribed && !!paid.at;
   const short = counted && behind(owed, got?.micros || 0, settleAt);
@@ -2012,7 +2051,9 @@ export function standing(r, paid, rate, settleAt, now = Date.now()) {
  */
 export function overdue(owedMicros, paidMicros, lastSeen, now = Date.now()) {
   const unpaid = owedMicros - paidMicros;
-  const slack = Math.max(5_000, owedMicros * 0.1);
+  // Under a cent is never sent on its own (it waits for more), so it's never
+  // overdue: the slack starts there.
+  const slack = Math.max(LISTEN_MIN_MICROS, owedMicros * 0.1);
   return unpaid > slack && now - Number(lastSeen) > (SETTLE_WITHIN_DAYS + 1) * DAY;
 }
 
@@ -2059,6 +2100,7 @@ function Listeners({ api, paid, rate, settleAt }) {
       held: {
         plays: row.plays,
         seconds: row.seconds,
+        costMicros: row.owed_micros ?? null,
         firstSeen: row.first_seen ? new Date(row.first_seen).toISOString() : null,
         lastSeen: row.last_seen ? new Date(row.last_seen).toISOString() : null,
         servingStopped: !!row.blocked,
@@ -2108,7 +2150,9 @@ function Listeners({ api, paid, rate, settleAt }) {
 
   // Numbered in the order they first came: listeners are anonymous by design,
   // so a number is easier to talk about than a code.
-  const numberOf = new Map(rows ? [...rows].sort((a, b) => (a.first_seen || 0) - (b.first_seen || 0)).map((r, i) => [r.pubkey, i + 1]) : []);
+  // Payers whose plays haven't been counted yet are listed too (withPayers).
+  const all = rows ? withPayers(rows, paid) : null;
+  const numberOf = new Map(all ? [...all].sort((a, b) => (a.first_seen || 0) - (b.first_seen || 0)).map((r, i) => [r.pubkey, i + 1]) : []);
 
   if (error) return (
     <section class="card"><h2>Your listeners</h2>
@@ -2116,7 +2160,7 @@ function Listeners({ api, paid, rate, settleAt }) {
   );
   if (!rows) return <p class="muted">Looking…</p>;
 
-  if (!rows.length) {
+  if (!all.length) {
     return (
       <section class="card nothing">
         <h2>No listeners yet. <Help at="free" about="listeners">Everyone who plays your paid tracks appears
@@ -2128,7 +2172,7 @@ function Listeners({ api, paid, rate, settleAt }) {
 
   return (
     <section class="card">
-      <h2>Your listeners <span class="note">{rows.length}</span>
+      <h2>Your listeners <span class="note">{all.length}</span>
         <Help at="banning" about="your listeners">Listeners don't sign up with a name, so each one is shown by a
           short code from their payment app. You see how much they listened, never what or when.
           A <strong>Paid</strong> figure in red means they're more than one payment behind. <strong>Overdue</strong>{" "}
@@ -2172,7 +2216,7 @@ function Listeners({ api, paid, rate, settleAt }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => standing(r, paid, rate, settleAt)).sort(rank).slice(0, shown).map(({ r, got, owed, subscribed, short, overdue: late }) => {
+          {all.map((r) => standing(r, paid, rate, settleAt)).sort(rank).slice(0, shown).map(({ r, got, owed, subscribed, short, overdue: late }) => {
             const listened = `${Math.round((r.seconds || 0) / 60)} min`;
             const heard = new Date(r.last_seen).toLocaleDateString();
             const isOpen = open === r.pubkey;
@@ -2357,7 +2401,8 @@ function EarningsSummary({ paid, payees }) {
     <section class="card earnings-top">
       <span class="label">PAID TO YOU</span>
       <div class="earned">
-        <b>{paid.at ? `$${((paid.total || 0) / 1_000_000).toFixed(2)}` : paid.busy ? "…" : "—"}</b>
+        {/* Your own share: with a split, the rest went straight to the others. */}
+        <b>{paid.at ? `$${((paid.mine || 0) / 1_000_000).toFixed(2)}` : paid.busy ? "…" : "—"}</b>
         {paid.network === "devnet" && <span class="note">test money</span>}
         <button class="link small" onClick={paid.look} disabled={paid.busy} aria-label="Check again" title="Check again">↻</button>
       </div>
@@ -2710,14 +2755,15 @@ function HomeTab({ api, manifest, payees, rate, settleAt, network, live, onGo })
   }, []);
 
   const titles = new Map((manifest.releases || []).flatMap((r) => (r.tracks || []).map((t) => [t.id, t.title || "Untitled"])));
-  const listeners = rows?.length ?? null;
+  const everyone = rows ? withPayers(rows, paid) : null;
+  const listeners = everyone?.length ?? null;
   const minutes = rows ? Math.round(rows.reduce((n, r) => n + (r.seconds || 0), 0) / 60) : null;
   // Listeners who have really fallen short, by the same rule as the listener
   // table (standing): past what their app may hold back, or owing past the
   // week. Paying every few songs leaves recent listening unpaid on purpose,
   // so a plain paid-versus-listened figure would warn about nothing.
   const short = rows && rate > 0 && paid.at
-    ? rows.map((r) => standing(r, paid, rate, settleAt)).filter((s) => s.short || s.overdue).length
+    ? everyone.map((r) => standing(r, paid, rate, settleAt)).filter((s) => s.short || s.overdue).length
     : 0;
   const top = (songs || []).filter((s) => titles.has(s.track)).slice(0, 5);
   const most = top[0]?.plays || 1;
@@ -2740,7 +2786,7 @@ function HomeTab({ api, manifest, payees, rate, settleAt, network, live, onGo })
           <div class="card stat"><span class="label">MINUTES LISTENED</span><b>{minutes == null ? "…" : minutes.toLocaleString()}</b>
             <span class="muted small">on your paid songs</span></div>
           <div class="card stat"><span class="label">PAID TO YOU</span>
-            <b>{paid.at ? `$${((paid.total || 0) / 1_000_000).toFixed(2)}` : paid.busy ? "…" : "—"}</b>
+            <b>{paid.at ? `$${((paid.mine || 0) / 1_000_000).toFixed(2)}` : paid.busy ? "…" : "—"}</b>
             <span class="muted small">{paid.error ? "couldn't check just now" : "by listeners, all time"}</span></div>
         </div>
 

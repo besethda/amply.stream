@@ -30,7 +30,7 @@ import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, 
 import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, itemFor, CHAINS, type Sale } from "./sales";
 import { settle, feeAddress, feeBalance, feeOnrampSignature, rpcAt, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS, WITHDRAW_FEE_MICROS, NEW_ACCOUNT_FEE_MICROS } from "./settle";
 import { tokenAccountOf, keyOf } from "./solana-tx";
-import { purchaseMemo } from "./payment-check";
+import { purchaseMemo, tipMemo, TIP_MIN_MICROS, TIP_MAX_MICROS } from "./payment-check";
 import { cleanSite } from "../../spec/site.mjs";
 import { cashOutProblem, draftCashOut, CASHOUT_MIN_MICROS, CASHOUT_MAX_MICROS } from "./cashout";
 import { base64 } from "./solana-tx";
@@ -846,7 +846,11 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     const manifest = await manifestNowOf(env);
     const pay = walletOf(manifest)!;
     let limits = { minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS } as { minMicros: number; maxMicros: number; memo?: string };
-    if (body.item !== undefined) {
+    if (body.tip === true) {
+      // A tip: any amount the listener chooses, within the app's own limits,
+      // and marked as one so it's never taken for paying for listening.
+      limits = { minMicros: TIP_MIN_MICROS, maxMicros: TIP_MAX_MICROS, memo: tipMemo(host) };
+    } else if (body.item !== undefined) {
       const item = String(body.item);
       const sale = itemFor(manifest, item);
       if (!sale || !sale.wallet) return fail(404, "that isn't for sale for USDC here");
@@ -1079,7 +1083,16 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     // so it isn't counted as listening anyone owes for.
     if (!(await takingPayments(env))) return new Response(null, { status: 204, headers: noStore() });
     const body = await jsonBody(request);
-    await counted(env.DB, who, Number(body?.seconds) || 0);
+    // Priced now, as it's heard: a later change of price doesn't reprice it.
+    // A subscriber pays by card, so their listening costs nothing here.
+    const until = await subscribedUntil(env.DB, who).catch(() => null);
+    const subscribed = until !== null && until > Date.now();
+    let perMinute = 0;
+    try {
+      const wallet = (JSON.parse((await manifestText(env)) || "{}")?.payment || []).find((p: { type?: string }) => p?.type === "solana-usdc");
+      perMinute = subscribed ? 0 : Math.max(0, Number(wallet?.ratePerMinute) || 0);
+    } catch { /* unpriced */ }
+    await counted(env.DB, who, Number(body?.seconds) || 0, Date.now(), perMinute);
     // Now and then, clear out wallets not heard from in a year. Here rather
     // than on a timer, so there is nothing for an artist to set up.
     if (Math.random() < 0.02) await pruneStale(env.DB);
@@ -1130,6 +1143,8 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
         ? {
             plays: row.plays,
             seconds: row.seconds,
+            costMicros: await env.DB.prepare("SELECT micros FROM owed WHERE pubkey = ?").bind(proof.address)
+              .first<{ micros: number }>().then((o) => o?.micros ?? null).catch(() => null),
             firstSeen: row.first_seen ? new Date(row.first_seen).toISOString() : null,
             lastSeen: row.last_seen ? new Date(row.last_seen).toISOString() : null,
             servingStopped: !!row.blocked,

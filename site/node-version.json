@@ -1,8 +1,9 @@
 {
-  "version": "3.22.2",
+  "version": "3.23.0",
   "spec": 1,
   "schema": [
     "CREATE TABLE IF NOT EXISTS settings ( key TEXT PRIMARY KEY, value TEXT NOT NULL )",
+    "CREATE TABLE IF NOT EXISTS owed ( pubkey TEXT PRIMARY KEY, micros INTEGER NOT NULL DEFAULT 0, seconds INTEGER NOT NULL DEFAULT 0 )",
     "CREATE TABLE IF NOT EXISTS listeners ( pubkey TEXT PRIMARY KEY, plays INTEGER NOT NULL DEFAULT 0, seconds INTEGER NOT NULL DEFAULT 0, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL, blocked INTEGER NOT NULL DEFAULT 0 )",
     "CREATE TABLE IF NOT EXISTS subscriptions ( wallet TEXT PRIMARY KEY, subscription TEXT NOT NULL, customer TEXT, until INTEGER NOT NULL, updated INTEGER NOT NULL )",
     "CREATE INDEX IF NOT EXISTS subscriptions_by_id ON subscriptions (subscription)",

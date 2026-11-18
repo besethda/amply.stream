@@ -42,6 +42,11 @@ export const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
 /** The note a purchase's payment carries: which artist, and what it bought. */
 export const purchaseMemo = (host: string, item: string) => `amply:buy:${host}:${item}`;
+/** A tip's note: the app writes the same (app/src/tips.js). */
+export const tipMemo = (host: string) => `amply:tip:${host}`;
+/** A tip is ten cents to fifty dollars: the app offers $1, $3 and $5. */
+export const TIP_MIN_MICROS = 100_000;
+export const TIP_MAX_MICROS = 50_000_000;
 
 /**
  * Ask the chain what happened, and believe only the chain.

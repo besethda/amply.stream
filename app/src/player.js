@@ -73,6 +73,7 @@ export function createPlayer(onChange, onListened, {
   let repeat = REPEAT.OFF;
   let refused = null;
   let last = 0;             // where the clock was when we last looked
+  let lastAt = 0;           // and when, by the wall clock
   let advancing = false;
   let played = 0;           // seconds of this track actually heard
   let loading = 0;          // guards against a slow resolve landing out of order
@@ -190,10 +191,16 @@ export function createPlayer(onChange, onListened, {
   audio.addEventListener("timeupdate", () => {
     const t = audio.currentTime;
     const step = t - last;
+    const wall = clock(), since = (wall - lastAt) / 1000;
     last = t;
+    lastAt = wall;
 
-    // Only forward movement of a plausible size is listening.
-    if (step > 0 && step <= MAX_STEP && !audio.paused) {
+    // Only forward movement of a plausible size is listening. A bigger step
+    // is still listening when as much time really passed: a phone in a
+    // pocket reports less often. A seek moves further than the clock did.
+    const rate = audio.playbackRate || 1;
+    const real = step > 0 && (step <= MAX_STEP || step <= since * rate + 0.5);
+    if (real && !audio.paused) {
       played += step;
       onListened(now(), step);
     }
@@ -206,6 +213,11 @@ export function createPlayer(onChange, onListened, {
     }
     tell();
   });
+
+  // Playing again, or a jump finished (by the lock screen too): measure from
+  // here, so neither a pause nor a jump is taken for listening.
+  audio.addEventListener("play", () => { lastAt = clock(); });
+  audio.addEventListener("seeked", () => { last = audio.currentTime || 0; lastAt = clock(); });
 
   // A safety net: if a track ends anyway, carry on. In the background on iOS
   // this will not fire usefully, which is what the lead time above is for.

@@ -94,6 +94,19 @@ ok("a funded fees account: the price is live", (await served()).paused === undef
 ok("  a paid song needs a wallet again", (await get("/audio/song.mp3")).status === 401);
 ok("  and listening is counted", (await played()) === 120);
 
+// ── what listening cost, priced when it was heard ──
+const owed = () => sqlite.prepare("SELECT micros, seconds FROM owed WHERE pubkey = ?").get(wallet) || { micros: 0, seconds: 0 };
+ok("  priced as heard: 2 minutes at a cent a minute is 2 cents", owed().micros === 20_000 && owed().seconds === 120, JSON.stringify(owed()));
+sqlite.prepare("INSERT INTO subscriptions (wallet, subscription, customer, until, updated) VALUES (?, 'sub_1', 'cus_1', ?, ?)").run(wallet, clock + 86400_000, clock);
+await played();
+ok("a subscriber's listening costs nothing by the minute", owed().micros === 20_000 && owed().seconds === 240, JSON.stringify(owed()));
+sqlite.prepare("DELETE FROM subscriptions").run();
+const { forget, listeners: listed } = await import("./src/store.ts");
+const row = (await listed(DB)).find((r) => r.pubkey === wallet);
+ok("the editor sees the cost beside the listening", row?.owed_micros === 20_000 && row?.owed_seconds === 240, JSON.stringify(row));
+await forget(DB, wallet);
+ok("forgotten: the cost goes with the rest", owed().micros === 0 && !sqlite.prepare("SELECT 1 FROM owed WHERE pubkey = ?").get(wallet));
+
 // ── just below the line ──
 later(6);
 lamports = OFFER_ABOVE_LAMPORTS - 1;

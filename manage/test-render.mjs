@@ -223,6 +223,78 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
   cmp("a subscriber is never short", (({ short, overdue: o }) => short || o)(of({ seconds: 4 * 3600, subscribed_until: NOW + DAY })), false);
   cmp("nothing is flagged before payments are read",
     (({ short, overdue: o }) => short || o)(standing({ pubkey: "B", seconds: 99999, last_seen: 0 }, {}, RATE, POINT, NOW)), false);
+
+  // What listening cost is what the server priced it at when it was heard.
+  cmp("4 hours priced at 10c when heard: not short, whatever today's price",
+    of({ seconds: 4 * 3600, owed_seconds: 4 * 3600, owed_micros: c(10) }).short, false);
+  cmp("  so raising the price doesn't put past listeners in red",
+    (({ short }) => short)(standing({ pubkey: "A", last_seen: NOW, seconds: 4 * 3600, owed_seconds: 4 * 3600, owed_micros: c(10) }, paid, RATE * 10, POINT, NOW)), false);
+  cmp("listening free when heard (paused, subscribed) owes nothing later",
+    of({ seconds: 10 * 3600, owed_seconds: 10 * 3600, owed_micros: 0 }).short, false);
+  cmp("listening from before the server priced it is still estimated",
+    of({ seconds: 8 * 3600, owed_seconds: 3600, owed_micros: c(1) }).short, true);
+  cmp("under a cent is never sent alone, so never overdue", overdue(c(0.9), 0, NOW - 30 * DAY, NOW), false);
+
+  const { withPayers } = await import("./src/ui.jsx");
+  const listed = withPayers([{ pubkey: "A", seconds: 60 }], { byWallet: { A: { micros: c(1) }, Z: { micros: c(1) }, unknown: { micros: 5 } } });
+  cmp("someone who paid before a play was counted is listed", listed.map((r) => r.pubkey).join(","), "A,Z");
+  cmp("  as having paid, with no plays yet", listed[1].paidOnly && listed[1].seconds === 0, true);
+  cmp("  and isn't counted as short for it", standing(listed[1], { at: NOW, byWallet: { Z: { micros: c(1) } } }, RATE, POINT, NOW).short, false);
+}
+
+// ── reading payments off the chain ──────────────────────────────────────────
+{
+  const { paymentsTo, mergePayments } = await import("./src/chain.js");
+  const ARTIST = "Art1st1111111111111111111111111111111111111", BAND = "Band11111111111111111111111111111111111111";
+  const FAN = "Fan111111111111111111111111111111111111111", OUT = "Out111111111111111111111111111111111111111";
+  const USDC = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+  const acct = { [ARTIST]: "accA", [BAND]: "accB", [FAN]: "accF", [OUT]: "accO" };
+  const tx = (sig, transfers, memo) => ({
+    blockTime: 1_000, meta: { err: null, preTokenBalances: [], innerInstructions: [],
+      postTokenBalances: Object.entries(acct).map(([owner, a], i) => ({ accountIndex: i, owner, mint: USDC })) },
+    transaction: { message: { accountKeys: Object.values(acct).map((pubkey) => ({ pubkey })), instructions: [
+      ...transfers.map(([to, micros]) => ({ parsed: { type: "transferChecked", info: { authority: FAN, destination: acct[to], mint: USDC, tokenAmount: { amount: String(micros) } } } })),
+      ...(memo ? [{ program: "spl-memo", parsed: memo }] : []),
+    ] } },
+  });
+  // 2,500 payments (three pages of 1,000), then a tip, a purchase and a send-out fee.
+  const sigs = [...Array(2500)].map((_, i) => `s${i}`).concat(["tip", "buy", "out"]);
+  const txs = Object.fromEntries(sigs.map((sig) => [sig,
+    sig === "tip" ? tx(sig, [[ARTIST, 1_000_000]], "amply:tip:a.test")
+      : sig === "buy" ? tx(sig, [[ARTIST, 5_000_000]], "amply:buy:a.test:album")
+      : sig === "out" ? tx(sig, [[OUT, 2_000_000], [ARTIST, 50_000]])
+      : tx(sig, [[ARTIST, 7_000], [BAND, 3_000]])]));
+  let pages = 0;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    const answer = (b) => {
+      if (b.method === "getSignaturesForAddress") {
+        pages++;
+        const { before, until, limit } = b.params[1];
+        let list = [...sigs].reverse();                       // newest first
+        if (until) list = list.slice(0, list.indexOf(until));
+        if (before) list = list.slice(list.indexOf(before) + 1);
+        return { jsonrpc: "2.0", id: b.id, result: list.slice(0, limit).map((signature) => ({ signature, err: null })) };
+      }
+      return { jsonrpc: "2.0", id: b.id, result: txs[b.params[0]] };
+    };
+    return new Response(JSON.stringify(Array.isArray(body) ? body.map(answer) : answer(body)));
+  };
+  globalThis.setTimeout = ((real) => (fn, ms) => real(fn, 0))(globalThis.setTimeout);
+  const all = await paymentsTo(ARTIST, "mainnet", { payees: [ARTIST, BAND] });
+  cmp("every payment is read, not just the latest few hundred", all.byWallet[FAN].payments, 2500);
+  cmp("  across pages", pages, 3);
+  cmp("  listening paid is listening only", all.byWallet[FAN].micros, 2500 * 7_000);
+  cmp("  a tip, a purchase and a send-out fee are counted apart", all.byWallet[FAN].other, 1_000_000 + 5_000_000 + 50_000);
+  cmp("  and everything that arrived is in the total", all.total, 2500 * 7_000 + 6_050_000);
+  sigs.push("new1");
+  txs.new1 = tx("new1", [[ARTIST, 7_000], [BAND, 3_000]]);
+  pages = 0;
+  const more = await paymentsTo(ARTIST, "mainnet", { until: all.newest, payees: [ARTIST, BAND] });
+  cmp("next time, only what's newer is read", more.byWallet[FAN].payments === 1 && pages === 1, true);
+  cmp("  and added to what was kept", mergePayments(all, more).byWallet[FAN].payments, 2501);
+  globalThis.fetch = realFetch;
 }
 
 // ── a page from before signup: the account first, then the claim ────────────

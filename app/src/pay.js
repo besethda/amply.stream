@@ -105,8 +105,9 @@ export async function sendDollarsOut(pair, destination, micros = "all", { nodes 
 
   let amount = micros;
   if (amount === "all") {
-    const held = await conn.getTokenAccountBalance(from).catch(() => null);
-    amount = Number(held?.value?.amount || 0);
+    // Read directly: free endpoints refuse getTokenAccountBalance from a browser.
+    const held = await conn.getParsedAccountInfo(from, "confirmed").catch(() => null);
+    amount = Number(held?.value?.data?.parsed?.info?.tokenAmount?.amount || 0);
   }
   if (!(amount > 0)) throw new PaymentError("nothing", "There are no dollars in this wallet to send.");
 
@@ -243,18 +244,25 @@ export async function payArtist(pair, recipients, micros, { artistName = "This a
   // path end to end (prove-payment.mjs), pays its own fee.
   if (!mintAddress) {
     const paused = () => new PaymentError("paused", `${artistName} can't take payments right now. Nothing was sent.`);
-    if (node?.item === undefined) {
+    if (node?.item === undefined && !node?.tip) {
       if (micros < LISTEN_MIN_MICROS) throw new PaymentError("small", "Less than a cent is owed. It waits until there's more.");
       if (micros > LISTEN_MAX_MICROS) throw new PaymentError("payment", "That's more than one payment can be. Nothing was sent.");
     }
-    const offer = node?.origin ? await feeOffer(node.origin, { micros, owners, pair, item: node.item }) : null;
+    const offer = node?.origin ? await feeOffer(node.origin, { micros, owners, pair, item: node.item, tip: node.tip }) : null;
     if (!offer) throw paused();
     const tx = await build(offer.feePayer);
     tx.feePayer = offer.feePayer;
     const sent = await sendThroughNode(conn, node, tx, pair);
     // The node didn't send it, and said so: nothing went out.
     if (!sent) throw paused();
-    await confirmed(conn, sent);
+    try {
+      await confirmed(conn, sent);
+    } catch (e) {
+      // Sent, and not yet seen landing: the signature lets the app look it
+      // up later rather than guess (paying.js, before paying again).
+      if (e instanceof PaymentError) e.signature = sent;
+      throw e;
+    }
     return { signature: sent, shares, micros, feePaidBy: "artist" };
   }
 
@@ -265,6 +273,62 @@ export async function payArtist(pair, recipients, micros, { artistName = "This a
   } catch (e) {
     throw paymentProblem(e);
   }
+}
+
+/**
+ * Did a payment that may have gone out actually land? For a debt whose last
+ * payment wasn't seen landing, before anything is sent again.
+ *
+ * With its signature, the network says. Without (the artist's server never
+ * answered), the listener's own recent transactions are read for a transfer
+ * to these payees since then. A payment the network hasn't seen two minutes
+ * on never will: its blockhash has expired. Returns the micros that landed
+ * (0 when nothing did), or null when it can't tell yet: then nothing is sent.
+ */
+export async function landedSince(pair, recipients, { since, signature, now = Date.now() } = {}) {
+  const conn = rpc();
+  try {
+    if (signature) {
+      const s = (await conn.getSignatureStatuses([signature], { searchTransactionHistory: true })).value?.[0];
+      if (s && !s.err && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) {
+        const tx = await conn.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+        return paidIn(tx, pair, recipients);
+      }
+      if (s?.err) return 0;
+      return now - since > EXPIRED_MS ? 0 : null;
+    }
+    if (now - since <= EXPIRED_MS) return null;
+    const sigs = await conn.getSignaturesForAddress(pair.publicKey, { limit: 25 }, "confirmed");
+    let micros = 0;
+    for (const s of sigs) {
+      if (s.err || !s.blockTime || s.blockTime * 1000 < since - 60_000) continue;
+      const tx = await conn.getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
+      micros += await paidIn(tx, pair, recipients);
+    }
+    return micros;
+  } catch {
+    return null;
+  }
+}
+const EXPIRED_MS = 2 * 60_000;
+
+/** What one transaction paid these payees for listening, from this wallet. */
+async function paidIn(tx, pair, recipients) {
+  if (!tx || tx.meta?.err) return 0;
+  const ixs = tx.transaction?.message?.instructions || [];
+  // A purchase or a tip carries a note; listening never does.
+  if (ixs.some((ix) => ix.programId?.toBase58?.() === MEMO_PROGRAM || ix.program === "spl-memo")) return 0;
+  const mint = addressOf(network().usdc, "The network");
+  const accounts = new Set(await Promise.all(recipients.filter((r) => r.address).map(async (r) =>
+    (await getAssociatedTokenAddress(mint, new PublicKey(r.address), false, TOKEN_PROGRAM_ID)).toBase58())));
+  const me = pair.publicKey.toBase58();
+  let micros = 0;
+  for (const ix of ixs) {
+    const p = ix.parsed;
+    if (p?.type !== "transferChecked" || p.info?.authority !== me || !accounts.has(p.info?.destination)) continue;
+    micros += Number(p.info.tokenAmount?.amount || 0);
+  }
+  return micros;
 }
 
 /** A failed send, in words a listener can act on. */
@@ -292,7 +356,7 @@ const NODE_TIMEOUT_MS = 8_000;
  * or null. Anything odd about the answer is a no, and the listener pays the
  * fee themselves as before. Nothing about the listener is sent to ask.
  */
-export async function feeOffer(origin, { micros, owners = [], pair, item } = {}) {
+export async function feeOffer(origin, { micros, owners = [], pair, item, tip = false } = {}) {
   let o;
   try {
     const res = await fetch(`${origin}/listen/fees`, { signal: AbortSignal.timeout(NODE_TIMEOUT_MS) });
@@ -307,7 +371,7 @@ export async function feeOffer(origin, { micros, owners = [], pair, item } = {})
   // Never a wallet that's also being paid, or the listener's own.
   if (owners.some((k) => k.equals(feePayer)) || pair?.publicKey.equals(feePayer)) return null;
   // A purchase's price is the node's to check; a listening payment must fit.
-  if (item === undefined && !(micros >= Number(o.minMicros) && micros <= Number(o.maxMicros))) return null;
+  if (item === undefined && !tip && !(micros >= Number(o.minMicros) && micros <= Number(o.maxMicros))) return null;
   return { feePayer };
 }
 

@@ -152,5 +152,29 @@ ok("paused on purpose: left alone", !s3.waiting && resolves === 3);
 
 ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") === "12345");
 
+// Listening in a pocket: the phone reports less often, in bigger steps.
+{
+  let wall = 0, heard = 0;
+  const p4 = createPlayer(() => {}, (_t, step) => { heard += step; }, { clock: () => wall });
+  const a = p4.element();
+  const on = (e) => (a.handlers[e] || []).forEach((f) => f());
+  p4.play(tracks, 0);
+  await tick();
+  a.paused = false; on("play");
+  const at = (t, ms) => { wall = ms; a.currentTime = t; on("timeupdate"); };
+  at(1, 1000); at(2, 2000);
+  at(12, 12000);
+  ok("ten seconds reported at once, ten seconds passed: counted", Math.abs(heard - 12) < 0.01, heard);
+  at(100, 12500);
+  ok("a jump further than the clock moved is a seek: not counted", Math.abs(heard - 12) < 0.01, heard);
+  a.paused = true; on("pause");
+  wall = 600_000;
+  a.paused = false; on("play");
+  at(150, 601_000);
+  ok("a long pause, then a jump: not taken for listening", Math.abs(heard - 12) < 0.01, heard);
+  on("seeked"); at(151, 602_000);
+  ok("  and listening carries on from there", Math.abs(heard - 13) < 0.01, heard);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

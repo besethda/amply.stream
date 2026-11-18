@@ -25,6 +25,16 @@ export const SCHEMA = [
      key TEXT PRIMARY KEY,
      value TEXT NOT NULL
    )`,
+  // What each wallet's listening cost, priced when it was heard: the price
+  // then, and nothing while it was free (paused, subscribed, or no price).
+  // Kept beside `listeners` rather than in it, so a database from before
+  // needs no change made to an existing table. `seconds` is the listening
+  // this covers; anything in `listeners.seconds` beyond it came before.
+  `CREATE TABLE IF NOT EXISTS owed (
+     pubkey TEXT PRIMARY KEY,
+     micros INTEGER NOT NULL DEFAULT 0,
+     seconds INTEGER NOT NULL DEFAULT 0
+   )`,
   `CREATE TABLE IF NOT EXISTS listeners (
      pubkey TEXT PRIMARY KEY,
      plays INTEGER NOT NULL DEFAULT 0,
@@ -202,8 +212,10 @@ export async function counted(
   pubkey: string,
   seconds: number,
   now = Date.now(),
+  /** The price per minute while it was heard, in dollars: 0 when it was free. */
+  perMinute = 0,
 ): Promise<void> {
-  const clean = Math.max(0, Math.min(Math.round(seconds), 3600));
+  const clean = Math.max(0, Math.min(Math.round(seconds), MAX_REPORT_S));
   await db.prepare(
     `INSERT INTO listeners (pubkey, plays, seconds, first_seen, last_seen) VALUES (?, 1, ?, ?, ?)
      ON CONFLICT(pubkey) DO UPDATE SET
@@ -211,7 +223,17 @@ export async function counted(
        seconds = seconds + excluded.seconds,
        last_seen = excluded.last_seen`,
   ).bind(pubkey, clean, now, now).run();
+  const micros = perMinute > 0 ? Math.round((clean / 60) * perMinute * 1_000_000) : 0;
+  // A database from before this table has no record of cost; the editor
+  // then estimates, as it always did. Nothing here is worth failing a play for.
+  await db.prepare(
+    `INSERT INTO owed (pubkey, micros, seconds) VALUES (?, ?, ?)
+     ON CONFLICT(pubkey) DO UPDATE SET micros = micros + excluded.micros, seconds = seconds + excluded.seconds`,
+  ).bind(pubkey, micros, clean).run().catch(() => {});
 }
+
+/** The longest one report of listening can be: a long mix, not a day. */
+export const MAX_REPORT_S = 3 * 3600;
 
 /**
  * The artist's listeners, each with when their subscription runs to, if they
@@ -220,12 +242,24 @@ export async function counted(
  * kind of honest listener an artist must not be invited to stop serving.
  */
 export async function listeners(db: D1Database, limit = 500): Promise<(Listener & { subscribed_until: number | null })[]> {
-  const { results } = await db.prepare(
-    `SELECT l.*, s.until AS subscribed_until
-       FROM listeners l LEFT JOIN subscriptions s ON s.wallet = l.pubkey
-      ORDER BY l.seconds DESC LIMIT ?`,
-  ).bind(Math.min(limit, 1000)).all<Listener & { subscribed_until: number | null }>();
-  return results ?? [];
+  const n = Math.min(limit, 1000);
+  try {
+    const { results } = await db.prepare(
+      `SELECT l.*, s.until AS subscribed_until, o.micros AS owed_micros, o.seconds AS owed_seconds
+         FROM listeners l LEFT JOIN subscriptions s ON s.wallet = l.pubkey
+         LEFT JOIN owed o ON o.pubkey = l.pubkey
+        ORDER BY l.seconds DESC LIMIT ?`,
+    ).bind(n).all<Listener & { subscribed_until: number | null }>();
+    return results ?? [];
+  } catch {
+    // No `owed` table yet (a database from before it): as before.
+    const { results } = await db.prepare(
+      `SELECT l.*, s.until AS subscribed_until
+         FROM listeners l LEFT JOIN subscriptions s ON s.wallet = l.pubkey
+        ORDER BY l.seconds DESC LIMIT ?`,
+    ).bind(n).all<Listener & { subscribed_until: number | null }>();
+    return results ?? [];
+  }
 }
 
 /** An upsert, so that blocking a wallet sticks even when there is no row for it
@@ -260,6 +294,15 @@ export async function forget(db: D1Database, pubkey: string): Promise<void> {
      WHERE pubkey = ? AND blocked = 1`,
   ).bind(pubkey).run();
   await db.prepare("DELETE FROM listeners WHERE pubkey = ? AND blocked = 0").bind(pubkey).run();
+  await forgetOwed(db, pubkey);
+}
+
+/** What a wallet's listening cost goes with the rest of what's held about it. */
+async function forgetOwed(db: D1Database, pubkey?: string): Promise<void> {
+  await (pubkey
+    ? db.prepare("DELETE FROM owed WHERE pubkey = ?").bind(pubkey)
+    : db.prepare("DELETE FROM owed WHERE pubkey NOT IN (SELECT pubkey FROM listeners)")
+  ).run().catch(() => {});
 }
 
 // ── what an artist needs to meet their obligations ─────────────────────────
@@ -292,6 +335,7 @@ export const KEEP_FOR = 365 * 86400_000;
 export async function pruneStale(db: D1Database, now = Date.now()): Promise<void> {
   await db.prepare("DELETE FROM listeners WHERE blocked = 0 AND last_seen < ?")
     .bind(now - KEEP_FOR).run();
+  await forgetOwed(db);
 }
 
 /**
@@ -305,6 +349,7 @@ export async function pruneStale(db: D1Database, now = Date.now()): Promise<void
 export async function remove(db: D1Database, pubkey: string): Promise<void> {
   await db.prepare("DELETE FROM listeners WHERE pubkey = ?").bind(pubkey).run();
   await db.prepare("DELETE FROM subscriptions WHERE wallet = ?").bind(pubkey).run();
+  await forgetOwed(db, pubkey);
 }
 
 // ── subscriptions ───────────────────────────────────────────────────────────

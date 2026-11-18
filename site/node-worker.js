@@ -787,6 +787,7 @@ wallet that plays their paid tracks:</p>
 <ul>
   <li>your wallet address;</li>
   <li>how many tracks you have played, and for how many minutes in total;</li>
+  <li>what that listening cost, at the price when you heard it;</li>
   <li>when you first and last listened;</li>
   <li>whether ${name} has stopped serving that wallet.</li>
 </ul>
@@ -923,8 +924,8 @@ async function listener(db, pubkey) {
 async function seen(db, pubkey, now = Date.now()) {
   await db.prepare("UPDATE listeners SET last_seen = ? WHERE pubkey = ?").bind(now, pubkey).run();
 }
-async function counted(db, pubkey, seconds, now = Date.now()) {
-  const clean = Math.max(0, Math.min(Math.round(seconds), 3600));
+async function counted(db, pubkey, seconds, now = Date.now(), perMinute2 = 0) {
+  const clean = Math.max(0, Math.min(Math.round(seconds), MAX_REPORT_S));
   await db.prepare(
     `INSERT INTO listeners (pubkey, plays, seconds, first_seen, last_seen) VALUES (?, 1, ?, ?, ?)
      ON CONFLICT(pubkey) DO UPDATE SET
@@ -932,14 +933,32 @@ async function counted(db, pubkey, seconds, now = Date.now()) {
        seconds = seconds + excluded.seconds,
        last_seen = excluded.last_seen`
   ).bind(pubkey, clean, now, now).run();
+  const micros = perMinute2 > 0 ? Math.round(clean / 60 * perMinute2 * 1e6) : 0;
+  await db.prepare(
+    `INSERT INTO owed (pubkey, micros, seconds) VALUES (?, ?, ?)
+     ON CONFLICT(pubkey) DO UPDATE SET micros = micros + excluded.micros, seconds = seconds + excluded.seconds`
+  ).bind(pubkey, micros, clean).run().catch(() => {
+  });
 }
+var MAX_REPORT_S = 3 * 3600;
 async function listeners(db, limit = 500) {
-  const { results } = await db.prepare(
-    `SELECT l.*, s.until AS subscribed_until
-       FROM listeners l LEFT JOIN subscriptions s ON s.wallet = l.pubkey
-      ORDER BY l.seconds DESC LIMIT ?`
-  ).bind(Math.min(limit, 1e3)).all();
-  return results ?? [];
+  const n = Math.min(limit, 1e3);
+  try {
+    const { results } = await db.prepare(
+      `SELECT l.*, s.until AS subscribed_until, o.micros AS owed_micros, o.seconds AS owed_seconds
+         FROM listeners l LEFT JOIN subscriptions s ON s.wallet = l.pubkey
+         LEFT JOIN owed o ON o.pubkey = l.pubkey
+        ORDER BY l.seconds DESC LIMIT ?`
+    ).bind(n).all();
+    return results ?? [];
+  } catch {
+    const { results } = await db.prepare(
+      `SELECT l.*, s.until AS subscribed_until
+         FROM listeners l LEFT JOIN subscriptions s ON s.wallet = l.pubkey
+        ORDER BY l.seconds DESC LIMIT ?`
+    ).bind(n).all();
+    return results ?? [];
+  }
 }
 async function setBlocked(db, pubkey, blocked, now = Date.now()) {
   await db.prepare(
@@ -953,14 +972,21 @@ async function forget(db, pubkey) {
      WHERE pubkey = ? AND blocked = 1`
   ).bind(pubkey).run();
   await db.prepare("DELETE FROM listeners WHERE pubkey = ? AND blocked = 0").bind(pubkey).run();
+  await forgetOwed(db, pubkey);
+}
+async function forgetOwed(db, pubkey) {
+  await (pubkey ? db.prepare("DELETE FROM owed WHERE pubkey = ?").bind(pubkey) : db.prepare("DELETE FROM owed WHERE pubkey NOT IN (SELECT pubkey FROM listeners)")).run().catch(() => {
+  });
 }
 var KEEP_FOR = 365 * 864e5;
 async function pruneStale(db, now = Date.now()) {
   await db.prepare("DELETE FROM listeners WHERE blocked = 0 AND last_seen < ?").bind(now - KEEP_FOR).run();
+  await forgetOwed(db);
 }
 async function remove(db, pubkey) {
   await db.prepare("DELETE FROM listeners WHERE pubkey = ?").bind(pubkey).run();
   await db.prepare("DELETE FROM subscriptions WHERE wallet = ?").bind(pubkey).run();
+  await forgetOwed(db, pubkey);
 }
 async function subscribedUntil(db, wallet) {
   const row = await db.prepare("SELECT until FROM subscriptions WHERE wallet = ?").bind(wallet).first();
@@ -1571,6 +1597,9 @@ async function claimSale(db, wallet, sessionId, { loadSession } = {}) {
 var SIG = /^[1-9A-HJ-NP-Za-km-z]{64,120}$/;
 var MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 var purchaseMemo = (host, item) => `amply:buy:${host}:${item}`;
+var tipMemo = (host) => `amply:tip:${host}`;
+var TIP_MIN_MICROS = 1e5;
+var TIP_MAX_MICROS = 5e7;
 async function verifyPayment(claim2, terms) {
   if (!SIG.test(claim2.signature || "")) return { ok: false, why: "that is not a transaction signature" };
   let body;
@@ -2284,7 +2313,14 @@ async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) =
   const signature = base58(tx.signatures[0]);
   try {
     const sim = await rpc("simulateTransaction", [signed, { encoding: "base64", sigVerify: true, commitment: "confirmed" }]);
-    if (sim?.value?.err) return refuse(422, failureOf(sim.value));
+    if (sim?.value?.err) {
+      const why = failureOf(sim.value);
+      if (why === CANT_PAY_FEE) {
+        balances.delete(key.address);
+        return refuse(409, why);
+      }
+      return refuse(422, why);
+    }
   } catch (e) {
     return refuse(502, e instanceof RpcError ? e.message : "couldn't reach the network");
   }
@@ -2310,12 +2346,13 @@ async function settle(db, rpc, txBase64, expect, { allowed = async (_listener) =
   }
   return { ok: true, signature, micros: verdict.micros, confirmed: false };
 }
+var CANT_PAY_FEE = "this artist's node can't pay the network fee right now; nothing was sent";
 function failureOf(value) {
   const logs = (value.logs || []).join("\n");
   if (/insufficient funds/i.test(logs) && /Transfer/i.test(logs)) return "there isn't enough in your wallet to pay this; nothing was sent";
   if (/Blockhash not found|BlockhashNotFound/i.test(JSON.stringify(value.err))) return "that payment is out of date; try again";
   if (/insufficient lamports|InsufficientFundsForFee|InsufficientFundsForRent/i.test(logs + JSON.stringify(value.err))) {
-    return "this artist's node can't pay the network fee right now; nothing was sent";
+    return CANT_PAY_FEE;
   }
   return "the network wouldn't accept that payment; nothing was sent";
 }
@@ -2450,7 +2487,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.22.2";
+var VERSION = "3.23.0";
 var SPEC_VERSION = 1;
 var RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
 var MANAGE_CSP = [
@@ -3255,7 +3292,9 @@ async function handleListen(request, env, path) {
     const manifest = await manifestNowOf(env);
     const pay = walletOf(manifest);
     let limits = { minMicros: LISTEN_MIN_MICROS2, maxMicros: LISTEN_MAX_MICROS2 };
-    if (body.item !== void 0) {
+    if (body.tip === true) {
+      limits = { minMicros: TIP_MIN_MICROS, maxMicros: TIP_MAX_MICROS, memo: tipMemo(host) };
+    } else if (body.item !== void 0) {
       const item = String(body.item);
       const sale = itemFor(manifest, item);
       if (!sale || !sale.wallet) return fail(404, "that isn't for sale for USDC here");
@@ -3468,7 +3507,15 @@ async function handleListen(request, env, path) {
     }
     if (!await takingPayments(env)) return new Response(null, { status: 204, headers: noStore() });
     const body = await jsonBody(request);
-    await counted(env.DB, who, Number(body?.seconds) || 0);
+    const until = await subscribedUntil(env.DB, who).catch(() => null);
+    const subscribed = until !== null && until > Date.now();
+    let perMinute2 = 0;
+    try {
+      const wallet = (JSON.parse(await manifestText(env) || "{}")?.payment || []).find((p) => p?.type === "solana-usdc");
+      perMinute2 = subscribed ? 0 : Math.max(0, Number(wallet?.ratePerMinute) || 0);
+    } catch {
+    }
+    await counted(env.DB, who, Number(body?.seconds) || 0, Date.now(), perMinute2);
     if (Math.random() < 0.02) await pruneStale(env.DB);
     return new Response(null, { status: 204, headers: noStore() });
   }
@@ -3502,6 +3549,7 @@ async function handleListen(request, env, path) {
       held: row ? {
         plays: row.plays,
         seconds: row.seconds,
+        costMicros: await env.DB.prepare("SELECT micros FROM owed WHERE pubkey = ?").bind(proof.address).first().then((o) => o?.micros ?? null).catch(() => null),
         firstSeen: row.first_seen ? new Date(row.first_seen).toISOString() : null,
         lastSeen: row.last_seen ? new Date(row.last_seen).toISOString() : null,
         servingStopped: !!row.blocked

@@ -130,6 +130,14 @@ const today = (db = sqlite) => db.prepare("SELECT count FROM fee_days").get()?.c
 }
 
 {
+  // The fees account ran out between balance checks: "not paying fees right
+  // now" (409), which the app waits on, rather than an error it retries.
+  const net = network({ simulate: { value: { err: "InsufficientFundsForFee", logs: [] } } });
+  const r = await settle(DB, net.rpc, payment(), expect, quick);
+  ok("a fees account too low to pay: 409, not paying fees right now", !r.ok && r.status === 409 && !net.methods().includes("sendTransaction"), JSON.stringify(r));
+}
+
+{
   const net = network();
   const r = await settle(DB, net.rpc, payment(), expect, { ...quick, allowed: async () => false });
   ok("too many from one wallet is refused, before signing", !r.ok && r.status === 429 && net.calls.length === 0);
