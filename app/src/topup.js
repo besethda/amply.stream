@@ -37,10 +37,8 @@ export function transferRequest(address, amount, { mint = null, message = "Top u
  */
 export const oneTapReady = (balance) => !!(balance && balance.exists && balance.dollarAccount);
 
-/** What the setup screen offers. Dollars in a few sizes, and one amount of SOL
- *  that covers the network fee for thousands of payments. */
+/** What the setup screen offers: dollars in a few sizes. */
 export const DOLLAR_AMOUNTS = [5, 10, 20];
-export const FEE_SOL = 0.01;
 
 /**
  * Adding money by card, through Stripe's onramp.
@@ -53,6 +51,9 @@ export const FEE_SOL = 0.01;
 export const TOPUP_PAGE = "https://amply-relay.sdarmistead.workers.dev/topup";
 export const CARD_AMOUNTS = [10, 20, 50];
 
+/** Amply's relay, where these pages live. */
+export const RELAY = new URL(TOPUP_PAGE).origin;
+
 /** The top-up page for buying `currency` ("usdc" or "sol") to this address. */
 export function topupUrl(address, { currency = "usdc", amount = null } = {}) {
   const q = [`address=${encodeURIComponent(address)}`, `currency=${currency}`];
@@ -63,17 +64,10 @@ export function topupUrl(address, { currency = "usdc", amount = null } = {}) {
   return `${TOPUP_PAGE}?${q.join("&")}`;
 }
 
-// ── adding money through Coinbase ───────────────────────────────────────────
+// ── Coinbase, for artists ───────────────────────────────────────────────────
 //
-// Coinbase's page opens with everything filled in: this wallet, USDC on
-// Solana, and the amount. The relay asks Coinbase for the session, with
-// Amply's own developer key; the app proves the wallet is its own by signing
-// a short message, so nobody else can ask for a session for it.
-
-/** The relay that serves the card page and asks Coinbase for sessions. */
-export const RELAY = new URL(TOPUP_PAGE).origin;
-export const COINBASE_AMOUNTS = [20, 30, 60];
-export const COINBASE_SOL_AMOUNTS = [5, 10];
+// Pages of Amply's relay, opened by the artist's editor: buying SOL for the
+// fees account, and cashing out. Each is signed by the wallet concerned.
 
 /** The page that sends an artist to Coinbase to buy SOL for their node's
  *  fees account, signed by the node (a page, so the editor fetches nothing). */
@@ -87,38 +81,6 @@ export const sellMessage = (address, signedAt) =>
 /** Coinbase's cash-out page for `amount` USDC from this wallet, opened from the editor. */
 export const coinbaseCashoutPage = (address, amount, signedAt, signature) =>
   `${RELAY}/coinbase/sell?${new URLSearchParams({ address, amount: String(amount), signedAt: String(signedAt), signature })}`;
-
-/** Exactly what the relay checks the signature against. */
-export const onrampMessage = (address, signedAt) =>
-  `Amply: add money to ${address} through Coinbase (${signedAt})`;
-
-let offered = null;
-/** Whether Coinbase is set up on the relay. Asked once per visit. */
-export async function coinbaseOffered(fetchFn = fetch) {
-  if (offered !== null) return offered;
-  try {
-    const res = await fetchFn(`${RELAY}/coinbase/status`);
-    offered = res.ok && (await res.json()).enabled === true;
-  } catch { offered = false; }
-  return offered;
-}
-
-/**
- * Coinbase's page for adding `amount` dollars to this wallet. `sign(text)`
- * returns the wallet's base58 signature over text.
- */
-export async function coinbaseLink(address, amount, sign, { fetchFn = fetch, now = Date.now() } = {}) {
-  if (!COINBASE_AMOUNTS.includes(amount)) throw new Error(`not a Coinbase amount: ${amount}`);
-  const signature = await sign(onrampMessage(address, now));
-  const res = await fetchFn(`${RELAY}/coinbase/onramp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ address, amount, signedAt: now, signature }),
-  });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok || !json.url) throw new Error(json.error || "Coinbase didn't open. Try again in a moment.");
-  return json.url;
-}
 
 /**
  * Cash App can pay a Solana wallet straight from its dollar balance. There

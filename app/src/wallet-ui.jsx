@@ -8,8 +8,7 @@
  */
 import { useState, useEffect } from "preact/hooks";
 import { machinery, markBackupSaved, onHomeScreen } from "./paying.js";
-import { transferRequest, DOLLAR_AMOUNTS, FEE_SOL, oneTapReady, topupUrl, CARD_AMOUNTS, COINBASE_AMOUNTS, coinbaseOffered, coinbaseLink, CASH_APP } from "./topup.js";
-import { signText } from "./identify.js";
+import { transferRequest, DOLLAR_AMOUNTS, oneTapReady, topupUrl, CARD_AMOUNTS, CASH_APP } from "./topup.js";
 import { mayOfferPasskey, createPasskeySeed, restorePasskeySeed, NoPasskeySecret } from "../../spec/passkey-wallet.mjs";
 
 /** What this device's passkey is called, for the button. */
@@ -190,172 +189,77 @@ function Hint({ label = "More about this", children }) {
   );
 }
 
-export function TopUp({ address, balance, network, pair, needsFee = true }) {
-  const [qr, setQr] = useState(null);
-  const [coinbase, setCoinbase] = useState(false);       // set up on the relay?
-  const [opening, setOpening] = useState(null);           // the amount being opened
-  const [said, setSaid] = useState(null);
+export function TopUp({ address, balance, network }) {
   const [cashQr, setCashQr] = useState(null);
-  useEffect(() => { coinbaseOffered().then(setCoinbase); }, []);
-
-  /** Open Coinbase with everything filled in. The window opens on the tap, so
-   *  no pop-up blocker stops it, and is pointed at Coinbase once the relay
-   *  has the session. */
-  async function viaCoinbase(amount) {
-    setSaid(null); setOpening(amount);
-    const w = window.open("", "_blank");
-    try {
-      const url = await coinbaseLink(address, amount, (text) => signText(pair, text));
-      if (w) { w.opener = null; w.location.href = url; } else location.href = url;
-    } catch (e) {
-      w?.close();
-      setSaid(e.message);
-    } finally { setOpening(null); }
-  }
+  const [qr, setQr] = useState(null);
 
   async function showCashQr(e) {
     if (!e.currentTarget.open || cashQr) return;
     const { renderSVG } = await import("uqr");
     setCashQr(renderSVG(address));
   }
-  const hasDollars = balance?.usdc > 0;
-  // Where every artist followed pays its listeners' network fees, there's no
-  // SOL to add: the step isn't shown at all.
-  const hasFee = balance?.sol > 0.001 || !needsFee;
-  const tick = (done, n) => <span class={`tick${done ? " done" : ""}`}>{done ? <Icon.check size={13} /> : n}</span>;
-
   async function showQr(e) {
     if (!e.currentTarget.open || qr) return;
     const { renderSVG } = await import("uqr");
-    setQr({
-      dollars: renderSVG(transferRequest(address, DOLLAR_AMOUNTS[0], { mint: network.usdc })),
-      fee: renderSVG(transferRequest(address, FEE_SOL)),
-    });
+    setQr(renderSVG(transferRequest(address, DOLLAR_AMOUNTS[0], { mint: network.usdc })));
   }
 
   if (!network.real) {
-    return <p class="dim">Test network — use a faucet for test USDC and SOL.</p>;
+    return <p class="dim">Test network — use a faucet for test USDC.</p>;
   }
 
   return (
     <div class="stack">
-      <div class="stack">
-        <div class="row two-steps">
-          <span class={`tick${hasDollars ? " done" : ""}`}>{hasDollars ? <Icon.check size={13} /> : 1}</span> Dollars
-          {needsFee && <><span class={`tick${hasFee ? " done" : ""}`}>{hasFee ? <Icon.check size={13} /> : 2}</span> $1 for fees, once</>}
-        </div>
-        <b>Add money</b>
-        <span class="dim small">Use whichever you already have. Amply never sees your bank or card details.</span>
-
-        {coinbase && (
-          <section class="choice stack">
-            <b>Coinbase <span class="dim small">· most countries · fee 0.5% from a bank, 2.5% by card</span>{" "}
-              <Hint label="About Coinbase">Opens Coinbase with everything filled in. Paying from your bank is the
-              cheaper way. You'll need a Coinbase account; it's free.</Hint></b>
-            <div class="row">
-              {COINBASE_AMOUNTS.map((n) => (
-                <button key={n} class={n === 30 ? "btn-primary sm" : "pill"} disabled={opening !== null}
-                  onClick={() => viaCoinbase(n)}>{opening === n ? "Opening…" : `$${n}`}</button>
-              ))}
-            </div>
-            {said && <p class="note-line warn-ink small" role="alert">{said}</p>}
-          </section>
-        )}
-
-        <details class="choice more" onToggle={showCashQr}>
-          <summary>Cash App <span class="dim small">· US · no fee right now</span> <span class="tag-cheap">cheapest</span></summary>
-          <span class="dim small">Copy your address, then pay it in Cash App.{" "}
-            <Hint label="How Cash App works">In Cash App, go to <b>Pay</b>, paste the address in the search box,
-              enter an amount and pay. Cash App sends it as digital dollars (USDC) for you, and it arrives here in a
-              minute or so. Cash App needs your ID verified and USDC switched on, and has daily limits. Free while Cash
-              App's offer lasts. Not available in New York or for sponsored (teen) accounts.</Hint></span>
-          <div class="row">
-            <Copy text={address} label="Copy address" />
-            <a class="pill" href={CASH_APP} target="_blank" rel="noopener noreferrer">Open Cash App <Icon.external size={13} /></a>
-          </div>
-          {cashQr && (
-            <figure class="cash-qr">
-              <div class="qr" dangerouslySetInnerHTML={{ __html: cashQr }} />
-              <figcaption class="dim small">On a computer? Scan this with your phone instead of pasting.</figcaption>
-            </figure>
-          )}
-        </details>
-
-        <details class="choice more" open={!coinbase}>
-          <summary>Card <span class="dim small">· US · Stripe's fee, shown before you pay</span></summary>
-        <span class="dim small">Pick an amount and pay on Stripe's page. Your wallet ends in{" "}
-          <b class="mono">{address.slice(-4)}</b>: Stripe's page shows the same.{" "}
-          <Hint label="How paying by card works">Stripe's secure page opens. If it asks where to send it, paste your
-            address; if it asks for a network, choose <b>Solana</b>. The first time, Stripe may ask for ID: that's
-            Stripe's own check, not Amply's, and takes a couple of minutes. At ½¢ a minute, a common price, $10 is
-            about 33 hours of listening.</Hint></span>
+      <section class="choice stack">
+        <b>Add money by card</b>
+        <span class="dim small">On Stripe's secure page. Your wallet ends in <b class="mono">{address.slice(-4)}</b>:
+          Stripe's page shows the same.{" "}
+          <Hint label="How paying by card works">If Stripe asks where to send it, paste your address; if it asks for
+            a network, choose <b>Solana</b>. The first time, Stripe may ask for ID: that's Stripe's own check. At ½¢
+            a minute, a common price, $10 is about 33 hours of listening.</Hint></span>
         <div class="row">
           {CARD_AMOUNTS.map((n) => (
             <a key={n} class={n === 20 ? "btn-primary sm" : "pill"} href={topupUrl(address, { amount: n })}
               target="_blank" rel="noopener noreferrer">${n}</a>
           ))}
         </div>
-        </details>
-        {!hasFee && (
-          <div class="stack">
-            <b>{hasDollars ? "One last thing: $1 for fees" : "Then, once: $1 for fees"}{" "}
-              <Hint label="About the fee">Each payment has a tiny network fee, paid in a coin called SOL. A one-off
-                $1 covers thousands of payments. Same steps, on the same Stripe page.</Hint></b>
-            <div class="row">
-              <a class={hasDollars ? "btn-primary sm" : "pill"} href={topupUrl(address, { currency: "sol" })}
-                target="_blank" rel="noopener noreferrer">Add $1 for fees <Icon.external size={13} /></a>
-            </div>
-          </div>
+      </section>
+
+      <details class="choice more" onToggle={showCashQr}>
+        <summary>Cash App <span class="dim small">· US · no fee right now</span></summary>
+        <span class="dim small">Copy your address, then pay it in Cash App.{" "}
+          <Hint label="How Cash App works">In Cash App, go to <b>Pay</b>, paste the address in the search box,
+            enter an amount and pay. It arrives here in a minute or so. Needs your ID verified in Cash App. Not
+            available in New York.</Hint></span>
+        <div class="row">
+          <Copy text={address} label="Copy address" />
+          <a class="pill" href={CASH_APP} target="_blank" rel="noopener noreferrer">Open Cash App <Icon.external size={13} /></a>
+        </div>
+        {cashQr && (
+          <figure class="cash-qr">
+            <div class="qr" dangerouslySetInnerHTML={{ __html: cashQr }} />
+            <figcaption class="dim small">On a computer? Scan this with your phone instead of pasting.</figcaption>
+          </figure>
         )}
-      </div>
-
-      <details class="more">
-        <summary>Already use a crypto wallet? Send from it instead</summary>
-      <ol class="setup">
-        <li>{tick(hasDollars || hasFee, 1)}<div>
-          <b>Phantom</b> <a class="link-dim" href="https://phantom.com" target="_blank" rel="noopener">phantom.com <Icon.external size={13} /></a>
-        </div></li>
-        <li>{tick(hasDollars && hasFee, 2)}<div>
-          <b>Buy USDC + ~$1 SOL</b>
-          <span class="dim small">Pick USDC itself — not "Cash". Always the Solana network.</span>
-        </div></li>
-        <li>{tick(hasDollars && hasFee, 3)}{!balance ? <div><b>Send it here</b></div> : !oneTapReady(balance) ? (
-          <div class="stack">
-            <b>Send it here — by hand, first time</b>
-            <p class="mono-box">{address}</p>
-            <Copy text={address} label="Copy address" />
-            <span class="dim small">In Phantom: Send → SOL → $1, then Send → USDC.</span>
-          </div>
-        ) : (
-          <div class="stack">
-            <b>One tap</b>
-            <div class="row">
-              {DOLLAR_AMOUNTS.map((n) => (
-                <a key={n} class="btn-primary sm" href={transferRequest(address, n, { mint: network.usdc })}>${n}</a>
-              ))}
-              <a class="pill" href={transferRequest(address, FEE_SOL)}>{FEE_SOL} SOL</a>
-            </div>
-          </div>
-        )}</li>
-      </ol>
-
       </details>
 
-      {oneTapReady(balance) && (
-        <details class="more" onToggle={showQr}>
-          <summary><Icon.qr size={15} /> Scan instead</summary>
-          {qr ? (
-            <div class="qr-pair">
-              <figure><div class="qr" dangerouslySetInnerHTML={{ __html: qr.dollars }} /><figcaption>${DOLLAR_AMOUNTS[0]} USDC</figcaption></figure>
-              <figure><div class="qr" dangerouslySetInnerHTML={{ __html: qr.fee }} /><figcaption>{FEE_SOL} SOL</figcaption></figure>
-            </div>
-          ) : <p class="dim">…</p>}
-        </details>
-      )}
       <details class="more">
-        <summary><Icon.copy size={15} /> Address</summary>
+        <summary>Already use a crypto wallet?</summary>
+        <span class="dim small">Send <b>USDC</b> on the <b>Solana</b> network to:</span>
         <p class="mono-box">{address}</p>
-        <Copy text={address} />
+        <div class="row">
+          <Copy text={address} label="Copy address" />
+          {oneTapReady(balance) && DOLLAR_AMOUNTS.map((n) => (
+            <a key={n} class="pill" href={transferRequest(address, n, { mint: network.usdc })}>${n} in one tap</a>
+          ))}
+        </div>
+        {oneTapReady(balance) && (
+          <details class="more" onToggle={showQr}>
+            <summary><Icon.qr size={15} /> Scan instead</summary>
+            {qr ? <figure><div class="qr" dangerouslySetInnerHTML={{ __html: qr }} /><figcaption>${DOLLAR_AMOUNTS[0]} USDC</figcaption></figure>
+              : <p class="dim">…</p>}
+          </details>
+        )}
       </details>
     </div>
   );
@@ -397,9 +301,9 @@ export function SendBack({ pair, balance, onRefresh, nodes = [] }) {
         aria-label="Send to" onInput={(e) => setTo(e.target.value)} autocomplete="off" spellcheck={false} />
       <div class="row">
         <button class="btn-primary" disabled={busy} onClick={() => go(false)}>Send dollars</button>
-        <button class="pill" disabled={busy} onClick={() => go(true)}>Send everything</button>
+        {/* Only an older wallet that once held SOL for fees has any to send. */}
+        {balance?.sol > 0.001 && <button class="pill" disabled={busy} onClick={() => go(true)}>Send everything</button>}
       </div>
-      <p class="mono-dim">"Everything" includes the SOL — then nothing can be paid until you top up.</p>
       {said && <p class={`note-line${said.bad ? " warn-ink" : ""}`} role="status">{said.text}</p>}
     </div>
   );

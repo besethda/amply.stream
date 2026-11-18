@@ -139,5 +139,14 @@ blocked("no name at all", base({ artist: { name: "" } }), me, /name you release 
   ok("a song for sale without a price is explained in the artist's terms", /needs a price from \$0\.50/.test(explain(e, broken)), explain(e || "", broken));
 }
 
+// ── the fees account comes first ────────────────────────────────────────────
+{
+  const held = buildManifest(base(), me, { perMinute: false });
+  ok("until the fees account is on, no per-minute price is published", !(held.payment || []).some((p) => p.type === "solana-usdc"));
+  ok("  and what is published is still valid", validate(held).errors.length === 0, validate(held).errors.join("; "));
+  const on = buildManifest(base(), me, { perMinute: true });
+  ok("once it's on, the price goes out", (on.payment || []).some((p) => p.type === "solana-usdc" && p.address === A));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
