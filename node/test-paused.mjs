@@ -123,6 +123,19 @@ later(61);
 ok("  but not for long: after an hour, nobody can say, so it's paused", (await served()).paused === true);
 rpcDown = false;
 
+// ── the website, on and off ──
+{
+  const { cleanSite, starterSite } = await import("../spec/site.mjs");
+  const site = cleanSite(starterSite(manifest));
+  await putSetting(DB, "site", JSON.stringify(site));
+  later(1);   // past the brief cache
+  ok("a website that's on is what visitors see", (await (await get("/")).text()).includes('class="s-hero'));
+  await putSetting(DB, "site", JSON.stringify({ ...site, on: false }));
+  later(1);
+  const page = await (await get("/")).text();
+  ok("  turned off: the plain music page instead, the site kept", !page.includes('class="s-hero') && /<html/.test(page));
+}
+
 // ── the favicon, served by the artist's own server ──
 {
   const { readFileSync } = await import("node:fs");

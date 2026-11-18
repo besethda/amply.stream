@@ -314,6 +314,40 @@ function Field({ path, label, value, kind, onInput, art }) {
 
 // ── the editor ──────────────────────────────────────────────────────────────
 
+/**
+ * Where the website is, and whether it's showing: one bar above the editor.
+ * On or off, the address to open or copy, and a way to put it on the
+ * artist's own domain. Changes here go live on Publish, like everything else.
+ */
+function SiteBar({ site, setSite, nodeUrl }) {
+  const on = site.on !== false;
+  const address = String(nodeUrl || "").replace(/^https:\/\//, "").replace(/\/$/, "");
+  // The domain page needs the workers.dev address (the service's own name).
+  const workers = typeof location !== "undefined" && /\.workers\.dev$/.test(location.host) ? location.host
+    : /\.workers\.dev$/.test(address) ? address : "";
+  const own = !/\.workers\.dev$/.test(address);
+  const [copied, setCopied] = useState(false);
+  const copy = () => navigator.clipboard?.writeText(`https://${address}`).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }, () => {});
+  return (
+    <div class={`se-top${on ? "" : " off"}`}>
+      <label class="se-switch">
+        <input type="checkbox" checked={on} onChange={() => setSite({ ...site, on: !on })} />
+        <span class="se-knob" aria-hidden="true" />
+        <span>{on ? "Website on" : "Website off"}</span>
+      </label>
+      <span class="se-addr">
+        <a href={`https://${address}`} target="_blank" rel="noopener">{address} ↗</a>
+        <button type="button" class="se-copy" onClick={copy}>{copied ? "Copied" : "Copy"}</button>
+      </span>
+      {!own && workers && (
+        <a class="se-domain" href={`https://amply.stream/domain?addr=${encodeURIComponent(workers)}`} target="_blank" rel="noopener">
+          Use your own domain ↗</a>
+      )}
+      {!on && <span class="se-offnote">Visitors see your music page. Publish to apply.</span>}
+    </div>
+  );
+}
+
 export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
   const [sel, setSel] = useState(null);
   const [view, setView] = useState("desktop");
@@ -365,10 +399,7 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
     return (
       <div class="card se-start">
         <h2>Make your website</h2>
-        <p>
-          Your own site, at your own address, with your music built in. You edit it by clicking on it:
-          click a title and type, click a picture to change it.
-        </p>
+        <p>Your music, news and shows on one page. Edit it by clicking on it.</p>
         <button type="button" class="btn sm" onClick={() => setSite(starterSite(manifest))}>Start from what I have</button>
       </div>
     );
@@ -555,6 +586,8 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
 
   const L = site.look || {};
   return (
+    <>
+    <SiteBar site={site} setSite={setSite} nodeUrl={nodeUrl} />
     <div class={`se${sheet ? " open" : ""}`}>
       {sheet && <button type="button" class="se-scrim" aria-label="Close the panel" onClick={() => setSheet(false)} />}
       <aside class="se-side" ref={sideRef} aria-label="Website tools">
@@ -563,11 +596,6 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
           <button type="button" class="se-btn" onClick={() => setSheet(false)}>Back to my page</button>
         </div>
 
-        <div class="se-where">
-          <span>Your website</span>
-          <a href={nodeUrl} target="_blank" rel="noopener">{String(nodeUrl || "").replace(/^https:\/\//, "")} ↗</a>
-          <small>This link shows what you last published, not these edits yet.</small>
-        </div>
         <div class="se-tools">
           <button type="button" class="se-btn ghost" disabled={!history.current.length} onClick={undo} title="Undo (Ctrl/Cmd+Z)">↶ Undo</button>
           <button type="button" class="se-btn ghost" aria-pressed={preview} onClick={() => { setPreview((p) => !p); setSel(null); setAdding(null); }}>
@@ -677,5 +705,6 @@ export function SiteEditor({ site, setSite, manifest, nodeUrl, art, notify }) {
         <button type="button" class="btn sm" onClick={() => setSheet(true)}>Edit panel</button>
       </div>
     </div>
+    </>
   );
 }
