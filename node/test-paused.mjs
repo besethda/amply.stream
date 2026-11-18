@@ -368,6 +368,22 @@ rpcDown = false;
   ok("  ranges and ETags as before", ranged.status === 206 && ranged.headers.get("Content-Range") === "bytes 0-99/1000" && ranged.headers.get("ETag") === '"e1"' && /^private/.test(ranged.headers.get("Cache-Control")));
   const free = await fetchAudio("/audio/free.mp3");
   ok("a free song stays public", free.status === 200 && free.headers.get("Cache-Control") === "public, max-age=31536000, immutable", free.headers.get("Cache-Control"));
+  // The artist's own editor plays a paid song without a listener's pass, through
+  // the signed-in route: whole, ranged, and measured with a HEAD.
+  {
+    const { hashKey, PREVIEW_KEY } = await import("./src/preview-key.ts");
+    const OWNER = "O".repeat(43);
+    await putSetting(DB, PREVIEW_KEY, JSON.stringify({ hash: await hashKey(OWNER), until: clock + 30 * 60_000 }));
+    const own = { Cookie: `amply_preview=${OWNER}` };
+    ok("a paid song is refused at its public address with no pass", (await fetchAudio("/audio/song.mp3")).status === 401);
+    const mine = await fetchAudio("/manage/audio/song.mp3", own);
+    ok("  but the artist's own copy plays, and is never shared", mine.status === 200 && mine.headers.get("Cache-Control") === "private, no-store", `${mine.status} ${mine.headers.get("Cache-Control")}`);
+    const mineRanged = await fetchAudio("/manage/audio/song.mp3", { ...own, Range: "bytes=0-99" });
+    ok("  and can be seeked", mineRanged.status === 206 && mineRanged.headers.get("Content-Range") === "bytes 0-99/1000");
+    const size = await worker.fetch(new Request(`${ORIGIN}/manage/audio/song.mp3`, { method: "HEAD", headers: own }), audioEnv);
+    ok("  and measured with a HEAD", size.status === 200 && size.headers.get("Content-Length") === "1000", `${size.status} ${size.headers.get("Content-Length")}`);
+    ok("  the signed-in route is closed to anyone else", (await fetchAudio("/manage/audio/song.mp3")).status !== 200);
+  }
   later(6);
   lamports = 0;
   later(1);

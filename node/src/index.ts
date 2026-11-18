@@ -765,10 +765,12 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     // The artist reading their own file back (evening out an older song's
     // volume): behind the sign-in, so paid songs and originals included.
-    if (request.method === "GET" && kind[1] === "audio") {
-      const object = await media(env).get(key);
-      if (!object || !("body" in object)) return fail(404, "that file is missing");
-      return new Response(object.body, { status: 200, headers: noStore({ "Content-Type": storedType("audio", key) }) });
+    // Also what the editor plays and measures a song through: the public
+    // address wants a listener's pass for a paid song, which the artist
+    // hasn't got. Ranges and HEAD work as they do there (a song can be
+    // seeked), and nothing is left in a shared cache.
+    if ((request.method === "GET" || request.method === "HEAD") && kind[1] === "audio") {
+      return serveObject(env, request, key, "private, no-store", storedType("audio", key));
     }
   }
 

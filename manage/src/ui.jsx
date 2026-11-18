@@ -64,6 +64,7 @@ import { readTransaction, writeTransaction, base64, keyOf } from "../../node/src
 import { checkFeePayment } from "../../node/src/feepay.ts";
 import { SiteEditor } from "./site-editor.jsx";
 import { paymentsTo, mergePayments, usdcBalance, NETWORKS } from "./chain.js";
+import { ownAudio } from "./node-api.js";
 import { coinbaseSolPage, coinbaseCashoutPage, sellMessage, sellNonce, cashoutProblem, topupUrl } from "../../app/src/topup.js";
 
 const MAX_UPLOAD = 90 * 1024 * 1024;
@@ -3311,7 +3312,7 @@ export function usePlayer() {
         if (a.paused) a.play().catch(() => {}); else a.pause();
         return;
       }
-      a.src = track.url;
+      a.src = ownAudio(track.url);
       setCurrent(track);
       a.play().catch(() => {});
     };
