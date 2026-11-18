@@ -3801,7 +3801,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
               until then they listen free. Said everywhere, until it's fixed. */}
           {feesOn === false && (wasLive || payees.some((p) => p.address)) && (
             <div class="banner error" role="alert">
-              <span><b>You're not getting paid.</b> Fans listen free until your fees account has $5.</span>
+              <span><b>You're not getting paid.</b> Songs are free until you set up your transaction fees to let listeners pay you.</span>
               <button class="link" onClick={() => { setTab("earnings"); setTimeout(() => document.getElementById("fees")?.scrollIntoView({ behavior: "smooth" }), 50); }}>Add $5</button>
             </div>
           )}
