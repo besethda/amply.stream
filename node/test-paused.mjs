@@ -148,6 +148,22 @@ rpcDown = false;
   ok("  the same one as amply.stream's", body === readFileSync("site/favicon.svg", "utf8").trim());
 }
 
+// ── every JSON answer: never cached, readable from any origin ──
+{
+  const post = (path) => worker.fetch(new Request(`${ORIGIN}${path}`, { method: "POST" }), env);
+  for (const [name, res] of [["/version", await get("/version")], ["/listen/challenge", await post("/listen/challenge")], ["/listen/fees", await get("/listen/fees")]]) {
+    ok(`${name} is JSON, not cached, open to any origin`, res.status === 200 && /^application\/json/.test(res.headers.get("Content-Type"))
+      && res.headers.get("Cache-Control") === "no-store" && res.headers.get("Access-Control-Allow-Origin") === "*" && (await res.json()) !== null);
+  }
+  for (const path of ["/", "/privacy"]) {
+    const res = await get(path);
+    const nonce = /'nonce-([^']+)'/.exec(res.headers.get("Content-Security-Policy") || "")?.[1];
+    const html = await res.text();
+    ok(`${path}: a fresh nonce in its CSP, on its scripts, not cached`, !!nonce && html.includes(`nonce="${nonce}"`) && res.headers.get("Cache-Control") === "no-store"
+      && /^text\/html/.test(res.headers.get("Content-Type")));
+  }
+}
+
 // ── the editor's MP3 encoder: a file of its own, kept by the browser ──
 {
   const { readFileSync } = await import("node:fs");

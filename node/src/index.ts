@@ -352,6 +352,25 @@ function noStore(extra?: HeadersInit): Headers {
   return h;
 }
 
+/** For the artist's page and privacy notice: a fresh nonce, the page's CSP
+ *  built on it (page.ts), and never cached. */
+function pageHeaders(): { nonce: string; headers: Headers } {
+  const nonce = crypto.randomUUID().replace(/-/g, "");
+  const headers = withCors(new Headers({
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": pageCsp(nonce),
+  }));
+  return { nonce, headers };
+}
+
+/** A JSON answer, never cached. `indent` for what a person reads (/listen/mine). */
+function json(value: unknown, status = 200, indent?: number): Response {
+  return new Response(JSON.stringify(value, null, indent), {
+    status, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
+  });
+}
+
 /**
  * Everything under /manage. Cloudflare Access guards these at the edge, and the
  * Worker verifies the assertion again — see access.ts for why edge protection
@@ -459,10 +478,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     }
     // maxFile: the most this service stores in one file (25 MB on KV), so the
     // editor can fit a song to it before uploading rather than be refused after.
-    return new Response(JSON.stringify({ email, version: VERSION, home, temporary, maxFile: maxObject(env) }), {
-      status: 200,
-      headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-    });
+    return json({ email, version: VERSION, home, temporary, maxFile: maxObject(env) });
   }
 
   // The website: read it, or save it. Saved through cleanSite, the one gate
@@ -478,7 +494,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const address = typeof body?.address === "string" ? body.address : "";
     if (!keyOf(address)) return fail(400, "not a payout address");
     await putSetting(env.DB, "payout", JSON.stringify({ address }));
-    return new Response(JSON.stringify({ address }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+    return json({ address });
   }
 
   // Cashing out through Coinbase: where Coinbase is waiting for the USDC, read
@@ -506,7 +522,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (clean === null) await env.DB.prepare("DELETE FROM settings WHERE key = 'site'").run();
     else await putSetting(env.DB, "site", JSON.stringify(clean));
     cachedSite = null;
-    return new Response(JSON.stringify({ site: clean }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+    return json({ site: clean });
   }
 
   // Totals per song, for the editor's Home tab.
@@ -515,9 +531,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       streams: { used: await playsToday(env.DB), of: FREE_STREAMS_A_DAY },
       storage: { used: await storageUsed(env), of: env.MEDIA ? FREE_STORAGE.r2 : FREE_STORAGE.kv },
     };
-    return new Response(JSON.stringify({ songs: await songTotals(env.DB), usage }), {
-      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-    });
+    return json({ songs: await songTotals(env.DB), usage });
   }
 
   // The wallet that pays listeners' network fees (settle.ts): its address,
@@ -537,10 +551,10 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
       : lamports !== null && lamports >= OFFER_ABOVE_LAMPORTS;
     const today = await env.DB.prepare("SELECT count FROM fee_days WHERE day = ?")
       .bind(dayKey("pay", Date.now())).first<{ count: number }>().catch(() => null);
-    return new Response(JSON.stringify({
+    return json({
       address, network, lamports, offering,
       offerAbove: OFFER_ABOVE_LAMPORTS, paidToday: today?.count ?? 0, dailyCap: DAILY_PAYMENTS,
-    }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+    });
   }
 
   // A signature for buying SOL into the fees account through Coinbase: the
@@ -549,7 +563,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const body = await jsonBody(request, 1_000);
     const signed = body ? await feeOnrampSignature(env.DB, Number(body.signedAt)) : null;
     if (!signed) return fail(400, "check this device's clock and try again");
-    return new Response(JSON.stringify(signed), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
+    return json(signed);
   }
 
   // Cashing out from a Face ID payout wallet (cashout.ts): the node drafts
@@ -568,7 +582,6 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const problem = cashOutProblem(from, to, micros, { payees, feePayer });
     if (problem) return fail(400, problem);
     const rpc = rpcAt(chain.rpc);
-    const json = (v: unknown) => new Response(JSON.stringify(v), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
 
     if (path === "/send/prepare") {
       if ((await feeBalance(rpc, feePayer, { fresh: true }).catch(() => 0)) < OFFER_ABOVE_LAMPORTS) {
@@ -599,9 +612,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   // Subscriptions through the artist's own Stripe account. The key comes in
   // here once and never goes back out: GET returns what is sold, not how.
   if (request.method === "GET" && path === "/stripe") {
-    return new Response(JSON.stringify(await publicView(env.DB)), {
-      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-    });
+    return json(await publicView(env.DB));
   }
 
   if (request.method === "POST" && path === "/stripe/connect") {
@@ -623,9 +634,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
         // back here to claim the subscription.
         returnTo: `https://amply.stream/app/?subscribed=${encodeURIComponent(`${origin}/manifest.json`)}&session={CHECKOUT_SESSION_ID}`,
       });
-      return new Response(JSON.stringify(await publicView(env.DB)), {
-        status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-      });
+      return json(await publicView(env.DB));
     } catch (e) {
       return fail(400, e instanceof StripeError ? e.message : "Couldn't reach Stripe.");
     }
@@ -651,9 +660,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
         key: String(body?.key || ""), items: clean, artist,
         returnTo: `https://amply.stream/app/?bought=${encodeURIComponent(`${origin}/manifest.json`)}&session={CHECKOUT_SESSION_ID}`,
       });
-      return new Response(JSON.stringify({ sales: sales.map(({ item, price, url }) => ({ item, price, url })) }), {
-        status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-      });
+      return json({ sales: sales.map(({ item, price, url }) => ({ item, price, url })) });
     } catch (e) {
       return fail(400, e instanceof StripeError ? e.message : "Couldn't reach Stripe.");
     }
@@ -681,10 +688,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     await pruneStale(env.DB);
     await pruneSubscriptions(env.DB);
     const rows = await listeners(env.DB);
-    return new Response(JSON.stringify(rows), {
-      status: 200,
-      headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-    });
+    return json(rows);
   }
 
   if (request.method === "POST" && path === "/block") {
@@ -835,10 +839,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
   const host = new URL(request.url).host;
 
   if (path === "/challenge" && request.method === "POST") {
-    return new Response(JSON.stringify({ challenge: challenge(host) }), {
-      status: 200,
-      headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-    });
+    return json({ challenge: challenge(host) });
   }
 
   if (path === "/token" && request.method === "POST") {
@@ -859,10 +860,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (!subscribed && subscriptionOnly(manifest)) {
       return fail(402, "subscribe to hear this artist's paid tracks");
     }
-    return new Response(JSON.stringify({ token: result.token, subscribedUntil: subscribed ? until : null }), {
-      status: 200,
-      headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-    });
+    return json({ token: result.token, subscribedUntil: subscribed ? until : null });
   }
 
   // ── paying listeners' network fees (settle.ts, feepay.ts) ────────────────
@@ -871,9 +869,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
   // price is served paused. Listeners never pay a network fee themselves.
   if (path === "/fees" && request.method === "GET") {
     const offer = await feeOffer(env, ctx).catch(() => null);
-    return new Response(JSON.stringify(offer ?? { feePayer: null }), {
-      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-    });
+    return json(offer ?? { feePayer: null });
   }
 
   // A listener's payment, signed by them, for this node to add its fee
@@ -907,9 +903,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
       allowed: (who) => allow(env as never, RULES.wallet, `${host}|settle|${who}`),
     });
     if (!result.ok) return fail(result.status, result.why);
-    return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {
-      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-    });
+    return json({ signature: result.signature, confirmed: result.confirmed });
   }
 
   // A listener sending their own money out, with no SOL for the fee: this
@@ -948,9 +942,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
       openOnce: [offer.withdraw.to],
     });
     if (!result.ok) return fail(result.status, result.why);
-    return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {
-      status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-    });
+    return json({ signature: result.signature, confirmed: result.confirmed });
   }
 
   // Back from Stripe's checkout: "this one was mine". Signed for with the
@@ -964,9 +956,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
       const outcome = await claim(env.DB, proof.address, String((body as { session?: string }).session || ""));
       if (outcome === "refused") return fail(403, "that checkout isn't a subscription for this wallet");
       const until = await subscribedUntil(env.DB, proof.address);
-      return new Response(JSON.stringify({ outcome, subscribedUntil: until }), {
-        status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-      });
+      return json({ outcome, subscribedUntil: until });
     } catch (e) {
       return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
     }
@@ -981,9 +971,6 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     owned: s.owner === wallet,
     // The code only to the one who bought the gift, and only until it's claimed.
     gift: s.buyer === wallet && !s.owner ? s.gift : null,
-  });
-  const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
-    status, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
   });
 
   // Back from Stripe's checkout for a song or an album.
@@ -1096,9 +1083,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     try {
       const url = await portalFor(env.DB, proof.address, returnTo);
       if (!url) return fail(404, "no subscription to manage here");
-      return new Response(JSON.stringify({ url }), {
-        status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-      });
+      return json({ url });
     } catch (e) {
       return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
     }
@@ -1173,7 +1158,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     const proof = await proveOwnership(host, body as never);
     if (!proof.ok) return fail(403, proof.why);
     const row = await listener(env.DB, proof.address);
-    return new Response(JSON.stringify({
+    return json({
       controller: host,
       wallet: proof.address,
       held: row
@@ -1193,10 +1178,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
       notHeld: "Which tracks you played, and when. This server never records that.",
       keptFor: "A year after you were last here, then deleted automatically.",
       exported: new Date().toISOString(),
-    }, null, 2), {
-      status: 200,
-      headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
-    });
+    }, 200, 2);
   }
 
   return null;
@@ -1270,12 +1252,7 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
     if (view === null) return fail(404, "no manifest published yet");
     if (view.parsed === undefined) return fail(500, "manifest is not valid JSON");
     const manifest = view.parsed;
-    const nonce = crypto.randomUUID().replace(/-/g, "");
-    const headers = withCors(new Headers({
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-      "Content-Security-Policy": pageCsp(nonce),
-    }));
+    const { nonce, headers } = pageHeaders();
     if (request.method === "HEAD") return new Response(null, { status: 200, headers });
     // Linked to one song or album (/?song=<id>, /?album=<id>): the page's
     // card and button are for that one.
@@ -1300,12 +1277,7 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
     const body = await manifestText(env);
     let manifest: unknown = {};
     try { if (body) manifest = JSON.parse(body); } catch { /* an empty notice beats an error */ }
-    const nonce = crypto.randomUUID().replace(/-/g, "");
-    const headers = withCors(new Headers({
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-      "Content-Security-Policy": pageCsp(nonce),
-    }));
+    const { nonce, headers } = pageHeaders();
     if (request.method === "HEAD") return new Response(null, { status: 200, headers });
     return new Response(renderPrivacy(manifest as never, new URL(request.url).origin, nonce), {
       status: 200, headers,
@@ -1345,16 +1317,7 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
   }
 
   if (pathname === "/version") {
-    const headers = withCors(
-      new Headers({
-        "Content-Type": "application/json; charset=utf-8",
-        "Cache-Control": "no-store",
-      }),
-    );
-    return new Response(
-      JSON.stringify({ version: VERSION, spec: SPEC_VERSION }),
-      { status: 200, headers },
-    );
+    return json({ version: VERSION, spec: SPEC_VERSION });
   }
 
   if (pathname.startsWith("/audio/")) {
