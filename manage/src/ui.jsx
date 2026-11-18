@@ -892,7 +892,9 @@ function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf,
     const taken = collectIds(manifest);
     update({
       ...manifest,
-      releases: [...(manifest.releases || []), { id: makeId("release", taken), title: "", tracks: [] }],
+      // Newest first: a new release goes above the ones already there, here,
+      // on the artist's page and in the app.
+      releases: [{ id: makeId("release", taken), title: "", tracks: [] }, ...(manifest.releases || [])],
     });
   };
 
