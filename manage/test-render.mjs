@@ -264,7 +264,8 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
   check("set up: Earnings shows the price per minute and per song", paid.includes("¢/min") && paid.includes("per song)"));
   check("  and how often, in songs", paid.includes("Pays you every"));
   check("  not the setup choices", !paid.includes(">Get paid<"));
-  check("  and cashing out to Coinbase or Cash App", paid.includes(">Cash out<") && paid.includes("Coinbase") && paid.includes("Cash App"));
+  // Cashing out needs the fees account on, and opens only when asked for.
+  check("  no cash out before the fees account is known to be on", !paid.includes(">Cash out<") && !paid.includes("Cash App"));
   const profile = show(full, "settings");
   check("Profile holds the profile, without prices", profile.includes(">Profile<") && !profile.includes("¢/min"));
   check("  the email is for GDPR compliance", profile.includes("Email for GDPR compliance"));
