@@ -895,10 +895,11 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     if (to === offer.feePayer || pay.recipients.some((r) => r.address === to)) return fail(400, "that address can't be sent to this way");
     const rpc = rpcAt(chain.rpc);
     let fee = WITHDRAW_FEE_MICROS;
+    let opensDestination = false;
     try {
       const ata = await tokenAccountOf(to, chain.mint, TOKEN_PROGRAM, ATA_PROGRAM);
       const info = await rpc("getAccountInfo", [ata, { encoding: "base64", commitment: "confirmed" }]);
-      if (!info?.value) fee += NEW_ACCOUNT_FEE_MICROS;
+      if (!info?.value) { fee += NEW_ACCOUNT_FEE_MICROS; opensDestination = true; }
     } catch {
       return fail(502, "couldn't reach the network; nothing was sent");
     }
@@ -907,11 +908,17 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
       payees: [{ address: to }, { address: offer.withdraw.to }],
       minMicros: 10_000, maxMicros: 10_000_000_000,
       withdrawal: { fee },
+      // The destination's account may be opened only when the listener is
+      // paying for that (it was missing just now): otherwise it could be
+      // closed between that look and the send, and the fee wallet would pay
+      // its rent, again and again. Existing, it's simply paid into.
+      mayOpen: opensDestination ? [to, offer.withdraw.to] : [offer.withdraw.to],
     }, {
       allowed: async (who) => !!(await listener(env.DB, who)) && allow(env as never, RULES.wallet, `${host}|withdraw|${who}`),
-      // The destination's account is paid for by the listener's fee; only the
-      // artist's own is opened once at most.
-      openOnce: [offer.withdraw.to],
+      // Each opened at most once by the fee wallet: the artist's own, and a
+      // destination opened for a listener, so neither can be closed for its
+      // rent and reopened at the fee wallet's cost.
+      openOnce: [offer.withdraw.to, to],
     });
     if (!result.ok) return fail(result.status, result.why);
     return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {

@@ -2090,6 +2090,18 @@ async function checkFeePayment(tx, expect) {
   if (payeeSet.has(listener2)) return no("the artist can't pay themselves through their own node");
   if (!tx.signatures[0].every((b) => b === 0)) return no("the fee wallet's signature is already there");
   const at = (i) => tx.accounts[i];
+  const usdcOf = /* @__PURE__ */ new Map();
+  const accountOf = /* @__PURE__ */ new Map();
+  try {
+    for (const p of payees) {
+      const a = await tokenAccountOf(p.address, mint, TOKEN_PROGRAM, ATA_PROGRAM);
+      usdcOf.set(p.address, a);
+      accountOf.set(a, p.address);
+    }
+  } catch {
+    return no("the artist's wallet list names something that isn't an address");
+  }
+  const mayOpen = new Set(expect.mayOpen ?? payees.map((p) => p.address));
   const created = /* @__PURE__ */ new Map();
   const paid = /* @__PURE__ */ new Map();
   const uses = /* @__PURE__ */ new Map();
@@ -2106,7 +2118,10 @@ async function checkFeePayment(tx, expect) {
       if (at(mintAt) !== mint) return no("that isn't USDC");
       if (at(system) !== SYSTEM_PROGRAM || at(token) !== TOKEN_PROGRAM) return no("creating a USDC account names the wrong programs");
       if (account < 2 || owner < 2) return no("a signer can't be a payee's account");
+      if (!mayOpen.has(at(owner))) return no("this payee's USDC account can't be opened at the fee wallet's cost here");
+      if (at(account) !== usdcOf.get(at(owner))) return no("that isn't the payee's own USDC account");
       if (created.has(at(account)) || [...created.values()].includes(at(owner))) return no("a payee's USDC account is created twice");
+      if (paid.has(at(owner))) return no("a payee's USDC account is created after they're paid");
       created.set(at(account), at(owner));
       uses.set(0, (uses.get(0) ?? 0) + 1);
       continue;
@@ -2119,9 +2134,9 @@ async function checkFeePayment(tx, expect) {
       if (authority !== 1) return no("the listener must sign their own payment");
       if (at(mintAt) !== mint) return no("that isn't USDC");
       if (source < 2) return no("a signer can't be a token account");
-      const payee = created.get(at(dest));
+      const payee = accountOf.get(at(dest));
       if (!payee) return no("a transfer goes somewhere that isn't a payee's USDC account");
-      if (created.has(at(source))) return no("a transfer can't come from a payee's account");
+      if (accountOf.has(at(source))) return no("a transfer can't come from a payee's account");
       if (paid.has(payee)) return no("a payee is paid twice");
       const micros2 = u64(ix.data, 1);
       if (micros2 <= 0) return no("a transfer of nothing");
@@ -2145,7 +2160,7 @@ async function checkFeePayment(tx, expect) {
   if (mentions(0) !== (uses.get(0) ?? 0)) return no("the fee wallet is used for something other than fees");
   if (mentions(1) !== (uses.get(1) ?? 0)) return no("the listener's key is used for something other than paying");
   if (expect.memo !== void 0 && memos !== 1) return no("a purchase must say what it bought");
-  if (paid.size !== created.size) return no("a USDC account is created without being paid");
+  for (const owner of created.values()) if (!paid.has(owner)) return no("a USDC account is created without being paid");
   const micros = [...paid.values()].reduce((a, b) => a + b, 0);
   if (!Number.isSafeInteger(micros)) return no("the amount is impossibly large");
   let shares;
@@ -3359,10 +3374,14 @@ async function handleListen(request, env, path) {
     if (to === offer.feePayer || pay.recipients.some((r) => r.address === to)) return fail(400, "that address can't be sent to this way");
     const rpc = rpcAt(chain.rpc);
     let fee = WITHDRAW_FEE_MICROS;
+    let opensDestination = false;
     try {
       const ata = await tokenAccountOf(to, chain.mint, TOKEN_PROGRAM, ATA_PROGRAM);
       const info = await rpc("getAccountInfo", [ata, { encoding: "base64", commitment: "confirmed" }]);
-      if (!info?.value) fee += NEW_ACCOUNT_FEE_MICROS;
+      if (!info?.value) {
+        fee += NEW_ACCOUNT_FEE_MICROS;
+        opensDestination = true;
+      }
     } catch {
       return fail(502, "couldn't reach the network; nothing was sent");
     }
@@ -3371,12 +3390,18 @@ async function handleListen(request, env, path) {
       payees: [{ address: to }, { address: offer.withdraw.to }],
       minMicros: 1e4,
       maxMicros: 1e10,
-      withdrawal: { fee }
+      withdrawal: { fee },
+      // The destination's account may be opened only when the listener is
+      // paying for that (it was missing just now): otherwise it could be
+      // closed between that look and the send, and the fee wallet would pay
+      // its rent, again and again. Existing, it's simply paid into.
+      mayOpen: opensDestination ? [to, offer.withdraw.to] : [offer.withdraw.to]
     }, {
       allowed: async (who) => !!await listener(env.DB, who) && allow(env, RULES.wallet, `${host}|withdraw|${who}`),
-      // The destination's account is paid for by the listener's fee; only the
-      // artist's own is opened once at most.
-      openOnce: [offer.withdraw.to]
+      // Each opened at most once by the fee wallet: the artist's own, and a
+      // destination opened for a listener, so neither can be closed for its
+      // rent and reopened at the fee wallet's cost.
+      openOnce: [offer.withdraw.to, to]
     });
     if (!result.ok) return fail(result.status, result.why);
     return new Response(JSON.stringify({ signature: result.signature, confirmed: result.confirmed }), {

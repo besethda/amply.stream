@@ -68,7 +68,10 @@ globalThis.fetch = async (url, init = {}) => {
     const fee = 50_000 + (node.destExists ? 0 : 500_000);
     const r = await settle(DB, nodeRpc, body.tx, {
       mint: network().usdc, payees: [{ address: body.to }, { address: artist }], minMicros: 10_000, maxMicros: 10_000_000_000, withdrawal: { fee },
-    }, { wait: async () => {}, confirmWithinMs: 20 });
+      // As the node does: the destination's account may be opened only when
+      // the listener pays for that.
+      mayOpen: node.destExists ? [artist] : [body.to, artist],
+    }, { wait: async () => {}, confirmWithinMs: 20, openOnce: [artist, body.to] });
     return r.ok ? json({ signature: r.signature, confirmed: r.confirmed }) : json({ error: r.why }, r.status);
   }
   if (u.pathname === "/listen/settle") {
@@ -210,6 +213,10 @@ for (const [why, status] of [["a payee closed their USDC account after this serv
   Connection.prototype.getAccountInfo = async () => ({ lamports: 2039280 });
   const r2 = await sendDollarsOut(listener, dest, "all", { nodes: [ORIGIN] });
   ok("to an account that already exists, just the 5 cent fee", r2.micros === 2_950_000 && r2.fee === 50_000, JSON.stringify(r2));
+  const creates = (b64) => Transaction.from(Buffer.from(b64, "base64")).instructions
+    .filter((ix) => ix.programId.toBase58() === "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
+    .map((ix) => ix.keys[2].pubkey.toBase58());
+  ok("  and the app doesn't ask the node to open it", !creates(node.body.tx).includes(dest) && creates(node.body.tx).includes(artist), JSON.stringify(creates(node.body.tx)));
 
   reset({ offer: { ...withdrawOffer, withdraw: { ...withdrawOffer.withdraw, fee: 5_000_000 } } });
   let threw = null;
