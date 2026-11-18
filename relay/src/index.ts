@@ -179,9 +179,10 @@ const TOPUP_CSP = [
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 function topupPage(p: { address: string; currency: "usdc" | "sol"; amount: string | null }): string {
+  if (p.currency === "sol") return feesPage(p);
   const what = p.currency === "usdc"
     ? `${p.amount ? `$${p.amount} of ` : ""}USDC`
-    : "$5 of SOL for your fees account (it pays your fans' network fees: each $1 covers ~1,000 payments)";
+    : "SOL";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -206,6 +207,28 @@ If they don't, or someone sent you this link, close this page: the money would g
 <p id="said" style="color:#6b6257;font-size:15px;margin:16px 0 0">Loading Stripe…</p>
 <p style="color:#6b6257;font-size:15px;margin:28px 0 0">Stripe handles the payment and any identity check. Amply never sees your card and takes nothing.</p>
 <p style="font-size:15px;margin:20px 0 0"><a href="https://amply.stream/app/" style="color:#1b1813">&larr; Back to Amply</a></p>
+<script id="params" type="application/json">${JSON.stringify(p).replace(/</g, "\\u003c")}</script>
+<script src="${STRIPE_ONRAMP_SCRIPT}"></script>
+<script src="/topup.js"></script>
+</body></html>`;
+}
+
+/** An artist filling their fees account: a few words, the address, the button. */
+function feesPage(p: { address: string; currency: "usdc" | "sol"; amount: string | null }): string {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Fill your fees account - Amply</title></head>
+<body style="font:18px/1.5 system-ui,sans-serif;max-width:34rem;margin:0 auto;padding:32px 16px;color:#1b1813;background:#fbf8f3">
+<p style="font-weight:800;letter-spacing:-0.02em;margin:0 0 18px">amply</p>
+<h1 style="font-size:28px;margin:0 0 12px">Fill your fees account</h1>
+<p style="margin:0 0 16px">Artists cover transaction fees to make it easier for their listeners ($1 covers ~1,000 payments).
+We use the Solana network, and you may have to create an account with Stripe.</p>
+<p style="margin:0 0 6px">Make sure your wallet address matches this:</p>
+<p id="address" style="font:15px ui-monospace,monospace;overflow-wrap:anywhere;background:#fff;border:1px solid #e4dccf;border-radius:12px;padding:14px 16px;margin:0 0 20px">${escapeHtml(p.address.slice(0, -4))}<b style="font-size:18px">${escapeHtml(p.address.slice(-4))}</b></p>
+<button id="go" disabled style="font:inherit;font-weight:700;padding:14px 26px;border:0;border-radius:999px;background:#f26b1d;color:#1b1813;cursor:pointer">Copy address and continue</button>
+<p id="said" style="color:#6b6257;font-size:15px;margin:16px 0 0">Loading Stripe…</p>
 <script id="params" type="application/json">${JSON.stringify(p).replace(/</g, "\\u003c")}</script>
 <script src="${STRIPE_ONRAMP_SCRIPT}"></script>
 <script src="/topup.js"></script>

@@ -139,7 +139,10 @@ const call = (path, { method = "POST", body, headers = {}, origin = ORIGIN } = {
 
   const fees = run(() => "https://crypto.link.com/?ref=x", { address: ADDR, currency: "sol", amount: null });
   ok("a fees account opens Stripe at $5 of SOL, not Stripe's own $10", fees.asked()?.destination_currency === "sol" && fees.asked()?.amount?.source_amount === "5");
-  ok("  and the page says what $1 covers, not \"months\"", /covers ~1,000 payments/.test(await (await page(`address=${ADDR}&currency=sol`)).text()));
+  const feesHtml = await (await page(`address=${ADDR}&currency=sol`)).text();
+  ok("  and the page says what $1 covers, not \"months\"", /covers ~1,000 payments/.test(feesHtml));
+  ok("  in a few words: why, the address to match, the button", /make it easier for their listeners/.test(feesHtml)
+    && /matches this/.test(feesHtml) && feesHtml.includes(ADDR.slice(-4)) && /Copy address and continue/.test(feesHtml) && !/Three steps/.test(feesHtml));
 
   const bare = run(() => "https://crypto.link.com?ref=x");
   ok("  a link with no path is still Stripe's", bare.els.go.disabled === false);
