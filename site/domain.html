@@ -52,7 +52,7 @@
 
   <div class="aside">
     <strong>This is for domains already on Cloudflare.</strong> If yours is with Squarespace,
-    Wix, GoDaddy or anyone else, you don't need this: open your editor, go to Settings, and
+    Wix, GoDaddy or anyone else, you don't need this: open your editor, go to Profile, and
     link your domain with one DNS record. It takes a minute and gives listeners the same proof.
   </div>
 
@@ -168,6 +168,9 @@ const slugFrom = (address) =>
   toSlug(String(address || "").trim().replace(/^https?:\/\//, "").replace(/\/.*$/, "").split(".")[0] || "");
 const cleanHost = (h) => String(h || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
 
+// Opened from the editor's Website tab, which knows the address already.
+const given = new URLSearchParams(location.search).get("addr");
+if (given && /^[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev$/i.test(given)) state.address = given;
 $("#addr").value = state.address || "";
 $("#host").value = state.host || "";
 

@@ -52,6 +52,8 @@ const manifest = {
   ok("at most 16 sections", dirty.sections.length <= 16);
   ok("section ids are unique", new Set(dirty.sections.map((x) => x.id)).size === dirty.sections.length);
   ok("nothing at all becomes an empty, valid site", cleanSite(null).sections.length === 0 && cleanSite("x").look.theme === "light");
+  ok("a site is on unless turned off: every site from before stays on", cleanSite({}).on === true && cleanSite({ on: "no" }).on === true);
+  ok("  and off is kept", cleanSite({ on: false }).on === false);
 }
 
 // ── what visitors see ──────────────────────────────────────────────────────

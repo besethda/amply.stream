@@ -357,6 +357,9 @@ function cleanSite(raw) {
   }).filter(Boolean);
   return {
     v: SITE_VERSION,
+    // Off: visitors get the plain music page; the site is kept, ready to turn
+    // back on. Absent means on, as every site made before this was.
+    on: r.on !== false,
     look: {
       theme: THEMES[look.theme] ? look.theme : "light",
       font: FONTS[look.font] ? look.font : "sans",
@@ -2491,7 +2494,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.24.4";
+var VERSION = "3.24.5";
 var SPEC_VERSION = 1;
 var RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
 var MANAGE_CSP = [
@@ -3642,6 +3645,7 @@ async function serve(request, env) {
       site = t ? JSON.parse(t) : null;
     } catch {
     }
+    if (site?.on === false) site = null;
     return new Response(renderPage(manifest, new URL(request.url).origin, nonce, focus, site), {
       status: 200,
       headers

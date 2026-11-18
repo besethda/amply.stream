@@ -83,6 +83,9 @@ export function cleanSite(raw) {
   }).filter(Boolean);
   return {
     v: SITE_VERSION,
+    // Off: visitors get the plain music page; the site is kept, ready to turn
+    // back on. Absent means on, as every site made before this was.
+    on: r.on !== false,
     look: {
       theme: THEMES[look.theme] ? look.theme : "light",
       font: FONTS[look.font] ? look.font : "sans",

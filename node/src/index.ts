@@ -1252,6 +1252,8 @@ async function serve(request: Request, env: Env): Promise<Response> {
     const focus = kind && /^[a-z0-9-]{1,64}$/.test(id) ? { kind, id } as const : null;
     let site: unknown = null;
     try { const t = await siteText(env); site = t ? JSON.parse(t) : null; } catch { /* the plain page, then */ }
+    // Turned off in the editor: the plain music page, the site kept for later.
+    if ((site as { on?: boolean } | null)?.on === false) site = null;
     return new Response(renderPage(manifest as never, new URL(request.url).origin, nonce, focus, site), {
       status: 200, headers,
     });
