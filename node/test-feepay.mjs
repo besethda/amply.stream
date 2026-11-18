@@ -226,5 +226,22 @@ await refuses("an artist with no wallet is refused", honest(), { exp: { ...expec
 ok("the programs are Solana's own", spl.TOKEN_PROGRAM_ID.toBase58() === TOKEN_PROGRAM && spl.ASSOCIATED_TOKEN_PROGRAM_ID.toBase58() === ATA_PROGRAM);
 ok("the app's create-if-missing is the idempotent kind", create(artist.publicKey).data.length === 1 && create(artist.publicKey).data[0] === 1);
 
+// ── a listener proving their wallet: identity.ts, on solana-tx.ts's checks ──
+{
+  const { verifySignature, fromBase58 } = await import("./src/identity.ts");
+  const { base58 } = await import("./src/solana-tx.ts");
+  const me = Keypair.generate();
+  const message = "amply:artist.test:1:x";
+  const sig = base58(signBy(me, Buffer.from(message)));
+  const address = me.publicKey.toBase58();
+  ok("a listener's signature on the challenge proves their wallet", await verifySignature(address, message, sig));
+  ok("  not on another message", !(await verifySignature(address, message + "!", sig)));
+  ok("  not for another wallet", !(await verifySignature(Keypair.generate().publicKey.toBase58(), message, sig)));
+  ok("  and junk is false, not an error", !(await verifySignature(address, message, "0OIl"))
+    && !(await verifySignature("x", message, sig)) && !(await verifySignature(address, message, "1".repeat(200))));
+  ok("an address decodes to its 32 bytes", fromBase58(address)?.length === 32 && Buffer.from(fromBase58(address)).equals(Buffer.from(me.publicKey.toBytes())));
+  ok("  and anything too long to be one isn't even tried", fromBase58("2".repeat(129)) === null && fromBase58("0") === null);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
