@@ -3180,17 +3180,21 @@ function Temporary({ api, initial }) {
       </div>
     );
   }
-  // Two ways the first step goes wrong outside this page. Cloudflare's sign-up
-  // forgets the claim it came from, so a new account has to come back and tap
-  // Keep it again. And if the claim went through but hasn't shown here yet,
-  // the protect step checks it with the artist's own login anyway.
+  // Cloudflare's sign-up forgets the claim it came from, so the account comes
+  // first and the claim after. And if the claim went through but hasn't shown
+  // here yet, the protect step checks it with the artist's own login anyway.
   return (
     <div class="banner temp" role="status">
       <span>{left > 0 ? <>Temporary page: <b>{left} min</b> left.</> : "Time's up."}</span>
-      {t.claim && left > 0 && <a class="btn sm" href={t.claim} target="_blank" rel="noopener noreferrer">Keep it ↗</a>}
+      {t.claim && left > 0 && (
+        <span class="temp-steps">
+          <a class="link" href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">Create a Cloudflare account ↗</a>
+          <span>and then</span>
+          <a class="btn sm" href={t.claim} target="_blank" rel="noopener noreferrer">Keep it ↗</a>
+        </span>
+      )}
       {left > 0 && (
         <span class="temp-more">
-          New to Cloudflare? Sign up, then tap Keep it again.{" "}
           <a class="link" href="https://amply.stream/start#lock" target="_blank" rel="noopener">Already kept it?</a>
         </span>
       )}

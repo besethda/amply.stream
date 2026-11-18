@@ -222,6 +222,7 @@ textarea { resize: vertical; line-height: 1.5; min-height: 110px; }
 /* A page from before signup, with its hour running out: always there, not a toast. */
 .banner.temp { background: rgba(246, 113, 30, .13); color: var(--ink); flex-wrap: wrap; }
 .banner.temp .temp-more { flex-basis: 100%; font-size: 14px; color: var(--ink2); }
+.banner.temp .temp-steps { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* ── music tab: releases ──────────────────────────────────────────── */
 
