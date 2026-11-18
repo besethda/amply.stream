@@ -2959,7 +2959,9 @@ function EarnSetup({ api, network, payees, onAddress, onFees, onPublish, onClose
 
   return (
     <div class="setup-flow" role="dialog" aria-modal="true" aria-label="Start earning">
-      <button class="setup-back" onClick={back} aria-label="Back">←</button>
+      <button class="setup-back" onClick={back} aria-label="Back">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+      </button>
       <div class="setup-body">
         {step === "key" && <KeyStep onAddress={keyed} onManual={() => setStep("manual")} onHave={() => setStep("have")} />}
         {step === "manual" && <KeyByHand onAddress={keyed} />}
