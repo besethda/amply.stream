@@ -1,5 +1,5 @@
 {
-  "version": "3.24.3",
+  "version": "3.24.4",
   "spec": 1,
   "schema": [
     "CREATE TABLE IF NOT EXISTS settings ( key TEXT PRIMARY KEY, value TEXT NOT NULL )",
