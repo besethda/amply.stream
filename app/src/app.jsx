@@ -36,6 +36,7 @@ import {
   readCode, songLink, albumLink,
 } from "./collection.js";
 import { You } from "./you.jsx";
+import { Onboard } from "./onboard.jsx";
 import { AddScreen } from "./add.jsx";
 import { createVisualizer } from "./visualizer.js";
 import { pageScroll, setPageScroll } from "./scroll.js";
@@ -50,7 +51,7 @@ import {
 import { BuyForm, Purchases } from "./buy-ui.jsx";
 import { Handoff, needsHandoff, SHARED_LINK } from "./handoff.jsx";
 import { toMicros } from "./money.js";
-import { networkName } from "./networks.js";
+import { networkName, NETWORKS } from "./networks.js";
 
 /** How long an answer about an artist's fees account stands while listening. */
 const FEES_FRESH_MS = 15 * 60_000;
@@ -512,9 +513,14 @@ export function App() {
     const r = state.refused;
     if (!r || r === shown.current) return;
     shown.current = r;
+    // Their ID first, then money, then the song: one screen, step by step.
+    const setup = () => { setSheet(null); needWallet({ needsMoney: true }).then((who) => who && player.retry()); };
+    const unsaved = pair && !backupSaved(pair.publicKey.toBase58());
+    if ((r.kind === "nowallet" && !(r.plans || []).length) || (r.kind === "empty" && unsaved)) { setup(); return; }
     setSheet(refusalSheet(r, {
       money,
       go: {
+        setup,
         agree: () => { agreeRate(r.url, r.rate); setSheet(null); player.retry(); },
         you: () => goYou(),
         topUp: () => goYou("topup"),
@@ -534,6 +540,10 @@ export function App() {
   const tip = async (to, dollars) => {
     const blocked = tipBlocked(dollars, { hasWallet: !!pair, balance, mismatch: pair ? mismatch(to) : null, feesCovered: !!to.feesPaid });
     if (blocked === "amount") return;
+    if (blocked === "nowallet") {
+      if (await needWallet({ needsMoney: true })) tip(to, dollars);
+      return;
+    }
     if (blocked) {
       setSheet(refusalSheet({ kind: blocked, message: pair ? mismatch(to) : "" }, {
         money, go: { you: () => goYou(), topUp: () => goYou("topup") },
@@ -730,15 +740,22 @@ export function App() {
 
   // ── subscriptions ─────────────────────────────────────────────────────────
 
-  async function ensureWallet() {
-    if (pair) return pair;
-    const { wallet } = await machinery();
-    const who = wallet.loadWallet() || wallet.createWallet();
-    setPair(who);
-    return who;
+  /**
+   * A saved wallet, or the ID screen to make or bring one back (onboard.jsx):
+   * nothing is ever made behind the listener's back, and nothing they can lose
+   * is kept unsaved. Resolves with the wallet, or null if they backed out.
+   * `needsMoney`: what comes next costs money, so the screen ends with adding
+   * some.
+   */
+  const [onboard, setOnboard] = useState(null);
+  function needWallet({ needsMoney = false } = {}) {
+    if (pair && backupSaved(pair.publicKey.toBase58()) && (!needsMoney || !balance || balance.usdc > 0)) return Promise.resolve(pair);
+    return new Promise((done) => setOnboard({ needsMoney, done }));
   }
+  const ensureWallet = () => needWallet().then((who) => { if (!who) throw new Error("Save your ID first."); return who; });
   async function subscribe(entry, plan) {
-    const who = await ensureWallet();
+    const who = await needWallet();
+    if (!who) return;
     const link = new URL(plan.url);
     link.searchParams.set("client_reference_id", who.publicKey.toBase58());
     location.href = link.toString();
@@ -1039,7 +1056,8 @@ export function App() {
 
   /** By card: to Stripe's page, carrying this wallet, and back to claim it. */
   async function buyByCard(e, o, gift) {
-    const who = await ensureWallet();
+    const who = await needWallet();
+    if (!who) return;
     rememberCheckout(originOf(e.url), o.id, gift);
     const link = new URL(o.card);
     link.searchParams.set("client_reference_id", who.publicKey.toBase58());
@@ -1052,6 +1070,10 @@ export function App() {
       : mismatch({ network: o.wallet.network }) ? "mismatch"
       : balance && !(balance.usdc - owedAll >= o.price) ? "empty"
       : !feesCovered(e) ? "paused" : null;
+    if (block === "nowallet" || (block === "empty" && pair && !backupSaved(pair.publicKey.toBase58()))) {
+      if (await needWallet({ needsMoney: true })) startBuy(e, o);
+      return;
+    }
     if (block) {
       setSheet(refusalSheet({ kind: block, message: block === "mismatch" ? mismatch({ network: o.wallet.network }) : "", name: nameOf(e) }, {
         money, go: { you: () => goYou(), topUp: () => goYou("topup"), retry: () => startBuy(e, o) },
@@ -1265,6 +1287,7 @@ export function App() {
   } else if (tab === "you") {
     screen = (
       <You pair={pair} setPair={setPair} balance={balance} owed={owedAll} onRefresh={refresh}
+        onSetUp={() => needWallet()}
         entries={entries} onOpenArtist={(u) => go({ open: u })} view={youView} setView={setYouView}
         themeName={themeName} onTheme={toggleTheme}
         purchases={<Purchases pair={pair} entries={entries} owned={ownedMap} onOpenArtist={(u) => go({ open: u })}
@@ -1308,6 +1331,12 @@ export function App() {
         onTip={() => setSheet({ title: `Tip ${tipsNow.name}`, icon: <Icon.tip size={22} />, body: "Straight to them. Amply takes nothing.", children: <Tips tips={tipsNow} />, secondaryLabel: "Close" })} viz={viz} tips={tipsNow} wave={wave} onWave={nextWave} />}
       {handoff && <Handoff link={handoff.link} url={handoff.url} onStay={() => { const l = handoff.link; setHandoff(null); openLink(l); }} />}
       <Sheet sheet={sheet} onClose={closeSheet} />
+      {onboard && (
+        <Onboard pair={pair} needsMoney={onboard.needsMoney} balance={balance} network={NETWORKS[networkName()]}
+          onPair={(p) => { setPair(p); }}
+          onDone={(p) => { setOnboard(null); refresh(); onboard.done(p); }}
+          onClose={() => { setOnboard(null); onboard.done(null); }} />
+      )}
       <Toast toast={toast} />
     </div>
   );

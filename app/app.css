@@ -164,6 +164,25 @@ h1, h2, p { margin: 0; }
 .handoff-steps { margin: 0 0 12px; padding-left: 22px; display: grid; gap: 8px; color: var(--ink2); font-size: 16px; }
 .handoff .btn-primary.wide { margin-top: 4px; }
 
+/* ── your ID: a screen of its own, like signing in ────────────────── */
+
+.onboard {
+  position: fixed; inset: 0; z-index: 97; background: var(--bg); overflow-y: auto;
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px calc(env(safe-area-inset-bottom, 0px) + 24px);
+  animation: up .25s ease;
+}
+.onboard-back { width: 44px; height: 44px; border-radius: 999px; display: grid; place-items: center; color: var(--ink); }
+.onboard-back:hover { background: var(--bg3); }
+.onboard-body {
+  max-width: 420px; margin: 0 auto; min-height: calc(100% - 56px);
+  display: flex; flex-direction: column; justify-content: center; gap: 14px; padding: 8px 10px 40px;
+}
+.onboard-body h1 { font-size: 30px; font-weight: 800; letter-spacing: -.035em; margin: 0 0 6px; display: flex; align-items: center; flex-wrap: wrap; }
+.onboard-body .hint-text { flex-basis: 100%; font-size: 14px; font-weight: 400; letter-spacing: 0; margin-top: 10px; line-height: 1.45; }
+.onboard-icon { width: 54px; height: 54px; border-radius: 15px; background: var(--bg3); color: var(--orange); display: flex; align-items: center; justify-content: center; }
+.onboard-body .mono-box { word-break: break-all; }
+.onboard-body .row { display: flex; gap: 8px; flex-wrap: wrap; }
+
 /* ── buying a song or an album ────────────────────────────────────── */
 
 .buy { margin-top: 2px; }

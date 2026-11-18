@@ -178,7 +178,7 @@ export function SetUp({ onMade }) {
  * exist yet.
  */
 /** A "?" that shows its explanation only when tapped: short screens, detail on request. */
-function Hint({ label = "More about this", children }) {
+export function Hint({ label = "More about this", children }) {
   const [open, setOpen] = useState(false);
   return (
     <>
