@@ -322,7 +322,7 @@ async function forgetOwed(db: D1Database, pubkey?: string): Promise<void> {
  * record of a barred wallet is kept regardless, holding nothing but the bar —
  * see forget().
  */
-export const KEEP_FOR = 365 * 86400_000;
+const KEEP_FOR = 365 * 86400_000;
 
 /**
  * Delete the totals of wallets not heard from within KEEP_FOR.

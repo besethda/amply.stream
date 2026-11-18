@@ -10,6 +10,7 @@
  * but paid somebody else, or paid in a worthless token, or was sent by a
  * different wallet, must all fail. So must one already spent for access.
  */
+import { MEMO_PROGRAM } from "./feepay";
 
 export interface PaymentClaim {
   signature: string;    // the transaction
@@ -37,8 +38,6 @@ export interface PaymentResult {
 }
 
 const SIG = /^[1-9A-HJ-NP-Za-km-z]{64,120}$/;
-
-export const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 
 /** The note a purchase's payment carries: which artist, and what it bought. */
 export const purchaseMemo = (host: string, item: string) => `amply:buy:${host}:${item}`;

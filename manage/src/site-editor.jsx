@@ -59,7 +59,6 @@ const LISTS = ["news", "shows", "merch", "links"];
 const FIRST = { news: "title", shows: "city", merch: "name", links: "label" };
 const itemName = (type, it) => (type === "news" ? it.title : type === "shows" ? [it.city, it.venue].filter(Boolean).join(" · ")
   : type === "merch" ? it.name : it.label) || "Untitled";
-const ITEM_WORD = { news: "post", shows: "show", merch: "item", links: "link" };
 
 const ACCENTS = ["#f6711e", "#e5484d", "#d6409f", "#7c5cfc", "#2f7de1", "#12a594", "#30a46c", "#131110"];
 

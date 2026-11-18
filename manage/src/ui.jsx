@@ -63,7 +63,7 @@ import { SiteEditor } from "./site-editor.jsx";
 import { paymentsTo, mergePayments, usdcBalance, NETWORKS } from "./chain.js";
 import { coinbaseSolPage, coinbaseCashoutPage, sellMessage, topupUrl } from "../../app/src/topup.js";
 
-export const MAX_UPLOAD = 90 * 1024 * 1024;
+const MAX_UPLOAD = 90 * 1024 * 1024;
 
 /**
  * What the audio pickers offer, as explicit extensions and types.
@@ -92,8 +92,6 @@ const TYPICAL_SONG_MIN = 4;
  * only a few dollars a month for a fan who listens every day.
  */
 export const DEFAULT_RATE = 0.005;
-/** What a stream typically pays elsewhere, in dollars, for the comparison beside the price. */
-const STREAM_PAYS_ELSEWHERE = 0.004;
 
 /** Price input to dollars: a number to the cent, or null for "not for sale". */
 export function salePrice(text) {
@@ -163,7 +161,7 @@ export function cents(usd) {
  * 400kbps sits above every lossy format anyone exports and below every
  * lossless one (CD-quality WAV is 1,411kbps, FLAC usually 700 to 1,000).
  */
-export const STREAM_KBPS_LIMIT = 400;
+const STREAM_KBPS_LIMIT = 400;
 const TARGET_KBPS = 256;
 
 export function sizeAdvice(bytes, duration) {
@@ -1551,7 +1549,7 @@ function ShowWalletKey({ payees }) {
  * isn't live yet, and let the artist check their Face ID really opens it
  * (the passkey makes the key again; only the address is compared).
  */
-function PayoutReady({ address, live, held = false }) {
+function PayoutReady({ address, live }) {
   const [check, setCheck] = useState(null);   // { ok } | { other } | { error } | "busy"
   const [canPasskey, setCanPasskey] = useState(false);
   useEffect(() => {
@@ -1575,9 +1573,7 @@ function PayoutReady({ address, live, held = false }) {
   return (
     <div class="payout-ready" role="status">
       <p><b>✓ Step 1: wallet ready</b> <span class="mono muted small">{address.slice(0, 4)}…{address.slice(-4)}</span></p>
-      {!live && (held
-        ? <p class="warn small">Next: add $5 for network fees, below.</p>
-        : <p class="warn small">Press <b>Publish</b> at the top so fans can start paying you.</p>)}
+      {!live && <p class="warn small">Press <b>Publish</b> at the top so fans can start paying you.</p>}
       {canPasskey && (
         check?.ok ? <p class="good small">Your Face ID opens this wallet. All good.</p>
           : check?.other ? <p class="warn small">That Face ID opens a different wallet ({check.other.slice(0, 4)}…{check.other.slice(-4)}).
@@ -2419,7 +2415,7 @@ function useFeesStatus(api) {
   return useMemo(() => ({ fees, failed, refresh, setSetupOpen }), [fees, failed, refresh]);
 }
 
-function FeesCard({ api, network, payees, step = false, bare = false }) {
+function FeesCard({ api, network, payees, bare = false }) {
   const { fees = null, failed = false, refresh } = useContext(Fees) || {};
   const load = () => refresh?.();
   // Opening the card looks again, unless the last look was just now.
@@ -2468,7 +2464,7 @@ function FeesCard({ api, network, payees, step = false, bare = false }) {
   }
   return (
     <section class="card" id="fees">
-      {!bare && <h2>{step ? "Step 2: fees account" : "Fees account"} <span class="pill-status off">Off</span></h2>}
+      {!bare && <h2>Fees account <span class="pill-status off">Off</span></h2>}
       <p>Add $5 so fans can pay you. Each $1 covers ~1,000 payments' network fees.</p>
       {real && <>
         <a class="btn" href={topupUrl(fees.address, { currency: "sol" })} target="_blank" rel="noopener noreferrer">Add $5 by card</a>
@@ -2930,46 +2926,6 @@ const VIA_KEY = "amply.editor.payout-via";
 const NOT_PAID_HIDDEN = "amply.editor.not-paid-hidden";
 const readVia = () => { try { return localStorage.getItem(VIA_KEY); } catch { return null; } };
 
-/**
- * Before anything is set up. Fans pay into the artist's own wallet, made with
- * Face ID: the same in every country, with no exchange in between and so no
- * exchange's forms about each fan. Coinbase or Cash App is only where the
- * artist moves it later (CashOut). Card subscriptions are the other way in.
- */
-function GetPaid({ payees, setPayees, manifest, update, api, perMinuteOnly }) {
-  const [cards, setCards] = useState(false);
-  const setAddress = (a) => {
-    setPayees([{ ...payees[0], address: a }, ...payees.slice(1)]);
-    // Kept on the node at once: an unpublished change is otherwise lost on reload.
-    if (keyOf(a)) api?.savePayout?.(a).catch(() => {});
-  };
-  return (
-    <section class="card">
-      <h2>{perMinuteOnly ? "Also take payments by the minute" : "Get paid"}</h2>
-      <p>Fans pay into your own wallet. Cash out to Coinbase or Cash App anytime.</p>
-      {!perMinuteOnly && <p class="muted small">Step 1 of 2 · then $5 for network fees</p>}
-      <PasskeyWallet onAddress={setAddress} />
-      <p class="muted small">Amply: 0% · Solana network fee ~0.1¢ a payment, from your fees account</p>
-      <details class="more">
-        <summary>Already have a Solana wallet?</summary>
-        <Field label="Paste its address">
-          <Text value={payees[0]?.address || ""} class="mono" placeholder="Your wallet address" onInput={(v) => setAddress(v.trim())} />
-        </Field>
-      </details>
-      {!perMinuteOnly && <>
-        <div class="pay-choices">
-          <button type="button" class="pay-choice" aria-pressed={cards} onClick={() => setCards(!cards)}>
-            <b>Card subscriptions</b><span>Stripe · fans subscribe by card</span>
-            <span class="fee">Fees: ~3.6% + 30¢ a payment (US cards) · no network fee</span>
-          </button>
-        </div>
-        {cards && <Subscriptions manifest={manifest} update={update} api={api} />}
-        <p class="muted small">Until then, your music is free.</p>
-      </>}
-    </section>
-  );
-}
-
 /** The price and how often it's paid, one line each. */
 function Pricing({ wallet, onChange, held = false }) {
   const rate = wallet.ratePerMinute ?? DEFAULT_RATE;
@@ -3272,7 +3228,7 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
         {/* Setup not finished (no fees account yet): one card that carries on. */}
         {hasWallet && held && <StartEarning resume onStart={() => setSetting("fees")} />}
         {hasWallet && !held && !liveAddresses.includes(payees.find((p) => p.address).address) && (
-          <PayoutReady address={payees.find((p) => p.address).address} live={false} held={held} />
+          <PayoutReady address={payees.find((p) => p.address).address} live={false} />
         )}
         {canCashOut && cashing && <CashOut api={api} payees={payees} network={network} via={via} onVia={setVia} />}
         {feesOff && !held && <FeesCard api={api} network={network} payees={payees} />}
@@ -3975,7 +3931,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
 
 /** Read duration from the file itself, the manifest requires it, and a player
  *  must never download audio just to learn how long a track is. */
-export function readDuration(file) {
+function readDuration(file) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const audio = new Audio();

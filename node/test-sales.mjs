@@ -14,7 +14,8 @@ import { DatabaseSync } from "node:sqlite";
 import { SCHEMA } from "./src/store.ts";
 import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, GIFT_RE } from "./src/sales.ts";
 import { setSales, claimSale } from "./src/stripe.ts";
-import { verifyPayment, purchaseMemo, MEMO_PROGRAM } from "./src/payment-check.ts";
+import { verifyPayment, purchaseMemo } from "./src/payment-check.ts";
+import { MEMO_PROGRAM } from "./src/feepay.ts";
 import { DOWNLOADS_PER_PURCHASE } from "../spec/pricing.mjs";
 
 function d1(db) {

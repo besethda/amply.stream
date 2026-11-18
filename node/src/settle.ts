@@ -123,7 +123,7 @@ export function forgetFeeKey(): void { cached = null; }
 
 export class RpcError extends Error {}
 
-export type Rpc = (method: string, params: unknown[]) => Promise<any>;
+type Rpc = (method: string, params: unknown[]) => Promise<any>;
 
 export function rpcAt(url: string, timeoutMs = RPC_TIMEOUT_MS): Rpc {
   return async (method, params) => {
@@ -221,7 +221,7 @@ export async function feeBalance(rpc: Rpc, address: string, { fresh = false, now
 
 /** Whether today's fees of this kind still have room, without counting one.
  *  Fails closed: no table (a database built before it), no fees. */
-export async function feeRoom(db: D1Database, kind: FeeKind = "pay", now = Date.now()): Promise<boolean> {
+async function feeRoom(db: D1Database, kind: FeeKind = "pay", now = Date.now()): Promise<boolean> {
   try {
     const row = await db.prepare("SELECT count FROM fee_days WHERE day = ?").bind(dayKey(kind, now)).first<{ count: number }>();
     return (row?.count ?? 0) < capOf(kind);

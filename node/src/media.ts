@@ -41,7 +41,7 @@ export interface Media {
   used(): Promise<number>;
 }
 
-export interface MediaEnv {
+interface MediaEnv {
   MEDIA?: R2Bucket;
   MEDIA_KV?: KVNamespace;
 }
@@ -141,7 +141,7 @@ const tags = (header: string) => header.split(",").map((t) => t.trim().replace(/
  * Whether a conditional request is satisfied, as R2's `onlyIf` decides it.
  * `false` means: answer without a body.
  */
-export function conditionsHold(headers: Headers | undefined, meta: Meta): boolean {
+function conditionsHold(headers: Headers | undefined, meta: Meta): boolean {
   if (!headers) return true;
   const ifMatch = headers.get("If-Match");
   if (ifMatch && !tags(ifMatch).some((t) => t === "*" || t === meta.etag)) return false;

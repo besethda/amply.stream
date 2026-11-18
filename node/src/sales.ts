@@ -41,7 +41,7 @@ export interface Sale {
 
 const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 /** A gift code: 20 characters of base58, about 117 bits — unguessable. */
-export function giftCode(): string {
+function giftCode(): string {
   const bytes = new Uint8Array(20);
   crypto.getRandomValues(bytes);
   return [...bytes].map((b) => B58[b % 58]).join("");
