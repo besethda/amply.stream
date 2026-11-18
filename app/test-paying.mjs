@@ -29,14 +29,17 @@ const is = (name, got, want) => ok(name, Object.is(got, want), `expected ${want}
 const URL_A = "https://a.test/manifest.json";
 const URL_B = "https://b.test/manifest.json";
 
-const artist = (url, perMinute, settleAt = 0.2, network) => ({
+const artist = (url, perMinute, settleAt = 0.2, network, { feesPaid = true, paused = false } = {}) => ({
   url,
+  // Their node pays the network fee, checked on the network (identify.js).
+  feesPaid,
   manifest: {
     artist: { name: url },
     payment: perMinute == null ? [] : [{
       type: "solana-usdc", address: "7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU",
       ratePerMinute: perMinute, settleAt,
       ...(network ? { network } : {}),
+      ...(paused ? { paused: true } : {}),
     }],
     releases: [],
   },
@@ -46,6 +49,22 @@ const artist = (url, perMinute, settleAt = 0.2, network) => ({
 const walletOn = (name) => store.set("amply.network.v1", name);
 
 // ── banking listening against the right artist ──────────────────────────────
+
+// ── an artist who can't be paid is free to hear ─────────────────────────────
+
+store.clear(); agreeRate(URL_A, 0.02); agreeRate(URL_B, 0.02);
+{
+  const unpaid = artist(URL_A, 0.01, 0.2, undefined, { feesPaid: false });
+  is("their fees account can't pay: listening to them owes nothing", p.bank({}, [unpaid], { [URL_A]: 600 })[URL_A], undefined);
+  const paused = artist(URL_A, 0.01, 0.2, undefined, { paused: true });
+  is("their server says payments are paused: nothing owed either", p.bank({}, [paused], { [URL_A]: 600 })[URL_A], undefined);
+  is("  and a paused price is no price", rateOf(paused.manifest), null);
+  const before = p.bank({}, [artist(URL_A, 0.01)], { [URL_A]: 6000 });
+  is("a debt from before the pause isn't sent while they can't be paid", p.owing(unpaid, before)?.due, false);
+  is("  and is when they can again", p.owing(artist(URL_A, 0.01), before)?.due, true);
+  const crumbs = p.bank({}, [artist(URL_A, 0.01)], { [URL_A]: 30 });
+  is("under a cent waits, even when leaving", p.owing(artist(URL_A, 0.01), crumbs, { ending: true })?.due, false);
+}
 
 store.clear(); agreeRate(URL_A, 0.02); agreeRate(URL_B, 0.02);
 {

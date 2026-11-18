@@ -200,9 +200,16 @@ var SECURING_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" 
 and the page reloads by itself.</p>`;
 
 // ../spec/pricing.mjs
+var FEES_READY_LAMPORTS = 3e6;
+var LISTEN_MIN_MICROS = 1e4;
+var LISTEN_MAX_MICROS = 2e6;
+var isPaused = (p) => p?.paused === true;
+function paused(manifest) {
+  return (manifest?.payment || []).some((p) => p && p.type === "solana-usdc" && isPaused(p));
+}
 function perMinute(manifest) {
   return (manifest?.payment || []).some(
-    (p) => p && p.type === "solana-usdc" && Number(p.ratePerMinute) > 0
+    (p) => p && p.type === "solana-usdc" && Number(p.ratePerMinute) > 0 && !isPaused(p)
   );
 }
 function plans(manifest) {
@@ -213,7 +220,7 @@ function charges(manifest) {
   return perMinute(manifest) || plans(manifest).length > 0;
 }
 function subscriptionOnly(manifest) {
-  return plans(manifest).length > 0 && !perMinute(manifest);
+  return plans(manifest).length > 0 && !perMinute(manifest) && !paused(manifest);
 }
 function needsWallet(manifest, track) {
   if (!track) return false;
@@ -224,7 +231,7 @@ function needsWallet(manifest, track) {
 var DOWNLOADS_PER_PURCHASE = 5;
 function walletOf(manifest) {
   const w = (manifest?.payment || []).find((p) => p && p.type === "solana-usdc");
-  if (!w) return null;
+  if (!w || isPaused(w)) return null;
   const recipients = Array.isArray(w.recipients) && w.recipients.length ? w.recipients.filter((r) => r && r.address) : w.address ? [{ address: w.address, split: 100 }] : [];
   return recipients.length ? { recipients, network: w.network || "solana" } : null;
 }
@@ -2118,8 +2125,8 @@ async function checkFeePayment(tx, expect) {
 }
 
 // src/settle.ts
-var LISTEN_MIN_MICROS = 1e4;
-var LISTEN_MAX_MICROS = 2e6;
+var LISTEN_MIN_MICROS2 = LISTEN_MIN_MICROS;
+var LISTEN_MAX_MICROS2 = LISTEN_MAX_MICROS;
 var DAILY_PAYMENTS = 1e3;
 var DAILY_SENDS = 50;
 var dayKey = (kind, now) => {
@@ -2127,7 +2134,7 @@ var dayKey = (kind, now) => {
   return kind === "send" ? `send:${day}` : day;
 };
 var capOf = (kind) => kind === "send" ? DAILY_SENDS : DAILY_PAYMENTS;
-var OFFER_ABOVE_LAMPORTS = 3e6;
+var OFFER_ABOVE_LAMPORTS = FEES_READY_LAMPORTS;
 var WITHDRAW_FEE_MICROS = 5e4;
 var NEW_ACCOUNT_FEE_MICROS = 5e5;
 var FEE_KEY = "fee-wallet";
@@ -2195,7 +2202,13 @@ var BALANCE_FRESH_MS = 5 * 6e4;
 async function feeBalance(rpc, address, { fresh = false, now = Date.now() } = {}) {
   const known = balances.get(address);
   if (known && !fresh && now - known.at < BALANCE_FRESH_MS) return known.lamports;
-  const r = await rpc("getBalance", [address, { commitment: "confirmed" }]);
+  let r;
+  try {
+    r = await rpc("getBalance", [address, { commitment: "confirmed" }]);
+  } catch (e) {
+    if (!fresh && known && now - known.at < 36e5) return known.lamports;
+    throw e;
+  }
   const lamports = Number(r?.value ?? 0);
   balances.set(address, { lamports, at: now });
   return lamports;
@@ -2437,7 +2450,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.21.0";
+var VERSION = "3.22.0";
 var SPEC_VERSION = 1;
 var RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
 var MANAGE_CSP = [
@@ -2756,8 +2769,31 @@ async function manifestText(env) {
   cachedManifest = { at: now, body };
   return body;
 }
+async function listenerText(env) {
+  const text = await manifestText(env);
+  if (text === null) return null;
+  let manifest;
+  try {
+    manifest = JSON.parse(text);
+  } catch {
+    return text;
+  }
+  const at = (manifest?.payment || []).findIndex((p) => p?.type === "solana-usdc");
+  if (at < 0) return text;
+  if (await feeOffer(env).catch(() => null)) return text;
+  manifest.payment[at] = { ...manifest.payment[at], paused: true };
+  return JSON.stringify(manifest);
+}
+async function takingPayments(env) {
+  const text = await listenerText(env);
+  try {
+    return !paused(text ? JSON.parse(text) : null);
+  } catch {
+    return false;
+  }
+}
 async function serveManifest(env) {
-  const body = await manifestText(env);
+  const body = await listenerText(env);
   if (body === null) {
     return fail(404, "no manifest published yet");
   }
@@ -3083,7 +3119,17 @@ async function handleManage(request, env, path) {
     if (typeof parsed !== "object" || parsed === null || parsed.amply !== 1) {
       return fail(400, "not an Amply v1 manifest");
     }
-    await putSetting(env.DB, MANIFEST_KEY, text);
+    const payment = parsed.payment;
+    let stored = text;
+    if (Array.isArray(payment) && payment.some((p) => p && typeof p === "object" && "paused" in p)) {
+      parsed.payment = payment.map((p) => {
+        if (!p || typeof p !== "object") return p;
+        const { paused: _dropped, ...rest } = p;
+        return rest;
+      });
+      stored = JSON.stringify(parsed, null, 2);
+    }
+    await putSetting(env.DB, MANIFEST_KEY, stored);
     cachedManifest = null;
     return new Response(null, { status: 204, headers: noStore() });
   }
@@ -3158,8 +3204,8 @@ async function feeOffer(env) {
   return {
     feePayer,
     network: pay.network,
-    minMicros: LISTEN_MIN_MICROS,
-    maxMicros: LISTEN_MAX_MICROS,
+    minMicros: LISTEN_MIN_MICROS2,
+    maxMicros: LISTEN_MAX_MICROS2,
     withdraw: { to: pay.recipients[0].address, fee: WITHDRAW_FEE_MICROS, newAccountFee: NEW_ACCOUNT_FEE_MICROS }
   };
 }
@@ -3179,7 +3225,7 @@ async function handleListen(request, env, path) {
     const address = String(body.address);
     const until = await refresh(env.DB, address).catch(() => subscribedUntil(env.DB, address));
     const subscribed = until !== null && until > Date.now();
-    const text = await manifestText(env);
+    const text = await listenerText(env);
     let manifest = null;
     try {
       manifest = text ? JSON.parse(text) : null;
@@ -3208,7 +3254,7 @@ async function handleListen(request, env, path) {
     if (!offer) return fail(409, "this artist's node isn't paying network fees right now");
     const manifest = await manifestNowOf(env);
     const pay = walletOf(manifest);
-    let limits = { minMicros: LISTEN_MIN_MICROS, maxMicros: LISTEN_MAX_MICROS };
+    let limits = { minMicros: LISTEN_MIN_MICROS2, maxMicros: LISTEN_MAX_MICROS2 };
     if (body.item !== void 0) {
       const item = String(body.item);
       const sale = itemFor(manifest, item);
@@ -3420,6 +3466,7 @@ async function handleListen(request, env, path) {
     if (!await listener(env.DB, who) && !await allow(env, RULES.newListener, host)) {
       return new Response(null, { status: 204, headers: noStore() });
     }
+    if (!await takingPayments(env)) return new Response(null, { status: 204, headers: noStore() });
     const body = await jsonBody(request);
     await counted(env.DB, who, Number(body?.seconds) || 0);
     if (Math.random() < 0.02) await pruneStale(env.DB);
@@ -3518,7 +3565,7 @@ async function serve(request, env) {
     if (arriving(request) && !(await accessConfig(env)).set && await previewSession(request, readPreviewKey(await setting(env.DB, PREVIEW_KEY)))) {
       return new Response(null, { status: 302, headers: noStore({ Location: "/manage" }) });
     }
-    const body = await manifestText(env);
+    const body = await listenerText(env);
     if (body === null) return fail(404, "no manifest published yet");
     let manifest;
     try {
@@ -3607,7 +3654,7 @@ async function serve(request, env) {
   if (pathname.startsWith("/audio/")) {
     const key = safeKey("audio", pathname.slice("/audio/".length));
     if (key === null) return fail(400, "bad key");
-    const manifest = await manifestText(env);
+    const manifest = await listenerText(env);
     let guarded = /* @__PURE__ */ new Set();
     let masters = /* @__PURE__ */ new Set();
     try {

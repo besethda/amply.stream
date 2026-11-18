@@ -2999,7 +2999,8 @@ function readPayees(manifest) {
  *  the spec allows exactly one of the two. */
 function writePayees(wallet, payees) {
   const clean = payees.filter((p) => p.address);
-  const { address, recipients, ...rest } = wallet;
+  // `paused` is the server's to set, on the copy it serves; never published.
+  const { address, recipients, paused: _server, ...rest } = wallet;
   // Nobody has given an address yet. A wallet with an empty one is not a valid
   // payment method, so publish no metered payment at all rather than a broken
   // one, and let the page say the music is free.
@@ -3256,6 +3257,13 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
   // Once it's live it stays, so publishing a song never makes music free.
   const [feesOn, setFeesOn] = useState(null);
   useEffect(() => { api?.fees?.().then((f) => setFeesOn(!!f.offering)).catch(() => {}); }, [api]);
+  // While it's off, look again every minute: money sent to it shows up here
+  // by itself, and the warning below goes.
+  useEffect(() => {
+    if (feesOn !== false || !api?.fees) return;
+    const t = setInterval(() => api.fees().then((f) => setFeesOn(!!f.offering)).catch(() => {}), 60_000);
+    return () => clearInterval(t);
+  }, [api, feesOn]);
   const wasLive = !!(live?.payment || []).find((p) => p.type === "solana-usdc");
   const perMinute = wasLive || feesOn === true || !api?.fees;
   const next = useMemo(() => buildManifest(manifest, payees, { perMinute }), [manifest, payees, perMinute]);
@@ -3489,6 +3497,14 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
             <div class="banner update" role="status">
               <span>Your editor is out of date.</span>
               <a class="link" href="https://amply.stream/repair" target="_blank" rel="noopener">Rebuild</a>
+            </div>
+          )}
+          {/* Fans can't pay until the fees account pays their network fee, so
+              until then they listen free. Said everywhere, until it's fixed. */}
+          {feesOn === false && (wasLive || payees.some((p) => p.address)) && (
+            <div class="banner error" role="alert">
+              <span><b>You're not getting paid.</b> Fans listen free until your fees account has $5.</span>
+              <button class="link" onClick={() => { setTab("earnings"); setTimeout(() => document.getElementById("fees")?.scrollIntoView({ behavior: "smooth" }), 50); }}>Add $5</button>
             </div>
           )}
           {!editorBehind && isNewer(newer, version) && !updateHidden && (

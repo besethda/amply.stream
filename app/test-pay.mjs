@@ -98,14 +98,24 @@ is("and a hundred minutes is a dollar", dueNow(minutes(100), rate).micros, MICRO
   Connection.prototype.sendTransaction = async (tx) => { sent = tx; throw new Error("stop here"); };
   const pair = Keypair.generate();
   const artist = Keypair.generate().publicKey.toBase58();
-  await payArtist(pair, [{ address: artist, split: 100 }], 8_000_000, { artistName: "A", memo: "amply:buy:shop.example:tides" }).catch(() => {});
+  // A test token pays its own way (prove-payment.mjs), so the transaction
+  // can be caught here; real USDC only ever goes through the artist's node.
+  const mint = Keypair.generate().publicKey.toBase58();
+  await payArtist(pair, [{ address: artist, split: 100 }], 8_000_000, { artistName: "A", memo: "amply:buy:shop.example:tides", mint }).catch(() => {});
   const memo = sent?.instructions.find((ix) => ix.programId.toBase58() === MEMO_PROGRAM);
   ok("a purchase's transaction carries its note", memo && Buffer.from(memo.data).toString("utf8") === "amply:buy:shop.example:tides",
     sent ? sent.instructions.map((i) => i.programId.toBase58()).join(",") : "nothing sent");
   ok("  signed by the buyer", memo?.keys[0]?.pubkey.toBase58() === pair.publicKey.toBase58() && memo.keys[0].isSigner);
   sent = null;
-  await payArtist(pair, [{ address: artist, split: 100 }], 1_000_000, { artistName: "A" }).catch(() => {});
+  await payArtist(pair, [{ address: artist, split: 100 }], 1_000_000, { artistName: "A", mint }).catch(() => {});
   ok("a tip carries none", sent && !sent.instructions.some((ix) => ix.programId.toBase58() === MEMO_PROGRAM));
+
+  // Real USDC with no artist's node to pay the network fee: the listener's
+  // wallet never pays it instead. Nothing is sent, and the app says why.
+  sent = null;
+  const e = await payArtist(pair, [{ address: artist, split: 100 }], 1_000_000, { artistName: "A" }).catch((x) => x);
+  ok("no node to pay the fee: nothing is sent", sent === null);
+  ok("  and the payment is paused, not failed", e?.kind === "paused", e?.message);
   Connection.prototype.sendTransaction = real;
 }
 

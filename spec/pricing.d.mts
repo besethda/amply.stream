@@ -1,6 +1,10 @@
 // Types for pricing.mjs, so the artist's server can share the rule with the app.
 export interface Plan { months: number; price: number; currency?: string; url: string }
 export const SETTLE_WITHIN_DAYS: number;
+export const FEES_READY_LAMPORTS: number;
+export const LISTEN_MIN_MICROS: number;
+export const LISTEN_MAX_MICROS: number;
+export function paused(manifest: unknown): boolean;
 export function perMinute(manifest: unknown): boolean;
 export function plans(manifest: unknown): Plan[];
 export function charges(manifest: unknown): boolean;

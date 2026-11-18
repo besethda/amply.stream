@@ -18,13 +18,14 @@
 import { readTransaction, writeTransaction, base58, base64, TxError, tokenAccountOf } from "./solana-tx";
 import { checkFeePayment, TOKEN_PROGRAM, ATA_PROGRAM, type FeePayExpect } from "./feepay";
 import { setting } from "./store";
+import { FEES_READY_LAMPORTS, LISTEN_MIN_MICROS as MIN, LISTEN_MAX_MICROS as MAX } from "../../spec/pricing.mjs";
 
 /** Bounds on a listening payment, in micro-dollars. The floor makes spam cost
  *  the sender more than the artist: each payment pays the artist at least a
  *  cent, and costs the fee wallet a few thousandths of one. The ceiling is the
  *  app's own largest payment. */
-export const LISTEN_MIN_MICROS = 10_000;
-export const LISTEN_MAX_MICROS = 2_000_000;
+export const LISTEN_MIN_MICROS = MIN;
+export const LISTEN_MAX_MICROS = MAX;
 
 /** Fees paid per day, across every listener: a bound on spending, whatever
  *  goes wrong. At 10,000 lamports a payment, a full day is 0.01 SOL. */
@@ -41,8 +42,10 @@ const dayKey = (kind: FeeKind, now: number) => {
 const capOf = (kind: FeeKind) => (kind === "send" ? DAILY_SENDS : DAILY_PAYMENTS);
 
 /** Below this, the node stops offering: enough for a payee's USDC account
- *  and a few hundred fees, and keeps the wallet itself above rent. */
-export const OFFER_ABOVE_LAMPORTS = 3_000_000;
+ *  and a few hundred fees, and keeps the wallet itself above rent. Below it,
+ *  too, the artist's USDC price is paused (spec/pricing.mjs): the listener's
+ *  app checks the same number on the network itself. */
+export const OFFER_ABOVE_LAMPORTS = FEES_READY_LAMPORTS;
 
 /** What a listener pays the artist, in USDC, when the artist's node pays the
  *  network fee on their withdrawal: the fee, and more when the destination's
@@ -150,7 +153,15 @@ const BALANCE_FRESH_MS = 5 * 60_000;
 export async function feeBalance(rpc: Rpc, address: string, { fresh = false, now = Date.now() } = {}): Promise<number> {
   const known = balances.get(address);
   if (known && !fresh && now - known.at < BALANCE_FRESH_MS) return known.lamports;
-  const r = await rpc("getBalance", [address, { commitment: "confirmed" }]);
+  let r;
+  try {
+    r = await rpc("getBalance", [address, { commitment: "confirmed" }]);
+  } catch (e) {
+    // A busy network for a minute shouldn't pause the artist's price: what
+    // was true within the hour stands. Any older, and nobody can say.
+    if (!fresh && known && now - known.at < 3_600_000) return known.lamports;
+    throw e;
+  }
   const lamports = Number(r?.value ?? 0);
   balances.set(address, { lamports, at: now });
   return lamports;

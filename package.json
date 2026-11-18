@@ -8,7 +8,7 @@
     "build": "npm run build:node && npm run build:manage && npm run build:licence && npm run build:app && npm run build:version",
     "build:node": "npm --prefix node run build:site",
     "build:manage": "npm --prefix manage run build",
-    "check": "npm run build && node spec/validate.mjs spec/example.json && npm run test:manage && npm run test:app && npm run test:csp && npm run test:preview && npm run test:store && npm run test:page && npm run test:stripe && npm run test:sales && npm run test:feepay && npm run test:limits && npm run test:media && npm run test:pricing && npm run test:provision && npm run test:relay && npm run test:accounts && npm --prefix node run typecheck && npm --prefix relay run typecheck",
+    "check": "npm run build && node spec/validate.mjs spec/example.json && npm run test:manage && npm run test:app && npm run test:csp && npm run test:preview && npm run test:store && npm run test:page && npm run test:stripe && npm run test:sales && npm run test:feepay && npm run test:paused && npm run test:limits && npm run test:media && npm run test:pricing && npm run test:provision && npm run test:relay && npm run test:accounts && npm --prefix node run typecheck && npm --prefix relay run typecheck",
     "deploy:site": "npm run build && ./node/node_modules/.bin/wrangler pages deploy site --project-name=amply",
     "deploy:relay": "npm --prefix relay run deploy",
     "deploy:accounts": "vercel deploy --prod --cwd accounts",
@@ -34,6 +34,7 @@
     "build:app": "npm --prefix app run build",
     "test:app": "npm --prefix app run test",
     "build:version": "node scripts/node-version.mjs && cp spec/manifest-rules.mjs site/js/manifest-rules.mjs && node scripts/security-headers.mjs",
+    "test:paused": "node/node_modules/.bin/esbuild node/test-paused.mjs --bundle --format=esm --platform=node --target=es2022 --loader:.png=binary --outfile=.build/test/paused.mjs --log-level=warning --external:node:sqlite && node --no-warnings .build/test/paused.mjs",
     "test:feepay": "node --experimental-strip-types node/test-solana-tx.mjs && node/node_modules/.bin/esbuild node/test-feepay.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/feepay.mjs --log-level=warning && node .build/test/feepay.mjs && node/node_modules/.bin/esbuild node/test-settle.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/settle.mjs --log-level=warning --external:node:sqlite && node --no-warnings .build/test/settle.mjs && node/node_modules/.bin/esbuild node/test-cashout.mjs --bundle --format=esm --platform=node --target=es2022 --outfile=.build/test/cashout.mjs --log-level=warning --external:node:sqlite && node --no-warnings .build/test/cashout.mjs",
     "test:loudness-browser": "npm run preview && node manage/test-loudness-browser.cjs"
   }

@@ -144,7 +144,9 @@ export function tracksOf(entry) {
 /** The metered payment method, if the artist offers one this client understands. */
 export function rateOf(manifest) {
   const wallet = (manifest.payment || []).find((p) => p.type === "solana-usdc");
-  if (!wallet) return null;
+  // Paused by the artist's server: their fees account is empty, so they can't
+  // be paid, and listening to them costs nothing (spec/pricing.mjs).
+  if (!wallet || wallet.paused === true) return null;
   return {
     perMinute: wallet.ratePerMinute,
     settleAt: wallet.settleAt ?? 1,

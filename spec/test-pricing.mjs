@@ -7,7 +7,7 @@
  *
  *   node spec/test-pricing.mjs
  */
-import { charges, needsWallet, perMinute, plans, subscriptionOnly, saleOf, forSale, includes, walletOf } from "./pricing.mjs";
+import { charges, needsWallet, perMinute, plans, subscriptionOnly, saleOf, forSale, includes, walletOf, paused } from "./pricing.mjs";
 import { validate } from "./manifest-rules.mjs";
 
 let pass = 0, fail = 0;
@@ -114,6 +114,24 @@ is("no plans at all is refused", errorsFor([]).length > 0, true);
   is("  or a link that isn't Stripe's", rules(base([], { price: 3, url: "https://evil.example/x" })).errors.some((e) => e.includes("sale.url")), true);
   is("  or another currency", rules(base([], { price: 3, url: LINK, currency: "sek" })).errors.some((e) => e.includes("sale.currency")), true);
   is("  and warn when there's no way to pay", rules(neither).warnings.some((w) => w.includes("no way to pay")), true);
+}
+
+// ── paused: the artist's fees account can't pay fans' network fees ──────────
+{
+  const halted = { payment: [{ ...priced.payment[0], paused: true }] };
+  is("a paused price is paused", paused(halted), true);
+  is("  and a live one isn't", paused(priced), false);
+  is("a paused price charges nothing", charges(halted), false);
+  is("  so its tracks play without a wallet", needsWallet(halted, { id: "a" }), false);
+  is("  and nothing is for sale in USDC", walletOf(halted), null);
+  const sub = { url: "https://buy.stripe.com/x", months: 3, price: 9 };
+  const both = { payment: [{ ...priced.payment[0], paused: true }, { type: "stripe-subscription", plans: [sub] }] };
+  is("paused with subscriptions too: still not subscription-only", subscriptionOnly(both), false);
+  const card = { ...both, releases: [{ id: "r", title: "R", sale: { price: 5, url: "https://buy.stripe.com/y" }, tracks: [] }] };
+  is("  and an album still sells by card", saleOf(card, card.releases[0])?.card, "https://buy.stripe.com/y");
+  is("  but not in USDC", saleOf(card, card.releases[0])?.wallet, null);
+  const v = validate({ amply: 1, artist: { name: "A" }, payment: [{ ...priced.payment[0], paused: "yes" }], releases: [] });
+  is("paused must be true or false", v.errors.some((e) => e.includes("paused")), true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

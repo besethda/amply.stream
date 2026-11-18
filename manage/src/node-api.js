@@ -47,7 +47,15 @@ export function nodeApi() {
     async readManifest() {
       const res = await fetch(`${base}/manifest.json`, { cache: "no-store" });
       if (!res.ok) return null;
-      return res.json().catch(() => null);
+      const m = await res.json().catch(() => null);
+      // The public copy says `paused` while the fees account is empty: that's
+      // the server's to say, not part of what the artist wrote.
+      if (Array.isArray(m?.payment)) m.payment = m.payment.map((p) => {
+        if (!p || typeof p !== "object" || !("paused" in p)) return p;
+        const { paused: _server, ...mine } = p;
+        return mine;
+      });
+      return m;
     },
     async writeManifest(manifest) {
       await req("PUT", "/manifest", {

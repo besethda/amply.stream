@@ -214,6 +214,9 @@ function check(m) {
           if (e.network !== undefined && !NETWORKS.includes(e.network)) {
             err(`${p}.network`, `must be one of ${NETWORKS.join(", ")} (absent means ${NETWORKS[0]})`);
           }
+          // Set by the artist's server on the copy it serves, never by the
+          // artist: their fees account can't pay fans' network fees yet.
+          if (e.paused !== undefined && typeof e.paused !== "boolean") err(`${p}.paused`, "must be true or false");
         } else if (e.type === "stripe-subscription") {
           // A card subscription, sold by the artist through their own Stripe
           // account: Amply is never the seller and never holds the money. The

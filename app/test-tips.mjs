@@ -33,12 +33,13 @@ const nothing = tipsFor({ artist: { name: "None" }, payment: [] });
 ok("an artist with neither: nothing to offer", !nothing.wallet && !nothing.links.length);
 
 // What stops a tip.
-const ready = { hasWallet: true, balance: { usdc: 10, sol: 0.01 }, mismatch: null };
-ok("with a wallet, money and fee: nothing stops it", tipBlocked(3, ready) === null);
+const ready = { hasWallet: true, balance: { usdc: 10, sol: 0 }, mismatch: null, feesCovered: true };
+ok("with a wallet, money, and the artist paying the fee: nothing stops it", tipBlocked(3, ready) === null);
 ok("no wallet: set one up first", tipBlocked(3, { ...ready, hasWallet: false }) === "nowallet");
 ok("wallet on the wrong network: says so", tipBlocked(3, { ...ready, mismatch: "wrong" }) === "mismatch");
 ok("not enough money: top up", tipBlocked(3, { ...ready, balance: { usdc: 2, sol: 0.01 } }) === "empty");
-ok("their node can't pay the fee and there's no SOL: paused, never 'add SOL'", tipBlocked(3, { ...ready, balance: { usdc: 10, sol: 0 } }) === "paused");
+ok("their node can't pay the fee: paused, never 'add SOL'", tipBlocked(3, { ...ready, feesCovered: false }) === "paused");
+ok("  even with SOL in the listener's wallet: listeners never pay the fee", tipBlocked(3, { ...ready, feesCovered: false, balance: { usdc: 10, sol: 1 } }) === "paused");
 ok("balance not known yet: not refused for that", tipBlocked(3, { ...ready, balance: null }) === null);
 ok("nothing, or more than the most a tip can be: refused", tipBlocked(0, ready) === "amount" && tipBlocked(MAX_TIP + 1, ready) === "amount");
 

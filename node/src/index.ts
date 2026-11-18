@@ -35,7 +35,7 @@ import { cleanSite } from "../../spec/site.mjs";
 import { cashOutProblem, draftCashOut, CASHOUT_MIN_MICROS, CASHOUT_MAX_MICROS } from "./cashout";
 import { base64 } from "./solana-tx";
 import { TOKEN_PROGRAM, SYSTEM_PROGRAM, ATA_PROGRAM } from "./feepay";
-import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf } from "../../spec/pricing.mjs";
+import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf, paused } from "../../spec/pricing.mjs";
 import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
 import { ICONS, MANIFEST_PATH, studioManifest } from "./studio";
 
@@ -238,8 +238,33 @@ async function manifestText(env: Env): Promise<string | null> {
   return body;
 }
 
+/**
+ * The manifest as listeners get it. While the fees account can't pay fans'
+ * network fees, the USDC price is marked `paused` (spec/pricing.mjs): fans
+ * can't pay it, so it charges nothing, and the music it made paid plays free.
+ * The artist's stored copy is never changed; only what's served. Every route
+ * a listener reaches reads this, so the page, the audio and the app agree.
+ */
+async function listenerText(env: Env): Promise<string | null> {
+  const text = await manifestText(env);
+  if (text === null) return null;
+  let manifest: { payment?: Record<string, unknown>[] };
+  try { manifest = JSON.parse(text); } catch { return text; }
+  const at = (manifest?.payment || []).findIndex((p) => p?.type === "solana-usdc");
+  if (at < 0) return text;
+  if (await feeOffer(env).catch(() => null)) return text;
+  manifest.payment![at] = { ...manifest.payment![at], paused: true };
+  return JSON.stringify(manifest);
+}
+
+/** Whether this node is taking USDC payments right now. */
+async function takingPayments(env: Env): Promise<boolean> {
+  const text = await listenerText(env);
+  try { return !paused(text ? JSON.parse(text) : null); } catch { return false; }
+}
+
 async function serveManifest(env: Env): Promise<Response> {
-  const body = await manifestText(env);
+  const body = await listenerText(env);
   if (body === null) {
     return fail(404, "no manifest published yet");
   }
@@ -647,7 +672,19 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (typeof parsed !== "object" || parsed === null || (parsed as { amply?: unknown }).amply !== 1) {
       return fail(400, "not an Amply v1 manifest");
     }
-    await putSetting(env.DB, MANIFEST_KEY, text);
+    // `paused` is this server's to say, from the fees account, on the copy it
+    // serves. One read back from that copy and published again is dropped.
+    const payment = (parsed as { payment?: unknown }).payment;
+    let stored = text;
+    if (Array.isArray(payment) && payment.some((p) => p && typeof p === "object" && "paused" in p)) {
+      (parsed as { payment: unknown[] }).payment = payment.map((p) => {
+        if (!p || typeof p !== "object") return p;
+        const { paused: _dropped, ...rest } = p as Record<string, unknown>;
+        return rest;
+      });
+      stored = JSON.stringify(parsed, null, 2);
+    }
+    await putSetting(env.DB, MANIFEST_KEY, stored);
     cachedManifest = null;
     return new Response(null, { status: 204, headers: noStore() });
   }
@@ -775,7 +812,7 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     // Checked with Stripe when due — a renewal, or once a day — else as known.
     const until = await refresh(env.DB, address).catch(() => subscribedUntil(env.DB, address));
     const subscribed = until !== null && until > Date.now();
-    const text = await manifestText(env);
+    const text = await listenerText(env);
     let manifest: unknown = null;
     try { manifest = text ? JSON.parse(text) : null; } catch { /* treated as nothing offered */ }
     if (!subscribed && subscriptionOnly(manifest)) {
@@ -1038,6 +1075,9 @@ async function handleListen(request: Request, env: Env, path: string): Promise<R
     if (!(await listener(env.DB, who)) && !(await allow(env as never, RULES.newListener, host))) {
       return new Response(null, { status: 204, headers: noStore() });
     }
+    // While fans can't pay (the fees account is empty), listening is free,
+    // so it isn't counted as listening anyone owes for.
+    if (!(await takingPayments(env))) return new Response(null, { status: 204, headers: noStore() });
     const body = await jsonBody(request);
     await counted(env.DB, who, Number(body?.seconds) || 0);
     // Now and then, clear out wallets not heard from in a year. Here rather
@@ -1174,7 +1214,7 @@ async function serve(request: Request, env: Env): Promise<Response> {
         && await previewSession(request, readPreviewKey(await setting(env.DB, PREVIEW_KEY)))) {
       return new Response(null, { status: 302, headers: noStore({ Location: "/manage" }) });
     }
-    const body = await manifestText(env);
+    const body = await listenerText(env);
     if (body === null) return fail(404, "no manifest published yet");
     let manifest: unknown;
     try {
@@ -1263,7 +1303,7 @@ async function serve(request: Request, env: Env): Promise<Response> {
     // Paid tracks are served only to a listener who has said who they are.
     // Everything else is served to anyone, and that default is what keeps a
     // shared link working.
-    const manifest = await manifestText(env);
+    const manifest = await listenerText(env);
     let guarded = new Set<string>();
     let masters = new Set<string>();
     try {
