@@ -4,15 +4,18 @@
  *
  *   /                 the artist's page, and /privacy, their privacy notice
  *   /manifest.json    the manifest, from D1
- *   /audio/<key>      audio from R2, with range requests; paid tracks need a pass
- *   /art/<key>        images from R2
+ *   /audio/<key>      audio from storage (R2, or KV: media.ts), with range
+ *                     requests; paid tracks need a pass
+ *   /art/<key>        images from storage
  *   /version          so the editor can spot a stale service
  *   /listen/...       what a listener signs for with their wallet: a pass,
  *                     plays, subscriptions, purchases, and their own record
  *   /manage/...       the artist's editor and its API, behind Cloudflare Access
+ *                     (before the page is claimed, the one-hour key from
+ *                     setup: preview-key.ts)
  *
  * Every line here is a line someone has to update inside their own cloud
- * account later, so keep it small. See docs/build.md §1B and §1D.
+ * account later, so keep it small. See node/README.md.
  */
 
 import { verifyAccess, type AccessConfig } from "./access";
@@ -212,14 +215,6 @@ async function serveObject(
 
 let cachedManifest: { at: number; body: string | null } | null = null;
 
-/**
- * The track list.
- *
- * Cached in the isolate for a few seconds. Every page load, every client
- * refresh and every guarded audio request needs it, and D1 is a query rather
- * than an edge read, so asking it each time would make a fast thing slow. A few
- * seconds is short enough that publishing still feels immediate.
- */
 /** The artist's website (spec/site.mjs), or null. Cached briefly like the
  *  manifest: every page view reads it. */
 let cachedSite: { at: number; body: string | null } | null = null;
@@ -231,6 +226,14 @@ async function siteText(env: Env): Promise<string | null> {
   return body;
 }
 
+/**
+ * The track list.
+ *
+ * Cached in the isolate for a few seconds. Every page load, every client
+ * refresh and every guarded audio request needs it, and D1 is a query rather
+ * than an edge read, so asking it each time would make a fast thing slow. A few
+ * seconds is short enough that publishing still feels immediate.
+ */
 async function manifestText(env: Env): Promise<string | null> {
   const now = Date.now();
   if (cachedManifest && now - cachedManifest.at < MANIFEST_CACHE) return cachedManifest.body;
@@ -801,7 +804,7 @@ async function whoIsAsking(request: Request, env: Env): Promise<string | null> {
   return readToken(env.DB, token);
 }
 
-/** Everything a listener can do without being the artist. */
+/** The artist's manifest as stored, parsed (shared: see derive), or null. */
 async function manifestNowOf(env: Env): Promise<unknown> {
   const text = await manifestText(env);
   return text ? derive(text).parsed ?? null : null;
@@ -827,6 +830,7 @@ async function feeOffer(env: Env, ctx?: ExecutionContext): Promise<{ feePayer: s
   };
 }
 
+/** Everything a listener can do without being the artist. */
 async function handleListen(request: Request, env: Env, path: string, ctx?: ExecutionContext): Promise<Response | null> {
   const host = new URL(request.url).host;
 
@@ -863,7 +867,8 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
 
   // ── paying listeners' network fees (settle.ts, feepay.ts) ────────────────
   // Who would pay the fee, if this node will. Offered only while the fee
-  // wallet holds enough; otherwise the app pays its own fee, as before.
+  // wallet holds enough; otherwise there's no offer, and the artist's USDC
+  // price is served paused. Listeners never pay a network fee themselves.
   if (path === "/fees" && request.method === "GET") {
     const offer = await feeOffer(env, ctx).catch(() => null);
     return new Response(JSON.stringify(offer ?? { feePayer: null }), {

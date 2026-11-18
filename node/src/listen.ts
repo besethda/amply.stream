@@ -11,8 +11,7 @@
  * What this does not check is whether the listening was paid for. It
  * identifies, and the artist's editor reads the chain to show who has listened
  * without paying, so the artist can stop serving them. A stopped wallet is
- * refused here, and loses the music within a token's lifetime. See
- * docs/identity.md.
+ * refused here, and loses the music within a token's lifetime.
  */
 import { verifySignature, challengeIsFresh, fromBase58 } from "./identity";
 import { listener, seen, signingKey } from "./store";

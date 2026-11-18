@@ -14,7 +14,7 @@
  * artist actually has — who is listening a lot and paying nothing — without
  * building a record of anybody's taste. What is not collected cannot leak, be
  * demanded, or be mishandled by someone who never wanted to be a data
- * controller. See docs/identity.md.
+ * controller.
  *
  * D1 rather than KV because KV allows a thousand writes a day on the free plan
  * and a single enthusiastic listener would spend a tenth of that in an evening.

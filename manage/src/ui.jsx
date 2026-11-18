@@ -2,11 +2,14 @@
  * The artist's workspace.
  *
  * It runs in exactly one place: on the artist's own node, behind Cloudflare
- * Access. There is no hosted copy, Amply is not involved in an artist editing
- * their own music, and a second way of doing it would quietly undo that.
+ * Access (or, before the artist has claimed the page, the one-hour key from
+ * setup: node/src/preview-key.ts). There is no hosted copy, Amply is not
+ * involved in an artist editing their own music, and a second way of doing it
+ * would quietly undo that.
  *
- * Three tabs on one page rather than routes, because routing is another thing
- * the node would have to serve and this is one file either way.
+ * Five tabs (Home, Website, Music, Earnings, Profile) on one page rather than
+ * routes, because routing is another thing the node would have to serve and
+ * this is one file either way.
  *
  * Talks to an injected `api` adapter rather than fetching directly, so the
  * interface stays testable without a live node.
@@ -2335,13 +2338,6 @@ function Listeners({ api, paid, rate, settleAt }) {
   );
 }
 
-/**
- * Listeners' network fees, paid by this service (node/src/settle.ts). Every
- * Solana payment needs a fee of a fraction of a cent, in SOL. When this
- * service's fee wallet holds a little SOL, it pays that for every listener,
- * so they never need any. It's a wallet of its own, separate from where
- * listeners pay: it holds SOL for fees and nothing else.
- */
 /** One tap to Coinbase, buying SOL straight into the fees account. */
 function BuySol({ api, label = "Or with Coinbase" }) {
   const [busy, setBusy] = useState(false);
@@ -2415,6 +2411,13 @@ function useFeesStatus(api) {
   return useMemo(() => ({ fees, failed, refresh, setSetupOpen }), [fees, failed, refresh]);
 }
 
+/**
+ * Listeners' network fees, paid by this service (node/src/settle.ts). Every
+ * Solana payment needs a fee of a fraction of a cent, in SOL. When this
+ * service's fee wallet holds a little SOL, it pays that for every listener,
+ * so they never need any. It's a wallet of its own, separate from where
+ * listeners pay: it holds SOL for fees and nothing else.
+ */
 function FeesCard({ api, network, payees, bare = false }) {
   const { fees = null, failed = false, refresh } = useContext(Fees) || {};
   const load = () => refresh?.();
