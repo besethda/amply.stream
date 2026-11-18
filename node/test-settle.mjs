@@ -12,7 +12,7 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { SCHEMA } from "./src/store.ts";
-import { feeKey, feeAddress, forgetFeeKey, settle, countFee, feeBalance, DAILY_PAYMENTS, DAILY_SENDS } from "./src/settle.ts";
+import { feeKey, feeAddress, forgetFeeKey, settle, countFee, feeBalance, rpcAt, DAILY_PAYMENTS, DAILY_SENDS } from "./src/settle.ts";
 import { readTransaction, verifySignature, base58 } from "./src/solana-tx.ts";
 
 const require = createRequire(resolve("app/package.json"));
@@ -272,6 +272,33 @@ for (const [name, junk] of [["nothing", undefined], ["not base64", "%%%"], ["too
   const second = await settle(db6, again.rpc, withdrawal(true), w, once);
   ok("  closed since, it isn't reopened at the fee wallet's cost", !second.ok && /closed their USDC account/.test(second.why) && !again.methods().includes("simulateTransaction"), second.why);
   forgetFeeKey();
+}
+
+// ── a busy endpoint is asked again, a moment later ──
+{
+  const real = globalThis.fetch;
+  const waits = [];
+  const pause = async (ms) => { waits.push(ms); };
+  const answers = (list) => { let n = 0; globalThis.fetch = async () => { const r = list[Math.min(n++, list.length - 1)]; return r(); }; return () => n; };
+  const busy = () => new Response("slow down", { status: 429 });
+  const fine = () => new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { value: 7 } }));
+  try {
+    let asked = answers([busy, busy, fine]);
+    const got = await rpcAt("https://rpc.test", 1000, 4, pause)("getBalance", []);
+    ok("a busy answer twice, then a good one: the good one is used", got?.value === 7 && asked() === 3, JSON.stringify({ got, asked: asked() }));
+    ok("  with a growing pause between, never long", waits.length === 2 && waits[1] > waits[0] && Math.max(...waits) <= 2000, JSON.stringify(waits));
+    asked = answers([busy]);
+    let said = "";
+    try { await rpcAt("https://rpc.test", 1000, 4, pause)("getBalance", []); } catch (e) { said = e.message; }
+    ok("busy every time: it says so, after four tries", said === "the network is busy" && asked() === 4, `${said} ${asked()}`);
+    asked = answers([busy, fine]);
+    said = "";
+    try { await rpcAt("https://rpc.test", 1000, 1, pause)("getBalance", []); } catch (e) { said = e.message; }
+    ok("asked to try once (the listener's offer), it doesn't wait", said === "the network is busy" && asked() === 1, `${said} ${asked()}`);
+    answers([() => new Response("no", { status: 403 })]);
+    try { await rpcAt("https://rpc.test", 1000, 4, pause)("getBalance", []); } catch (e) { said = e.message; }
+    ok("a refusal (not busy) is not retried", said === "the network refused the request");
+  } finally { globalThis.fetch = real; }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

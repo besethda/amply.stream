@@ -57,6 +57,9 @@ export const NEW_ACCOUNT_FEE_MICROS = 500_000;
 
 const FEE_KEY = "fee-wallet";
 const RPC_TIMEOUT_MS = 10_000;
+/** Tries per question when the network answers busy, and the longest wait between. */
+const RPC_TRIES = 4;
+const RPC_PAUSE_MAX_MS = 2_000;
 const CONFIRM_WITHIN_MS = 25_000;
 
 // ── the key ─────────────────────────────────────────────────────────────────
@@ -125,24 +128,37 @@ export class RpcError extends Error {}
 
 type Rpc = (method: string, params: unknown[]) => Promise<any>;
 
-export function rpcAt(url: string, timeoutMs = RPC_TIMEOUT_MS): Rpc {
+export function rpcAt(url: string, timeoutMs = RPC_TIMEOUT_MS, tries = RPC_TRIES, pause: (ms: number) => Promise<unknown> = (ms) => new Promise((r) => setTimeout(r, ms))): Rpc {
   return async (method, params) => {
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        // Solana's public endpoint refuses a Worker without a User-Agent.
-        headers: { "Content-Type": "application/json", "User-Agent": "amply-node/1.0" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch {
-      throw new RpcError("couldn't reach the network");
+    // A free endpoint shares one rate limit between everyone on a Worker's
+    // address, so a busy answer (429) or a hiccup (5xx) is ordinary traffic.
+    // Asking again after a moment is safe for every call made here: a
+    // sendTransaction repeats the same signed transaction, which lands once.
+    for (let attempt = 1; ; attempt++) {
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          // Solana's public endpoint refuses a Worker without a User-Agent.
+          headers: { "Content-Type": "application/json", "User-Agent": "amply-node/1.0" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch {
+        throw new RpcError("couldn't reach the network");
+      }
+      if (!res.ok) {
+        if ((res.status === 429 || res.status >= 500) && attempt < tries) {
+          const told = Number(res.headers.get("Retry-After"));
+          await pause(Math.min(Number.isFinite(told) && told > 0 ? told * 1000 : 400 * attempt, RPC_PAUSE_MAX_MS));
+          continue;
+        }
+        throw new RpcError(res.status === 429 ? "the network is busy" : "the network refused the request");
+      }
+      const body = await res.json().catch(() => null) as { result?: unknown; error?: { message?: string } } | null;
+      if (!body || body.error) throw new RpcError(`the network said: ${String(body?.error?.message || "nothing useful").slice(0, 200)}`);
+      return body.result;
     }
-    if (!res.ok) throw new RpcError(res.status === 429 ? "the network is busy" : "the network refused the request");
-    const body = await res.json().catch(() => null) as { result?: unknown; error?: { message?: string } } | null;
-    if (!body || body.error) throw new RpcError(`the network said: ${String(body?.error?.message || "nothing useful").slice(0, 200)}`);
-    return body.result;
   };
 }
 
