@@ -21,8 +21,9 @@ import {
 } from "@solana/spl-token";
 import bs58 from "bs58";
 import { rpc, network, networkName } from "./wallet.js";
+import { networkFor } from "./networks.js";
 import { toMicros, toUsd } from "./money.js";
-import { SETTLE_WITHIN_DAYS as SETTLE_AFTER_DAYS, shareOut } from "../../spec/pricing.mjs";
+import { SETTLE_WITHIN_DAYS as SETTLE_AFTER_DAYS, shareOut, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS } from "../../spec/pricing.mjs";
 
 export { MICROS, toMicros, toUsd } from "./money.js";
 export { SETTLE_AFTER_DAYS };
@@ -236,19 +237,25 @@ export async function payArtist(pair, recipients, micros, { artistName = "This a
     return tx;
   };
 
-  // The artist's node pays the network fee, where it offers to: then the
-  // listener needs no SOL at all. Only on the real USDC; a test token is
-  // always paid the old way.
-  const offer = node?.origin && !mintAddress ? await feeOffer(node.origin, { micros, owners, pair, item: node.item }) : null;
-  if (offer) {
+  // The artist's node pays the network fee, always: a listener never pays
+  // one, whatever SOL their wallet holds. An artist whose fees account can't
+  // pay can't be paid, and nothing is sent. Only a test token, proving this
+  // path end to end (prove-payment.mjs), pays its own fee.
+  if (!mintAddress) {
+    const paused = () => new PaymentError("paused", `${artistName} can't take payments right now. Nothing was sent.`);
+    if (node?.item === undefined) {
+      if (micros < LISTEN_MIN_MICROS) throw new PaymentError("small", "Less than a cent is owed. It waits until there's more.");
+      if (micros > LISTEN_MAX_MICROS) throw new PaymentError("payment", "That's more than one payment can be. Nothing was sent.");
+    }
+    const offer = node?.origin ? await feeOffer(node.origin, { micros, owners, pair, item: node.item }) : null;
+    if (!offer) throw paused();
     const tx = await build(offer.feePayer);
     tx.feePayer = offer.feePayer;
     const sent = await sendThroughNode(conn, node, tx, pair);
-    if (sent) {
-      await confirmed(conn, sent);
-      return { signature: sent, shares, micros, feePaidBy: "artist" };
-    }
-    // The node didn't send it (and said so): pay the fee ourselves.
+    // The node didn't send it, and said so: nothing went out.
+    if (!sent) throw paused();
+    await confirmed(conn, sent);
+    return { signature: sent, shares, micros, feePaidBy: "artist" };
   }
 
   try {
@@ -294,7 +301,7 @@ export async function feeOffer(origin, { micros, owners = [], pair, item } = {})
   } catch {
     return null;
   }
-  if (!o?.feePayer || o.network !== networkName()) return null;
+  if (!o?.feePayer || networkFor(o.network) !== networkName()) return null;
   let feePayer;
   try { feePayer = new PublicKey(o.feePayer); } catch { return null; }
   // Never a wallet that's also being paid, or the listener's own.
@@ -310,9 +317,8 @@ export async function feeOffer(origin, { micros, owners = [], pair, item } = {})
  * this payment, so a confirmed signature means this payment landed.
  *
  * Returns the signature, or null when the node didn't send it and said so
- * (it isn't paying fees just now, or refused): then nothing went out, and
- * the listener's own wallet can pay the fee instead. Throws where something
- * may have gone out, so the same debt is never paid twice.
+ * (it isn't paying fees just now, or refused): then nothing went out. Throws
+ * where something may have gone out, so the same debt is never paid twice.
  */
 /** What an artist's node charges to pay the fee on a withdrawal, or null. */
 async function withdrawOffer(origin) {
@@ -322,7 +328,7 @@ async function withdrawOffer(origin) {
     if (!res.ok) return null;
     o = await res.json();
   } catch { return null; }
-  if (!o?.feePayer || o.network !== networkName() || !o.withdraw?.to) return null;
+  if (!o?.feePayer || networkFor(o.network) !== networkName() || !o.withdraw?.to) return null;
   const fee = Number(o.withdraw.fee), newAccountFee = Number(o.withdraw.newAccountFee);
   // A node can't ask more than this, whatever it says.
   if (!(fee >= 0 && fee <= 100_000 && newAccountFee >= 0 && newAccountFee <= 1_000_000)) return null;

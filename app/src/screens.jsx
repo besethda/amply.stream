@@ -5,7 +5,7 @@
  * the link or website that artist gave them; everything on these screens comes
  * from artists they chose. See docs/clients.md.
  */
-import { reachable, seemsGone } from "./library.js";
+import { reachable, seemsGone, feesCovered } from "./library.js";
 import { useState, useEffect, useRef, useContext } from "preact/hooks";
 import { createContext } from "preact";
 import { useRowSwipe } from "./gestures.js";
@@ -32,7 +32,8 @@ export function priceShort(entry) {
   const m = entry.manifest;
   if (isSubscribed(originOf(entry.url))) return "Subscribed";
   const rate = rateOf(m);
-  if (perMinute(m) && rate) return `${money(rate.perMinute)}/min`;
+  // A price the app isn't charging (their fees account is empty) isn't shown.
+  if (perMinute(m) && rate) return feesCovered(entry) ? `${money(rate.perMinute)}/min` : "Free";
   if (subscriptionOnly(m)) return "Subscribers";
   return "Free";
 }
@@ -47,7 +48,7 @@ export function badgeOf(entry, track) {
   if (!charges) return null;
   if (!track.needsWallet) return { label: "free", tone: "good" };
   if (isSubscribed(originOf(entry.url))) return { label: "sub", tone: "good" };
-  if (perMinute(m)) return { label: `${money(rateOf(m).perMinute)}/min`, tone: "" };
+  if (perMinute(m)) return feesCovered(entry) ? { label: `${money(rateOf(m).perMinute)}/min`, tone: "" } : { label: "free", tone: "good" };
   return { label: "sub", tone: "" };
 }
 

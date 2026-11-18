@@ -53,8 +53,8 @@ export function tipBlocked(dollars, { hasWallet, balance, mismatch, feesCovered 
   if (mismatch) return "mismatch";
   // Only once the balance is known: a slow network is no reason to refuse.
   if (balance && !(balance.usdc >= dollars)) return "empty";
-  // Their node pays the network fee; until it can, the tip waits.
-  if (balance && !(balance.sol > 0.001) && !feesCovered) return "paused";
+  // Their node pays the network fee, never the listener; until it can, no tip.
+  if (!feesCovered) return "paused";
   return null;
 }
 

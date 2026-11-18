@@ -11,7 +11,7 @@
  * either of them.
  */
 import { rateOf } from "./manifest.js";
-import { SETTLE_WITHIN_DAYS } from "../../spec/pricing.mjs";
+import { SETTLE_WITHIN_DAYS, LISTEN_MIN_MICROS } from "../../spec/pricing.mjs";
 import { payableHere, networkName, networkFor, NETWORKS } from "./networks.js";
 import {
   loadLedger, accrue, settled, rateStatus, withinLimits, recordSpend, clampRate,
@@ -75,13 +75,18 @@ export const loaded = () => modules;
  * The rate comes from the manifest as it stands now, and spend.js decides
  * whether it may be charged at all. Anything not yet agreed accrues nothing:
  * the music still plays, because the licence says it may.
+ *
+ * Nor does an artist who can't be paid: one whose fees account, checked by
+ * this app on the network (identify.js nodePaysFees), can't pay the network
+ * fee. Listeners never pay that fee, so until the artist does, listening to
+ * them is free, and nothing builds up to be asked for later.
  */
 export function bank(ledger, entries, seconds) {
   let next = ledger;
   for (const [url, secs] of Object.entries(seconds)) {
     const entry = entries.find((e) => e.url === url);
     const rate = entry && rateOf(entry.manifest);
-    if (!rate) continue;
+    if (!rate || !canPay(entry)) continue;
     // An artist asking to be paid somewhere this wallet's money is not. Build
     // no debt: it could never be settled, and a growing number the listener
     // cannot discharge is worse than nothing owed at all. The app says so
@@ -91,6 +96,9 @@ export function bank(ledger, entries, seconds) {
   }
   return next;
 }
+
+/** Whether this artist's node paid the network fee at the last check. */
+export const canPay = (entry) => !!entry?.feesPaid;
 
 /**
  * Why an artist cannot be paid from this device, in words a listener can act
@@ -120,7 +128,10 @@ export function owing(entry, ledger, { ending = false, now = Date.now() } = {}) 
 
   const threshold = Math.round((rate.settleAt ?? 1) * 1e6);
   const old = held.since != null && now - held.since >= SETTLE_WITHIN_DAYS * 86400e3;
-  const due = held.micros >= threshold || ending || old;
+  // Below a cent, a payment isn't worth its network fee: it waits for more.
+  // And nothing is due to an artist who can't be paid right now; it waits
+  // for their fees account rather than being tried and refused.
+  const due = (held.micros >= threshold || ending || old) && held.micros >= LISTEN_MIN_MICROS && canPay(entry);
 
   return {
     micros: held.micros,
@@ -200,7 +211,7 @@ export async function settleAll(pair, entries, ledger, { ending = false } = {}) 
       next = result.ledger;
       if (result.paid) paid.push({ entry, ...result.paid });
     } catch (e) {
-      failed.push({ entry, message: e.message });
+      failed.push({ entry, message: e.message, kind: e.kind });
     }
   }
 

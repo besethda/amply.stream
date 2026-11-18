@@ -22,11 +22,35 @@
  */
 export const SETTLE_WITHIN_DAYS = 7;
 
+/**
+ * Fans never pay a network fee: the artist's own fees account pays it. Until
+ * that account holds this much SOL (in lamports), the artist's server marks
+ * their USDC payment `paused` in the manifest it serves, and their music
+ * plays free. The listener's app checks the account itself too, on the
+ * network, rather than take the server's word that it can pay.
+ */
+export const FEES_READY_LAMPORTS = 3_000_000;
+
+/** The smallest and largest single payment for listening, in micro-dollars,
+ *  that an artist's server pays the network fee on. Below a cent, a debt waits
+ *  until there's more. */
+export const LISTEN_MIN_MICROS = 10_000;
+export const LISTEN_MAX_MICROS = 2_000_000;
+
+/** A USDC payment the artist's server has paused: their fees account is
+ *  empty, so nobody can pay them in USDC and nothing is owed for listening. */
+const isPaused = (p) => p?.paused === true;
+
+/** Is this artist's USDC payment paused (see FEES_READY_LAMPORTS)? */
+export function paused(manifest) {
+  return (manifest?.payment || []).some((p) => p && p.type === "solana-usdc" && isPaused(p));
+}
+
 /** Does this artist charge by the minute? A price with nowhere to send it is
  *  not a charge — the editor publishes no payment until there is an address. */
 export function perMinute(manifest) {
   return (manifest?.payment || []).some(
-    (p) => p && p.type === "solana-usdc" && Number(p.ratePerMinute) > 0,
+    (p) => p && p.type === "solana-usdc" && Number(p.ratePerMinute) > 0 && !isPaused(p),
   );
 }
 
@@ -47,10 +71,12 @@ export function charges(manifest) {
 /**
  * Subscription and nothing else: then a paid track needs an active
  * subscription, because there is no other way to pay for it. With per-minute
- * offered too, anyone with a wallet can listen and pay as they go.
+ * offered too, anyone with a wallet can listen and pay as they go. A paused
+ * per-minute price still counts as offered: a pause never shuts out the fans
+ * who could listen before it.
  */
 export function subscriptionOnly(manifest) {
-  return plans(manifest).length > 0 && !perMinute(manifest);
+  return plans(manifest).length > 0 && !perMinute(manifest) && !paused(manifest);
 }
 
 /** Must a listener identify themselves with a wallet to play this track? */
@@ -74,7 +100,7 @@ export const DOWNLOADS_PER_PURCHASE = 5;
 /** The artist's wallet payment, if they take USDC: who is paid, on which chain. */
 export function walletOf(manifest) {
   const w = (manifest?.payment || []).find((p) => p && p.type === "solana-usdc");
-  if (!w) return null;
+  if (!w || isPaused(w)) return null;
   const recipients = Array.isArray(w.recipients) && w.recipients.length
     ? w.recipients.filter((r) => r && r.address)
     : (w.address ? [{ address: w.address, split: 100 }] : []);

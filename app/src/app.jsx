@@ -51,6 +51,9 @@ import { BuyForm, Purchases } from "./buy-ui.jsx";
 import { Handoff, needsHandoff, SHARED_LINK } from "./handoff.jsx";
 import { toMicros } from "./money.js";
 import { networkName } from "./networks.js";
+
+/** How long an answer about an artist's fees account stands while listening. */
+const FEES_FRESH_MS = 15 * 60_000;
 import { tipsFor, amplyTips, tipBlocked, tipMicros } from "./tips.js";
 import { createUpdater, IDLE_MS as UPDATE_IDLE_MS } from "./update.js";
 import {
@@ -186,7 +189,7 @@ export function App() {
       pending.current[track.from] = (pending.current[track.from] || 0) + seconds;
       const artist = library.current.find((e) => e.url === track.from);
       const rate = artist && rateOf(artist.manifest);
-      if (rate?.perMinute > 0) session.current += (seconds / 60) * rate.perMinute * 1e6;
+      if (rate?.perMinute > 0 && feesCovered(artist)) session.current += (seconds / 60) * rate.perMinute * 1e6;
     },
     {
       /**
@@ -227,7 +230,9 @@ export function App() {
         catch (e) { throw refuse(e.subscribe ? "subscribe" : "refused", e.message, data); }
         if (!token) throw refuse("offline", "", data);
 
-        if (!isSubscribed(origin) && !onlySub) {
+        // An artist who can't be paid right now (their fees account is
+        // empty) is free to hear: no money needed, no price to agree to.
+        if (!isSubscribed(origin) && !onlySub && feesCovered(artist)) {
           const rate = artist && rateOf(artist.manifest);
           // Money on the wrong network can't pay this artist, so it can't hear
           // their paid music either — or a test wallet would be free listening.
@@ -251,6 +256,9 @@ export function App() {
         // who, so free tracks count too. Songs on this phone aren't anyone's.
         if (track.id && /^https:/.test(track.url || "")) reportHeard(originOf(track.url), track.id, seconds);
         if (!track.needsWallet || !holder.current) return;
+        // Listening that costs nothing isn't reported as listening owed for.
+        const artist = library.current.find((e) => e.url === track.from);
+        if (!isSubscribed(originOf(track.url)) && !(artist && rateOf(artist.manifest) && feesCovered(artist))) return;
         reportPlayed(holder.current, originOf(track.url), seconds);
       },
     },
@@ -265,6 +273,7 @@ export function App() {
       pending.current = {};
       if (!Object.keys(banked).length) return;
       setLedger((l) => bank(l, library.current, banked));
+      recheckFees(Object.keys(banked));
     };
     const timer = setInterval(flush, 5000);
     document.addEventListener("visibilitychange", flush);
@@ -275,6 +284,34 @@ export function App() {
       window.removeEventListener("pagehide", flush);
       flush();
     };
+  }, []);
+
+  // Whether each artist being listened to can be paid, looked at again every
+  // quarter of an hour: an artist whose fees account runs dry stops being
+  // charged for within minutes, and one who fills it starts being paid.
+  const recheckFees = useCallback(async (urls) => {
+    const now = Date.now();
+    const stale = urls.filter((u) => {
+      const e = library.current.find((x) => x.url === u);
+      return e && rateOf(e.manifest) && !(now - (e.feesCheckedAt || 0) < FEES_FRESH_MS);
+    });
+    if (!stale.length) return;
+    // Marked as checked first, so a slow answer isn't asked for twice.
+    noteFees(stale, null, now);
+    const found = await Promise.all(stale.map((u) => nodePaysFees(originOf(u), networkName())));
+    noteFees(stale, found, now);
+  }, []);
+  /** Record whether these artists can be paid (null: only when it was asked). */
+  const noteFees = useCallback((urls, found, now = Date.now()) => {
+    setEntries((all) => {
+      const next = all.map((e) => {
+        const i = urls.indexOf(e.url);
+        if (i < 0) return e;
+        return found ? { ...e, feesPaid: !!found[i], feesCheckedAt: now } : { ...e, feesCheckedAt: now };
+      });
+      saveLibrary(next);
+      return next;
+    });
   }, []);
 
   // A library is a cache of other people's pages (library.js). Check every
@@ -297,7 +334,7 @@ export function App() {
           const { domain: _was, ...rest } = e;
           // Whether their node pays the network fee, so paying them needs no SOL.
           const feesPaid = await nodePaysFees(originOf(e.url), networkName());
-          return noteReach({ ...rest, manifest, feesPaid, ...(domain ? { domain } : {}) }, true);
+          return noteReach({ ...rest, manifest, feesPaid, feesCheckedAt: Date.now(), ...(domain ? { domain } : {}) }, true);
         } catch {
           return noteReach(e, false);
         }
@@ -343,7 +380,6 @@ export function App() {
       // when it lands, rather than quietly changing a number.
       const was = lastBalance.current;
       if (was && next.usdc > was.usdc + 0.001) flash({ text: `${money(next.usdc - was.usdc)} has arrived. Paid songs will play now.` });
-      else if (was && !(was.sol > 0.001) && next.sol > 0.001) flash({ text: "Fees are covered. You're all set." });
       lastBalance.current = next;
       setBalance(next);
     }
@@ -367,6 +403,10 @@ export function App() {
       const total = result.paid.reduce((n, p) => n + p.usd, 0);
       flash({ text: result.paid.length === 1 ? `Paid ${money(total)} → ${nameOf(first.entry)}` : `Paid ${money(total)} to ${result.paid.length} artists` });
     }
+    // Their node said it can't pay the fee: stop charging for them now, not
+    // at the next check. What's owed waits for their fees account.
+    const refused = result.failed.filter((f) => f.kind === "paused").map((f) => f.entry.url);
+    if (refused.length) noteFees(refused, refused.map(() => false));
     if (result.failed.length) flash({ bad: true, text: result.failed[0].message });
   }, [pair, entries, ledger, refresh]);
 
@@ -951,7 +991,7 @@ export function App() {
     const block = !pair ? "nowallet"
       : mismatch({ network: o.wallet.network }) ? "mismatch"
       : balance && !(balance.usdc - owedAll >= o.price) ? "empty"
-      : balance && !(balance.sol > 0.001) && !feesCovered(e) ? "paused" : null;
+      : !feesCovered(e) ? "paused" : null;
     if (block) {
       setSheet(refusalSheet({ kind: block, message: block === "mismatch" ? mismatch({ network: o.wallet.network }) : "", name: nameOf(e) }, {
         money, go: { you: () => goYou(), topUp: () => goYou("topup"), retry: () => startBuy(e, o) },

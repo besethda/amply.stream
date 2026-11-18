@@ -130,6 +130,15 @@ Order therefore expresses the artist's preference.
 | `ratePerMinute` | number | **yes** | USD per minute listened. Must be > 0 and ≤ `1.00`. |
 | `settleAt` | number | no | USD a listener owes before their client sends it. Default `1.00`. Range `0.01`-`100`. See below. |
 | `network` | string | no | Which chain the artist is paid on: `solana` or `devnet`. Default `solana`. See below. |
+| `paused` | boolean | no | Set by the artist's server, never by the artist: `true` while their fees account can't pay fans' network fees. See below. |
+
+**Paused.** Fans never pay a Solana network fee; the artist's own fees account does. While
+it holds less than 0.003 SOL, the artist's server serves this entry with `paused: true`. A
+paused entry charges nothing: a client **must not** accrue a debt to it, and **must not**
+pay any network fee itself instead. Tracks that only this price made paid play free, and
+nothing is for sale in USDC. A debt from before the pause waits until it ends. Clients
+should also check the fees account on the network themselves before accruing anything,
+rather than take the server's word that it can pay.
 
 **Which money.** A Solana address is valid on every network, so nothing about a payment
 reveals which one it was made on: a transfer to the wrong one succeeds, tokens move, and an

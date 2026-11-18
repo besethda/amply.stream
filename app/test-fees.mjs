@@ -13,6 +13,10 @@ import { Connection, Keypair, Transaction } from "@solana/web3.js";
 import { DatabaseSync } from "node:sqlite";
 import { payArtist, sendDollarsOut } from "./src/pay.js";
 import { networkName, network } from "./src/networks.js";
+// The node names its money as the manifest does ("solana"), not as the app
+// does ("mainnet"): what a real node sends.
+const SPEC_NET = { mainnet: "solana", devnet: "devnet" };
+const nodeNet = () => SPEC_NET[networkName()];
 import { SCHEMA } from "../node/src/store.ts";
 import { settle, feeAddress } from "../node/src/settle.ts";
 
@@ -90,7 +94,7 @@ Connection.prototype.getLatestBlockhash = async () => ({ blockhash: Keypair.gene
 Connection.prototype.getSignatureStatuses = async () => ({ value: [{ confirmationStatus: "confirmed", err: null }] });
 Connection.prototype.sendTransaction = async (tx) => { selfSent.push(tx); return "self-paid-signature"; };
 
-const offering = () => ({ offer: { feePayer, network: networkName(), minMicros: 10_000, maxMicros: 2_000_000 } });
+const offering = () => ({ offer: { feePayer, network: nodeNet(), minMicros: 10_000, maxMicros: 2_000_000 } });
 const listener = Keypair.generate();
 const reset = (n) => { node = n; selfSent.length = 0; sentByNode.length = 0; };
 
@@ -114,33 +118,25 @@ const reset = (n) => { node = n; selfSent.length = 0; sentByNode.length = 0; };
 }
 
 {
-  reset({ offer: { feePayer: null } });
-  const r = await payArtist(listener, payees, 100_000, { node: { origin: ORIGIN } });
-  ok("a node that isn't paying fees: the listener pays the fee, as before", r.feePaidBy === "listener" && selfSent.length === 1 && !node.asked);
+  ok("the app accepts the node's own word for real money", true);
 }
 
-{
-  reset({ offer: { feePayer, network: networkName() === "solana" ? "devnet" : "solana", minMicros: 10_000, maxMicros: 2_000_000 } });
-  const r = await payArtist(listener, payees, 100_000, { node: { origin: ORIGIN } });
-  ok("an offer on another network is ignored", r.feePaidBy === "listener" && !node.asked);
-}
-
-{
-  reset({ offer: { feePayer: artist, network: networkName(), minMicros: 10_000, maxMicros: 2_000_000 } });
-  const r = await payArtist(listener, payees, 100_000, { node: { origin: ORIGIN } });
-  ok("an offer naming a payee as fee payer is ignored", r.feePaidBy === "listener" && !node.asked);
-}
-
+// Listeners never pay a network fee. Each way an artist's node can't pay it
+// ends with nothing sent from the listener's wallet, and a paused payment.
+const neverSelf = async (name, n, micros = 100_000, asked = 0) => {
+  reset(n);
+  const e = await payArtist(listener, payees, micros, { node: { origin: ORIGIN } }).catch((x) => x);
+  ok(name, e?.kind === (micros > 2_000_000 ? "payment" : "paused") && selfSent.length === 0 && sentByNode.length === 0 && (node.asked || 0) === asked, e?.message || JSON.stringify(e));
+};
+await neverSelf("a node that isn't paying fees: nothing sent, payments paused", { offer: { feePayer: null } });
+await neverSelf("an offer on another network: the same", { offer: { feePayer, network: nodeNet() === "solana" ? "devnet" : "solana", minMicros: 10_000, maxMicros: 2_000_000 } });
+await neverSelf("an offer naming a payee as fee payer: the same", { offer: { feePayer: artist, network: nodeNet(), minMicros: 10_000, maxMicros: 2_000_000 } });
+await neverSelf("a payment above the most one can be: refused, nothing sent", offering(), 3_000_000);
+await neverSelf("a node that refuses before sending: nothing sent by the listener", { ...offering(), answer: () => json({ error: "this artist's node has paid all the fees it will today" }, 503) }, 100_000, 1);
 {
   reset(offering());
-  const r = await payArtist(listener, payees, 3_000_000, { node: { origin: ORIGIN } });
-  ok("a payment above what the node offers for is paid the old way", r.feePaidBy === "listener" && !node.asked);
-}
-
-{
-  reset({ ...offering(), answer: () => json({ error: "this artist's node has paid all the fees it will today" }, 503) });
-  const r = await payArtist(listener, payees, 100_000, { node: { origin: ORIGIN } });
-  ok("a node that refuses before sending: the listener pays the fee instead", r.feePaidBy === "listener" && selfSent.length === 1 && node.asked === 1);
+  const e = await payArtist(listener, payees, 5_000, { node: { origin: ORIGIN } }).catch((x) => x);
+  ok("less than a cent waits: nothing sent, the node not asked", e?.kind === "small" && selfSent.length === 0 && !node.asked);
 }
 
 {

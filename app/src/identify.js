@@ -9,6 +9,8 @@
  * costs the listener nothing at all.
  */
 import { machinery } from "./paying.js";
+import { NETWORKS, networkFor } from "./networks.js";
+import { FEES_READY_LAMPORTS } from "../../spec/pricing.mjs";
 
 const TOKENS = "amply.tokens.v1";
 
@@ -312,17 +314,40 @@ export const audioUrl = (url, token) =>
   (token ? `${url}${url.includes("?") ? "&" : "?"}t=${encodeURIComponent(token)}` : url);
 
 /**
- * Whether this artist's node pays its listeners' network fees, so they need no
- * SOL. Asked with nothing about the listener; a no on any doubt. The payment
- * itself asks again (pay.js), and falls back to the listener paying.
+ * Whether this artist can be paid from this app: their node pays the network
+ * fee, so listeners never do. Asked with nothing about the listener, and a no
+ * on any doubt.
+ *
+ * The node's word isn't taken for it. The app looks at the fees account on
+ * the network itself, and only an account holding enough to pay counts. A
+ * node that says yes and can't pay would have listeners owing money nobody
+ * can send. Each payment asks the node again (pay.js); a no then stops
+ * charging for this artist too.
  */
 export async function nodePaysFees(origin, network) {
   try {
     const res = await fetch(`${origin}/listen/fees`, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return false;
     const o = await res.json();
-    return typeof o?.feePayer === "string" && o.feePayer.length >= 32 && o.network === network;
+    // The node says the manifest's word for its money ("solana"); this app
+    // says its own ("mainnet"). networkFor is the one map between them.
+    if (typeof o?.feePayer !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(o.feePayer)) return false;
+    if (networkFor(o.network) !== network || !NETWORKS[network]) return false;
+    return (await lamportsOf(NETWORKS[network].rpc, o.feePayer)) >= FEES_READY_LAMPORTS;
   } catch {
     return false;
   }
+}
+
+/** A wallet's SOL, straight from the network, without the payment libraries. */
+async function lamportsOf(rpc, address) {
+  const res = await fetch(rpc, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getBalance", params: [address, { commitment: "confirmed" }] }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) return 0;
+  const body = await res.json();
+  return Number(body?.result?.value) || 0;
 }
