@@ -17,6 +17,11 @@ const here = (rel) => fileURLToPath(new URL(rel, import.meta.url));
 const js = await readFile(here("../.build/node-manage.js"), "utf8");
 const base = await readFile(here("../site/style.css"), "utf8");
 const editor = await readFile(here("../site/editor.css"), "utf8");
+// Which version this editor is, in a form setup can read without running it:
+// a rebuild installs it only if it matches the service it's installing
+// (site/js/provision.js), never a stale copy caught mid-deploy.
+const version = (await readFile(here("../node/src/constants.ts"), "utf8")).match(/export const VERSION = "([^"]+)"/)?.[1];
+if (!version) throw new Error("node/src/constants.ts no longer declares VERSION where expected");
 
 const html = `<!doctype html>
 <html lang="en">
@@ -25,6 +30,7 @@ const html = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Your music</title>
 <meta name="robots" content="noindex">
+<meta name="amply-version" content="${version}">
 <meta name="theme-color" content="#ffffff">
 <link rel="manifest" href="/studio.webmanifest">
 <link rel="apple-touch-icon" href="/studio/icon-180.png">

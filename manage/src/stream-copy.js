@@ -61,7 +61,22 @@ export async function encodeMp3([left, right], { kbps = STREAM_KBPS, onProgress 
  * streams fine as it is; null altogether when the song can't be analysed
  * (then it simply goes up as it is).
  */
-export async function prepareStream(file, duration, { onProgress, onStage } = {}) {
+/** A song too long to fit the storage even as the smallest copy worth hearing. */
+export class TooLong extends Error {}
+
+const RATES = [256, 224, 192, 160, 128, 112, 96];   // MP3 bitrates, best first; below 96 isn't worth streaming
+
+/**
+ * The best bitrate that fits a song of `duration` seconds into `maxBytes`,
+ * with a little room for the MP3's own framing; null if even 96 kbps won't.
+ */
+export function fitKbps(duration, maxBytes) {
+  if (!maxBytes) return STREAM_KBPS;
+  const budget = (maxBytes * 0.97 * 8) / duration / 1000;
+  return RATES.find((k) => k <= Math.min(STREAM_KBPS, budget)) ?? null;
+}
+
+export async function prepareStream(file, duration, { onProgress, onStage, maxBytes = null, force = false } = {}) {
   if (!(duration > 0) || duration > LONGEST_S) return null;
   let channels;
   onStage?.("Reading the song…");
@@ -72,11 +87,17 @@ export async function prepareStream(file, duration, { onProgress, onStage } = {}
   if (!Number.isFinite(lufs)) return null;
   const ext = String(file.name || "").split(".").pop();
   const kbps = (file.size * 8) / duration / 1000;
-  if (!needsStreamCopy({ gainDb: gainFor(lufs), kbps, ext })) return { lufs, gainDb: 0, blob: null };
+  // `force`: the original is too big to store, so a copy it is, whatever else.
+  if (!force && !needsStreamCopy({ gainDb: gainFor(lufs), kbps, ext })) return { lufs, gainDb: 0, blob: null };
+  // At a bitrate the storage can hold: 256 kbps, or less for a long song.
+  const rate = fitKbps(duration, maxBytes);
+  if (rate === null) {
+    throw new TooLong(`At ${Math.round(duration / 60)} minutes it's too long for your storage (${Math.round(maxBytes / 1048576)} MB a file), even as a smaller copy. Turn on R2 storage in Cloudflare for bigger files.`);
+  }
   onStage?.(gainFor(lufs) >= 0 ? "Turning the volume up to match…" : "Turning the volume down to match…");
   await breathe();
   const { out, gainDb } = normalize(channels, STREAM_RATE);
   onStage?.("Optimizing for streaming…");
-  const blob = await encodeMp3(out, { onProgress });
+  const blob = await encodeMp3(out, { kbps: rate, onProgress });
   return { lufs, gainDb, blob };
 }

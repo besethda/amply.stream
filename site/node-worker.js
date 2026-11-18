@@ -2437,7 +2437,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.20.3";
+var VERSION = "3.20.4";
 var SPEC_VERSION = 1;
 var RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
 var MANAGE_CSP = [
@@ -2854,7 +2854,7 @@ async function handleManage(request, env, path) {
       if (claimed && !preview.claimed) await putSetting(env.DB, PREVIEW_KEY, JSON.stringify(afterClaim(preview)));
       temporary = previewNotice(preview, claimed);
     }
-    return new Response(JSON.stringify({ email, version: VERSION, home, temporary }), {
+    return new Response(JSON.stringify({ email, version: VERSION, home, temporary, maxFile: maxObject(env) }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
     });

@@ -38,7 +38,7 @@ function cloudflare(refuse) {
       // editor, and the schema its database needs.
       const body = url.includes("node-version")
         ? JSON.stringify({ version: "test", schema: ["CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)"], limits: LIMITS })
-        : "export default {}";
+        : 'export default {}; const VERSION = "test"; // <meta name="amply-version" content="test">';
       return new Response(body, { status: 200 });
     }
     const path = new URL(url).pathname.replace(/^\/api/, "");
