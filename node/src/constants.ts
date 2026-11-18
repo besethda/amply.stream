@@ -6,7 +6,7 @@
  * checks MANAGE_CSP.
  */
 
-export const VERSION = "3.24.1";
+export const VERSION = "3.24.2";
 export const SPEC_VERSION = 1;
 
 /** Amply's relay, which holds Amply's Coinbase key (relay/src/index.ts). */
