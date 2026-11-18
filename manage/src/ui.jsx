@@ -2272,6 +2272,9 @@ function BuySol({ api, label = "Or with Coinbase" }) {
   );
 }
 
+/** Payments that $5 of SOL pays the network fee on, roughly: a full bar. */
+const FEES_FULL = 6000;
+
 function FeesCard({ api, network, payees, onStatus, step = false }) {
   const [fees, setFees] = useState(null);
   const [failed, setFailed] = useState(false);
@@ -2303,29 +2306,35 @@ function FeesCard({ api, network, payees, onStatus, step = false }) {
     </details>
   );
   if (fees.offering) {
+    // About what $5 of SOL pays for; the bar is full there, and red near empty.
+    const share = payments == null ? 0 : Math.min(1, payments / FEES_FULL);
     return (
-      <details class="card fees-on" id="fees">
-        <summary><b>Fees account</b> <span class="pill-status on">On</span>
-          <span class="muted small">{payments != null ? `about ${payments.toLocaleString()} payments left` : ""}</span></summary>
-        {real && <a class="btn sm" href={topupUrl(fees.address, { currency: "sol" })} target="_blank" rel="noopener noreferrer">Top up $5 by card</a>}
-        {real && <BuySol api={api} />}
-        {byHand}
-        <button class="btn ghost sm" onClick={load}>Refresh</button>
-      </details>
+      <section class="card fees-on" id="fees">
+        <div class={`meter${share < 0.1 ? " full" : ""}`}>
+          <span class="label">Fees left{payments != null && <span class="meter-note"> · ~{payments.toLocaleString()} payments</span>}</span>
+          <div class="meter-bar" role="meter" aria-label="Fees left" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(share * 100)}>
+            <i style={{ width: `${share * 100}%` }} />
+          </div>
+        </div>
+        <details class="fee-how">
+          <summary>Top up</summary>
+          {real && <a class="btn sm" href={topupUrl(fees.address, { currency: "sol" })} target="_blank" rel="noopener noreferrer">$5 by card</a>}
+          {real && <BuySol api={api} />}
+          {byHand}
+        </details>
+      </section>
     );
   }
   return (
     <section class="card" id="fees">
       <h2>{step ? "Step 2: fees account" : "Fees account"} <span class="pill-status off">Off</span></h2>
-      <p>Add $5. It pays the network fee on every fan payment, so fans never deal with it. Lasts months.
-        {step && <> Fans can pay you once it's on.</>}</p>
+      <p>Add $5 so fans can pay you. It covers every payment's network fee for months.</p>
       {real && <>
         <a class="btn" href={topupUrl(fees.address, { currency: "sol" })} target="_blank" rel="noopener noreferrer">Add $5 by card</a>
         <BuySol api={api} />
       </>}
       {byHand}
-      <p class="muted small">It switches on a few minutes after the money arrives.
-        {real ? "" : ` Test network (${fees.network}).`}{" "}
+      <p class="muted small">On within minutes.{real ? "" : ` Test network (${fees.network}).`}{" "}
         <button class="link" onClick={load}>Check now</button></p>
     </section>
   );
@@ -2346,22 +2355,26 @@ function EarningsSummary({ paid, payees }) {
   }
   return (
     <section class="card earnings-top">
-      <span class="label">PAID TO YOU BY LISTENERS</span>
+      <span class="label">PAID TO YOU</span>
       <div class="earned">
         <b>{paid.at ? `$${((paid.total || 0) / 1_000_000).toFixed(2)}` : paid.busy ? "…" : "—"}</b>
         {paid.network === "devnet" && <span class="note">test money</span>}
+        <button class="link small" onClick={paid.look} disabled={paid.busy} aria-label="Check again" title="Check again">↻</button>
       </div>
-      <p class="muted small">
-        {paid.busy ? "Checking the latest payments…"
-          : paid.error ? <>Couldn't check payments just now. <button class="link" onClick={paid.look}>Try again</button></>
-          : paid.at ? <>Checked at {new Date(paid.at).toLocaleTimeString()}. <button class="link" onClick={paid.look}>Check again</button></>
-          : <button class="link" onClick={paid.look}>Check payments</button>}
-      </p>
-      <p class="payout-where muted small">In your payout wallet{" "}
-        <Help about="your payout wallet">Where fans' payments land. Only you can move money out of it.</Help>{" "}
-        <code title={payees.find((p) => p.address)?.address}>{short(payees.find((p) => p.address)?.address)}</code>{" "}
-        <CopyButton text={payees.find((p) => p.address)?.address} label="Copy" /></p>
-      <a class="btn sm" href="#cash-out" onClick={(e) => { e.preventDefault(); const c = document.getElementById("cash-out"); c?.scrollIntoView({ behavior: "smooth", block: "start" }); c?.querySelector("button.pay-choice")?.focus({ preventScroll: true }); }}>Cash out</a>
+      {paid.error && <p class="warn small">Couldn't check just now.</p>}
+    </section>
+  );
+}
+
+/** The payout wallet's address, for the few who need it. */
+function PayoutAddress({ payees }) {
+  const address = payees.find((p) => p.address)?.address;
+  if (!address) return null;
+  return (
+    <section class="card">
+      <p class="payout-where muted small">Payout wallet{" "}
+        <code title={address}>{short(address)}</code>{" "}
+        <CopyButton text={address} label="Copy" /></p>
     </section>
   );
 }
@@ -2840,24 +2853,22 @@ function Pricing({ wallet, onChange, held = false }) {
           <select value={batch} onChange={(e) => onChange({ ...wallet, settleAt: settleFor(Number(e.target.value), rate) })}>
             {BATCHES.map((b) => <option key={b} value={b}>{b}</option>)}
           </select>{" "}{batch === 1 ? "song" : "songs"}{" "}
-          <Help at="batching" about="how often">Each payment has a network fee of about a tenth of a cent, paid from
-            your fees account. Fewer, bigger payments waste less of it. Whatever a fan owes below this is paid within a
-            week, so nothing is lost.</Help>
+          <Help at="batching" about="how often">Each time a listener pays, there's a set transaction fee of 0.1¢. You
+            can choose to only require payment from listeners after 10 listens, so that you make more money.</Help>
         </label>
       )}
       {rate > 0 && (() => {
         const { payment, share } = payoutFee(batch, rate);
         const pct = share * 100 < 1 ? Number((share * 100).toFixed(1)) : Math.round(share * 100);
-        return (
-          <p class={`small ${share > 0.02 ? "warn" : "muted"}`}>
-            {cents(payment)} a payment · Solana network fee 0.1¢ ({pct}%){share > 0.02 ? " · pick more songs" : ""}</p>
-        );
+        // Said only when the fee is a noticeable part of each payment.
+        return share > 0.02 && <p class="small warn">Fee: {pct}% of each {cents(payment)} payment · pick more songs</p>;
       })()}
     </section>
   );
 }
 
-function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rate, network, settleAt, held = false, onFees }) {
+function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rate, network, settleAt, held = false, onFees, feesOn = null }) {
+  const [cashing, setCashing] = useState(false);
   const paid = usePayments(payees, network);
   const [via, setViaState] = useState(readVia);
   const setVia = (v) => { setViaState(v); try { localStorage.setItem(VIA_KEY, v); } catch { /* fine */ } };
@@ -2870,7 +2881,17 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
   const hasWallet = payees.some((p) => p.address);
   const subscribing = (manifest.payment || []).some((p) => p.type === "stripe-subscription");
   const liveAddresses = readPayees(live || { payment: [] }).map((p) => p.address).filter(Boolean);
-  const head = <div class="page-head"><h1>Earnings</h1></div>;
+  const payoutLive = hasWallet && liveAddresses.includes(payees.find((p) => p.address).address);
+  // Cashing out needs a published wallet and a fees account that pays the
+  // network fee: before both, there's nothing to cash out, so no button.
+  const canCashOut = payoutLive && !held && feesOn === true;
+  const head = (
+    <div class="page-head">
+      <h1>Earnings</h1>
+      {canCashOut && <button class={`btn sm${cashing ? " ghost" : ""}`} onClick={() => setCashing(!cashing)}>{cashing ? "Close" : "Cash out"}</button>}
+    </div>
+  );
+  const feesOff = hasWallet && (held || feesOn === false);
 
   if (!hasWallet && !subscribing) {
     return (<>{head}<div class="stack">
@@ -2886,18 +2907,19 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
         {hasWallet && !liveAddresses.includes(payees.find((p) => p.address).address) && (
           <PayoutReady address={payees.find((p) => p.address).address} live={false} held={held} />
         )}
-        {hasWallet && held && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} step />}
+        {canCashOut && cashing && <CashOut api={api} payees={payees} network={network} via={via} onVia={setVia} />}
+        {feesOff && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} step={held} />}
         {hasWallet && <BackupReminder payees={payees} />}
         {hasWallet && <EarningsSummary paid={paid} payees={payees} />}
         {hasWallet && <Pricing wallet={wallet} onChange={setWallet} held={held} />}
         {subscribing && <Subscriptions manifest={manifest} update={update} api={api} />}
         <Listeners api={api} paid={paid} rate={rate} settleAt={settleAt} />
-        {hasWallet && !held && <CashOut api={api} payees={payees} network={network} via={via} onVia={setVia} />}
-        {hasWallet && !held && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} />}
+        {hasWallet && !feesOff && <FeesCard api={api} network={network} payees={payees} onStatus={onFees} />}
         {!hasWallet && <GetPaid payees={payees} setPayees={setPayees} manifest={manifest} update={update} api={api} perMinuteOnly />}
         <details class="advanced">
           <summary>More <span class="note">{[!subscribing && "card subscriptions", hasWallet && "split with bandmates", hasWallet && "test mode"].filter(Boolean).join(", ")}</span></summary>
           <div class="stack">
+            {payoutLive && <PayoutAddress payees={payees} />}
             {!subscribing && <Subscriptions manifest={manifest} update={update} api={api} />}
             {hasWallet && <Splits payees={payees} rate={wallet.ratePerMinute ?? 0} onChange={setPayees} />}
             {hasWallet && (
@@ -3549,7 +3571,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
           <EarningsTab
             node={node} api={api} payees={payees} setPayees={setPayees}
             manifest={manifest} update={update} live={live}
-            held={!perMinute} onFees={setFeesOn}
+            held={!perMinute} onFees={setFeesOn} feesOn={feesOn}
             // What listeners are actually charged is what is published, not
             // what is in the editor: a price changed and not yet published
             // must not make a listener look like they are underpaying.

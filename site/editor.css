@@ -819,6 +819,10 @@ select { max-width: 100%; text-overflow: ellipsis; }
 .meter-bar { height: 12px; border-radius: 99px; background: var(--bg2); overflow: hidden; }
 .meter-bar i { display: block; height: 100%; background: var(--orange); border-radius: 99px; }
 .meter.full .meter-bar i { background: var(--bad); }
+.meter .meter-note { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.fees-on .fee-how { margin-top: 14px; }
+.fees-on .fee-how .btn { margin: 10px 8px 0 0; }
+.earnings-top .earned .link { font-size: 18px; text-decoration: none; }
 .top-songs { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; counter-reset: song; }
 .top-songs li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, 2fr) auto; align-items: center; gap: 12px; counter-increment: song; }
 .top-songs .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
