@@ -392,6 +392,21 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
   check("  and drawing the editor asks nothing by itself", asked === 0);
 }
 
+// ── Your price: what a payment comes to, at every choice of songs ──
+{
+  const { Pricing, settleFor, BATCHES } = await import("./src/ui.jsx");
+  const check = (name, cond, detail = "") => { cond ? pass++ : fail++; console.log(`${cond ? "ok  " : "FAIL"}  ${name}${cond ? "" : ` — ${detail}`}`); };
+  const said = {};
+  for (const songs of BATCHES) {
+    const html = renderToString(h(Pricing, { wallet: { type: "solana-usdc", ratePerMinute: 0.01, settleAt: settleFor(songs, 0.01) }, onChange() {} }));
+    said[songs] = /Each payment is about ([^<·]+)/.exec(html.replace(/<!--.*?-->/g, ""))?.[1]?.trim();
+  }
+  check("every choice of songs says what a payment comes to", BATCHES.every((b) => !!said[b]), JSON.stringify(said));
+  check("  and it grows with the songs", said[1] !== said[5] && said[5] !== said[10], JSON.stringify(said));
+  const free = renderToString(h(Pricing, { wallet: { type: "solana-usdc", ratePerMinute: 0, settleAt: 1 }, onChange() {} }));
+  check("  a free price has none", !/Each payment is about/.test(free));
+}
+
 // ── Auto-block: the switch, why it waits, and what turning it on would do ──
 {
   const { AutoBlockSwitch, AutoBlockHelp, AutoBlockChip, autoBlockWaits, wouldAutoBlock, paidChunks } = await import("./src/ui.jsx");
@@ -402,7 +417,7 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
 
   const off = renderToString(h(AutoBlockSwitch, { ab: { known: true, on: false, disabled: false } }));
   check("Auto-block is a switch, labelled, saying it's off", /role="switch"/.test(off) && /aria-checked="false"/.test(off) && off.includes("Auto-block") && /aria-describedby="autoblock-help"/.test(off), off);
-  check("  a button, so a keyboard works it", /^<button type="button"/.test(off));
+  check("  a button, so a keyboard works it", /<button type="button" role="switch"/.test(off));
   const on = renderToString(h(AutoBlockSwitch, { ab: { known: true, on: true, disabled: false } }));
   check("  and on", /aria-checked="true"/.test(on) && /class="ab-switch on"/.test(on));
   check("  not drawn until the server has said which", renderToString(h(AutoBlockSwitch, { ab: { known: false } })) === "");
@@ -411,6 +426,18 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
   const help = renderToString(h(AutoBlockHelp, { ab: { known: true, on: false, reason: autoBlockWaits(0.01, { ...ready, at: undefined }) } }));
   check("the help says what it does", help.includes("Stop serving listeners who are behind on paying, until they pay. Their app is told what they owe and pays it.") && /id="autoblock-help"/.test(help));
   check("  and why it can't be turned on yet", help.includes("Check who has paid first"));
+
+  // The "?" beside the switch, the mechanics it opens (with this artist's own
+  // numbers) and the question before turning it on, all drawn in the page.
+  check("the switch has a ? beside it, closed to begin with", /class="why"/.test(off) && /aria-expanded="false"/.test(off) && /aria-controls="autoblock-explain"/.test(off), off);
+  const opened = renderToString(h(AutoBlockHelp, { ab: { known: true, on: false, explaining: true, settleAt: 0.5, limit: 0.75 } }));
+  check("  opening it says how it decides, with the real figures", opened.includes("autoblock-explain") && opened.includes("$0.75") && opened.includes("$0.50") && opened.includes("more than"), opened);
+  check("  and what it never does", /subscribers/.test(opened) && /less than a cent/.test(opened) && /blocked yourself stay blocked/.test(opened) && /free tracks always play/.test(opened));
+  check("  and how fast a block bites", /half an hour/.test(opened));
+  const asked = renderToString(h(AutoBlockHelp, { ab: { known: true, on: false, asking: { count: 2, owed: 6_500_000 } } }));
+  check("turning it on asks in the page, naming who and how much", asked.includes("Turn on Auto-block?") && asked.includes("2 listeners are behind right now") && asked.includes("$6.50") && asked.includes("Cancel"), asked);
+  const none = renderToString(h(AutoBlockHelp, { ab: { known: true, on: false, asking: { count: 0, owed: 0 } } }));
+  check("  and says so when nobody is behind", none.includes("Nobody is behind right now"));
 
   check("waits for a price", autoBlockWaits(0, ready) !== null && autoBlockWaits(0.01, { ...ready, addresses: [] }) !== null);
   check("  for payments to be read", /Check who has paid/.test(autoBlockWaits(0.01, { ...ready, at: undefined })));
