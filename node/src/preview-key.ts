@@ -59,28 +59,46 @@ export function readPreviewKey(raw: string | null): PreviewKey | null {
  * Whether the temporary account has been claimed: true once its token is
  * refused, false while it works, null when Cloudflare can't say.
  *
- * Refused means 401, the answer for a token that no longer exists, and twice,
- * a moment apart: believing it drops the claim link for good, so a one-off
- * refusal, or a 403 about something else, must not be enough.
+ * Gone (tokenStanding, below), and twice, a moment apart: believing it drops
+ * the claim link for good, so a one-off refusal must not be enough. Only 401
+ * counted once, and claimed pages stayed on "Keep it": Cloudflare also
+ * answers a claimed account's token with a 403.
  */
 export async function claimedYet(k: PreviewKey, pause = 1500): Promise<boolean | null> {
   if (k.claimed) return true;
   if (!k.token) return null;
-  const ask = async (): Promise<number | null> => {
-    try {
-      const res = await fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", {
-        headers: { Authorization: `Bearer ${k.token}` },
-      });
-      return res.status;
-    } catch {
-      return null;
-    }
-  };
-  const first = await ask();
-  if (first !== null && first >= 200 && first < 300) return false;
-  if (first !== 401) return null;
+  const first = await tokenStanding(k.token);
+  if (first === "works") return false;
+  if (first !== "gone") return null;
   await new Promise((r) => setTimeout(r, pause));
-  return (await ask()) === 401 ? true : null;
+  return (await tokenStanding(k.token)) === "gone" ? true : null;
+}
+
+/**
+ * Cloudflare's errors for a token that isn't authorised any more. A claimed
+ * account's token has come back both as a 401 and as a 403 with one of these;
+ * a 403 for any other reason (a firewall, a blocked path) proves nothing.
+ */
+const TOKEN_REFUSED = new Set([1000, 9109, 10000, 10001]);
+
+/**
+ * What the temporary token gets back: "works" while it still reaches its
+ * account, "gone" when it's refused or reaches no account at all (as after a
+ * claim, if Cloudflare keeps the token but moves the account), null otherwise.
+ */
+async function tokenStanding(token: string): Promise<"works" | "gone" | null> {
+  try {
+    const res = await fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const body = (await res.json().catch(() => null)) as { result?: unknown[]; errors?: { code?: number }[] } | null;
+    if (res.ok) return Array.isArray(body?.result) && body!.result!.length === 0 ? "gone" : "works";
+    if (res.status === 401) return "gone";
+    if (res.status === 403 && (body?.errors || []).some((e) => TOKEN_REFUSED.has(Number(e.code)))) return "gone";
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** The same key, after the claim: nothing left that only mattered before it. */
