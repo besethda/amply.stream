@@ -460,7 +460,10 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const q = new URL(request.url).searchParams;
     const pay = walletOf(await manifestNowOf(env));
     if (!pay?.recipients.some((r) => r.address === q.get("address"))) return fail(400, "that isn't one of your payout wallets");
-    const ask = new URLSearchParams({ address: q.get("address") || "", signedAt: q.get("signedAt") || "", signature: q.get("signature") || "" });
+    const ask = new URLSearchParams({
+      address: q.get("address") || "", signedAt: q.get("signedAt") || "", signature: q.get("signature") || "",
+      nonce: q.get("nonce") || "", amount: q.get("amount") || "",
+    });
     const res = await fetch(`${RELAY_ORIGIN}/coinbase/sell/status?${ask}`).catch(() => null);
     const body = res ? await res.text() : JSON.stringify({ error: "Coinbase couldn't be reached" });
     return new Response(body, { status: res?.status ?? 502, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });

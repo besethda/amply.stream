@@ -347,26 +347,64 @@ const SELL_SIGNED_WITHIN_MS = 5 * 60_000;
 const SELL_STATUS_WITHIN_MS = 45 * 60_000;
 export const CASHOUT_MAX_USD = 10_000;
 
-/** What a payout wallet signs to cash out through Coinbase, and to follow it. */
-export const sellMessage = (address: string, signedAt: number) =>
-  `Amply: cash out from ${address} through Coinbase (${signedAt})`;
+/**
+ * What a payout wallet signs to cash out through Coinbase, and to follow it:
+ * the amount, and a random `nonce` the editor makes for this one cash-out.
+ * The nonce goes into Coinbase's reference for the session (sellRefOf), so
+ * the status check finds that session's transaction and no other; and the
+ * signature starts one session only (usedSells).
+ */
+export const sellMessage = (address: string, signedAt: number, nonce: string, amount: number) =>
+  `Amply: cash out $${Number(amount).toFixed(2)} from ${address} through Coinbase (${signedAt}, ${nonce})`;
+
+/** A cash-out's nonce: 16 random bytes, as hex. */
+export const SELL_NONCE = /^[0-9a-f]{32}$/;
 
 /** The address, if the request is signed by its wallet within `within`; else why not. */
 export async function sellProblem(
-  q: { address?: unknown; signedAt?: unknown; signature?: unknown }, within: number, now = Date.now(),
+  q: { address?: unknown; signedAt?: unknown; signature?: unknown; nonce?: unknown; amount?: unknown }, within: number, now = Date.now(),
 ): Promise<string | null> {
   const address = typeof q.address === "string" ? q.address : "";
   const key = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address) ? unbase58(address) : null;
   if (!key || key.length !== 32) return "not a Solana address";
   const signedAt = Number(q.signedAt);
   if (!Number.isSafeInteger(signedAt) || Math.abs(now - signedAt) > within) return "the signature is too old";
-  return signedBy(key, q.signature, sellMessage(address, signedAt));
+  // An editor from before the nonce: its requests could be replayed, so they
+  // aren't taken. Updating the editor fixes it.
+  if (typeof q.nonce !== "string" || !SELL_NONCE.test(q.nonce)) return "update your Amply editor to cash out (this request has no nonce)";
+  const amount = Number(q.amount);
+  if (!(amount >= 1 && amount <= CASHOUT_MAX_USD) || Math.round(amount * 100) !== amount * 100) return "cash out at least $1, in whole cents";
+  return signedBy(key, q.signature, sellMessage(address, signedAt, q.nonce, amount));
 }
 
 /** Coinbase's reference for a wallet: a hash of it, not the wallet itself. */
 async function refOf(address: string): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(address)));
   return Array.from(digest.slice(0, 20), (x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+/** Coinbase's reference for one cash-out: a hash of the wallet and that
+ *  cash-out's nonce, so its transactions are that session's alone. */
+export const sellRefOf = (address: string, nonce: string) => refOf(`${address}:${nonce}`);
+
+/**
+ * Sell signatures already used to start a session, until they'd be too old
+ * anyway: a signature (sent in an address, so it may be seen) can't start a
+ * second session. Kept in this copy of the Worker, which Cloudflare may run
+ * several of: a short-lived bar, on top of the nonce binding the session.
+ */
+const usedSells = new Map<string, number>();
+function usedSell(signature: string, now: number): boolean {
+  const until = usedSells.get(signature);
+  return until !== undefined && until > now;
+}
+/** Marks the signature used; false if it already was (or the set is full). */
+export function firstUseOf(signature: string, now = Date.now()): boolean {
+  for (const [k, until] of usedSells) if (until <= now) usedSells.delete(k);
+  if (usedSells.has(signature)) return false;
+  if (usedSells.size >= 10_000) return false;   // under a flood, refuse rather than forget
+  usedSells.set(signature, now + 2 * SELL_SIGNED_WITHIN_MS);
+  return true;
 }
 
 /** A session token from Coinbase for this wallet, USDC on Solana, or why not. */
@@ -394,20 +432,25 @@ async function sessionToken(env: Env, address: string, clientIp: string | null, 
 export async function startCashout(env: Env, q: URLSearchParams, clientIp: string | null, now = Date.now()): Promise<{ url: string } | { status: number; error: string }> {
   if (!env.CDP_KEY_ID || !env.CDP_KEY_SECRET) return { status: 503, error: "Coinbase isn't set up here yet" };
   const address = q.get("address") || "";
-  const problem = await sellProblem({ address, signedAt: q.get("signedAt"), signature: q.get("signature") }, SELL_SIGNED_WITHIN_MS, now);
-  if (problem) return { status: 403, error: problem };
   const amount = Number(q.get("amount"));
   if (!(amount >= 1 && amount <= CASHOUT_MAX_USD) || Math.round(amount * 100) !== amount * 100) {
     return { status: 400, error: "cash out at least $1, in whole cents" };
   }
+  const nonce = q.get("nonce") || "";
+  const signature = q.get("signature") || "";
+  const problem = await sellProblem({ address, signedAt: q.get("signedAt"), signature, nonce, amount }, SELL_SIGNED_WITHIN_MS, now);
+  if (problem) return { status: 403, error: problem };
+  const reused = { status: 403, error: "this cash-out was already started; start again from your editor" };
+  if (usedSell(signature, now)) return reused;
   if (!(await onrampAllowed(env, `ip:${clientIp || "unknown"}`)) || !(await onrampAllowed(env, `addr:${address}`))) {
     return { status: 429, error: "too many requests; try again in a minute" };
   }
+  if (!firstUseOf(signature, now)) return reused;
   const session = await sessionToken(env, address, clientIp);
   if ("error" in session) return session;
   const p = new URLSearchParams({
     sessionToken: session.token,
-    partnerUserRef: await refOf(address),
+    partnerUserRef: await sellRefOf(address, nonce),
     redirectUrl: CASHOUT_RETURN,
     defaultNetwork: "solana",
     defaultAsset: "USDC",
@@ -424,14 +467,18 @@ export type CashoutState =
 /**
  * Where Coinbase is waiting for this wallet's USDC, once the artist has
  * pressed "Cash out now": its address and the exact amount. Read from
- * Coinbase's own record of the session, for a signed request only.
+ * Coinbase's own record of that one session (its reference carries the
+ * cash-out's nonce), for a signed request only. The editor sends only if the
+ * amount is what the artist asked for.
  */
 export async function cashoutStatus(env: Env, q: URLSearchParams, now = Date.now()): Promise<CashoutState | { status: number; error: string }> {
   if (!env.CDP_KEY_ID || !env.CDP_KEY_SECRET) return { status: 503, error: "Coinbase isn't set up here yet" };
   const address = q.get("address") || "";
-  const problem = await sellProblem({ address, signedAt: q.get("signedAt"), signature: q.get("signature") }, SELL_STATUS_WITHIN_MS, now);
+  const nonce = q.get("nonce") || "";
+  const problem = await sellProblem({ address, signedAt: q.get("signedAt"), signature: q.get("signature"), nonce, amount: q.get("amount") }, SELL_STATUS_WITHIN_MS, now);
   if (problem) return { status: 403, error: problem };
-  const path = `/onramp/v1/sell/user/${await refOf(address)}/transactions`;
+  // That session's transactions alone: its reference carries the nonce.
+  const path = `/onramp/v1/sell/user/${await sellRefOf(address, nonce)}/transactions`;
   const jwt = await coinbaseJwt(env.CDP_KEY_ID, env.CDP_KEY_SECRET, "GET", path, now);
   const res = await fetch(`https://${COINBASE_HOST}${path}?page_size=5`, { headers: { Authorization: `Bearer ${jwt}` } });
   const json = (await res.json().catch(() => null)) as { transactions?: Record<string, unknown>[] } | null;

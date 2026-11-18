@@ -74,13 +74,31 @@ export function topupUrl(address, { currency = "usdc", amount = null } = {}) {
 export const coinbaseSolPage = (address, amount, signedAt, signature) =>
   `${RELAY}/coinbase/sol?${new URLSearchParams({ address, amount: String(amount), signedAt: String(signedAt), signature })}`;
 
-/** What a payout wallet signs to cash out through Coinbase (the relay checks it). */
-export const sellMessage = (address, signedAt) =>
-  `Amply: cash out from ${address} through Coinbase (${signedAt})`;
+/** What a payout wallet signs to cash out through Coinbase (the relay checks
+ *  it): the amount, and this cash-out's own random nonce. */
+export const sellMessage = (address, signedAt, nonce, amount) =>
+  `Amply: cash out $${Number(amount).toFixed(2)} from ${address} through Coinbase (${signedAt}, ${nonce})`;
+
+/** A fresh nonce for one cash-out: 16 random bytes, as hex. */
+export const sellNonce = () =>
+  Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
 
 /** Coinbase's cash-out page for `amount` USDC from this wallet, opened from the editor. */
-export const coinbaseCashoutPage = (address, amount, signedAt, signature) =>
-  `${RELAY}/coinbase/sell?${new URLSearchParams({ address, amount: String(amount), signedAt: String(signedAt), signature })}`;
+export const coinbaseCashoutPage = (address, amount, signedAt, signature, nonce) =>
+  `${RELAY}/coinbase/sell?${new URLSearchParams({ address, amount: String(amount), signedAt: String(signedAt), signature, nonce })}`;
+
+/**
+ * Whether to send what Coinbase asks for, or why not. Coinbase's answer comes
+ * through the relay and the artist's node; the editor sends only exactly the
+ * amount the artist entered, to a Solana address.
+ */
+export function cashoutProblem(send, enteredMicros) {
+  if (!send || typeof send.to !== "string" || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(send.to)) return "Coinbase didn't give a Solana address to send to. Nothing was sent.";
+  if (!Number.isSafeInteger(send.micros) || send.micros !== enteredMicros) {
+    return `Coinbase is asking for $${(Number(send.micros) / 1e6).toFixed(2)}, not the $${(enteredMicros / 1e6).toFixed(2)} you entered. Nothing was sent; start again.`;
+  }
+  return null;
+}
 
 /**
  * Cash App can pay a Solana wallet straight from its dollar balance. There

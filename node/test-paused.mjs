@@ -242,5 +242,22 @@ rpcDown = false;
   ok("  a paid song playing free while payments are paused is still private", pausedPaid.status === 200 && /^private/.test(pausedPaid.headers.get("Cache-Control")), `${pausedPaid.status} ${pausedPaid.headers.get("Cache-Control")}`);
 }
 
+// ── a Coinbase cash-out's status, asked through the artist's node (A4) ──
+{
+  const { hashKey, PREVIEW_KEY } = await import("./src/preview-key.ts");
+  const KEY = "K".repeat(43);
+  await putSetting(DB, PREVIEW_KEY, JSON.stringify({ hash: await hashKey(KEY), until: clock + 30 * 60_000 }));
+  const realFetch = globalThis.fetch;
+  let asked = null;
+  globalThis.fetch = async (url) => { asked = new URL(String(url)); return new Response(JSON.stringify({ waiting: true })); };
+  const nonce = "0123456789abcdef0123456789abcdef";
+  const q = new URLSearchParams({ address: ADDRESS, signedAt: "123", signature: "sig", nonce, amount: "25" });
+  const res = await worker.fetch(new Request(`${ORIGIN}/manage/cashout/coinbase?${q}`, { headers: { Cookie: `amply_preview=${KEY}` } }), env);
+  globalThis.fetch = realFetch;
+  ok("the editor's cash-out check reaches the relay", res.status === 200 && asked?.pathname === "/coinbase/sell/status", `${res.status} ${asked}`);
+  ok("  with the cash-out's nonce and amount, so the relay finds that session alone",
+    asked?.searchParams.get("nonce") === nonce && asked?.searchParams.get("amount") === "25" && asked?.searchParams.get("signature") === "sig");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
