@@ -760,6 +760,10 @@ select { max-width: 100%; text-overflow: ellipsis; }
 
 /* Sending to a bank app from a Face ID wallet. */
 .send-form { display: grid; gap: 10px; margin: 10px 0 6px; max-width: 560px; }
+/* Where a Coinbase cash-out goes, shown before Face ID. */
+.cashout-confirm { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0; }
+.cashout-confirm dt { color: var(--ink3); font-size: 13px; font-family: var(--mono); }
+.cashout-confirm dd { margin: 0; }
 .send-amount { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .send-amount .money input { width: 8em; }
 .send-done { margin: 10px 0; }

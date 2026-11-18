@@ -43,6 +43,9 @@ export const SCHEMA = [
      last_seen INTEGER NOT NULL,
      blocked INTEGER NOT NULL DEFAULT 0
    )`,
+  // For pruneStale: finding wallets not heard from in a year without reading
+  // every row. A new index on an existing table, so nothing in it changes.
+  `CREATE INDEX IF NOT EXISTS listeners_by_last_seen ON listeners (last_seen)`,
   // Who has an active subscription, and until when. The listener's wallet,
   // Stripe's id for the subscription and for the customer — so it can be
   // checked with Stripe and cancelled through Stripe's page — and the
@@ -336,6 +339,25 @@ export async function pruneStale(db: D1Database, now = Date.now()): Promise<void
   await db.prepare("DELETE FROM listeners WHERE blocked = 0 AND last_seen < ?")
     .bind(now - KEEP_FOR).run();
   await forgetOwed(db);
+}
+
+/** When pruneStale last ran from listening (pruneHourly), in settings. */
+const PRUNED_AT = "pruned-at";
+const PRUNE_EVERY = 3_600_000;
+
+/**
+ * pruneStale, at most once an hour. Plays call this now and then, and the
+ * owed clean-up reads the whole table, so a burst of plays mustn't run it
+ * again and again: the time it last ran is kept in settings, and under an
+ * hour since, it does nothing. Returns whether it ran.
+ */
+export async function pruneHourly(db: D1Database, now = Date.now()): Promise<boolean> {
+  const last = Number(await setting(db, PRUNED_AT).catch(() => null)) || 0;
+  // A time in the future (a clock that jumped) doesn't stop it for ever.
+  if (last <= now && now - last < PRUNE_EVERY) return false;
+  await putSetting(db, PRUNED_AT, String(now));
+  await pruneStale(db, now);
+  return true;
 }
 
 /**

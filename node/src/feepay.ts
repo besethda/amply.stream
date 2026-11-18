@@ -22,8 +22,10 @@
  *         the artist's own manifest, with the fee wallet as rent payer and the
  *         USDC mint. Solana's own program checks the account it creates is
  *         that payee's real USDC account, so a listener can't substitute one;
- *       · a checked USDC transfer, signed by the listener, into one of those
- *         payee accounts;
+ *       · a checked USDC transfer, signed by the listener, into a payee's
+ *         own USDC account (worked out from their address), created in the
+ *         same transaction or not. Only payees in `mayOpen` (by default all)
+ *         may have theirs created;
  *   - for a purchase, one memo naming what was bought, exactly as the node
  *     expects it, signed by the listener alone; for listening, no memo;
  *   - the fee wallet appears nowhere else: not as a transfer's source or
@@ -38,7 +40,7 @@
  * it can be tested exhaustively; settle.ts does the rest.
  */
 import { shareOut } from "../../spec/pricing.mjs";
-import { isSigner, isWritable, u64, verifySignature, type Transaction } from "./solana-tx";
+import { isSigner, isWritable, tokenAccountOf, u64, verifySignature, type Transaction } from "./solana-tx";
 import { TOKEN_PROGRAM, ATA_PROGRAM, SYSTEM_PROGRAM, MEMO_PROGRAM } from "../../spec/chains.mjs";
 
 export { TOKEN_PROGRAM, ATA_PROGRAM, SYSTEM_PROGRAM, MEMO_PROGRAM };
@@ -58,6 +60,10 @@ export interface FeePayExpect {
    *  [destination, the artist's wallet], any amount goes to the destination,
    *  and at least `fee` to the artist, who is paying the network fee. */
   withdrawal?: { fee: number };
+  /** The payees whose USDC account this transaction may create at the fee
+   *  wallet's cost; by default all of them. A payee left out can still be
+   *  paid, into their existing account, but the transaction may not open it. */
+  mayOpen?: string[];
 }
 
 export type FeePayVerdict =
@@ -88,6 +94,21 @@ export async function checkFeePayment(tx: Transaction, expect: FeePayExpect): Pr
 
   // ── what it does ──
   const at = (i: number) => tx.accounts[i];
+  // Each payee's own USDC account, worked out here: a transfer may go into
+  // one whether or not this transaction creates it, so a payment into an
+  // account that exists needn't carry a create the fee wallet would pay for.
+  const usdcOf = new Map<string, string>();    // payee → their USDC account
+  const accountOf = new Map<string, string>(); // and back
+  try {
+    for (const p of payees) {
+      const a = await tokenAccountOf(p.address, mint, TOKEN_PROGRAM, ATA_PROGRAM);
+      usdcOf.set(p.address, a);
+      accountOf.set(a, p.address);
+    }
+  } catch {
+    return no("the artist's wallet list names something that isn't an address");
+  }
+  const mayOpen = new Set(expect.mayOpen ?? payees.map((p) => p.address));
   const created = new Map<string, string>();   // payee account → payee
   const paid = new Map<string, number>();      // payee → micros
   const uses = new Map<number, number>();      // fee wallet / listener appearances, checked below
@@ -108,7 +129,10 @@ export async function checkFeePayment(tx: Transaction, expect: FeePayExpect): Pr
       if (at(mintAt) !== mint) return no("that isn't USDC");
       if (at(system) !== SYSTEM_PROGRAM || at(token) !== TOKEN_PROGRAM) return no("creating a USDC account names the wrong programs");
       if (account < 2 || owner < 2) return no("a signer can't be a payee's account");
+      if (!mayOpen.has(at(owner))) return no("this payee's USDC account can't be opened at the fee wallet's cost here");
+      if (at(account) !== usdcOf.get(at(owner))) return no("that isn't the payee's own USDC account");
       if (created.has(at(account)) || [...created.values()].includes(at(owner))) return no("a payee's USDC account is created twice");
+      if (paid.has(at(owner))) return no("a payee's USDC account is created after they're paid");
       created.set(at(account), at(owner));
       uses.set(0, (uses.get(0) ?? 0) + 1);
       continue;
@@ -122,12 +146,12 @@ export async function checkFeePayment(tx: Transaction, expect: FeePayExpect): Pr
       if (authority !== 1) return no("the listener must sign their own payment");
       if (at(mintAt) !== mint) return no("that isn't USDC");
       if (source < 2) return no("a signer can't be a token account");
-      // Only into an account this transaction creates (or confirms) as a
-      // payee's: Solana's associated-token program won't accept one that
-      // isn't that payee's real USDC account.
-      const payee = created.get(at(dest));
+      // Only into a payee's own USDC account, worked out above from their
+      // address (and, where this transaction creates it, checked by Solana's
+      // associated-token program as well).
+      const payee = accountOf.get(at(dest));
       if (!payee) return no("a transfer goes somewhere that isn't a payee's USDC account");
-      if (created.has(at(source))) return no("a transfer can't come from a payee's account");
+      if (accountOf.has(at(source))) return no("a transfer can't come from a payee's account");
       if (paid.has(payee)) return no("a payee is paid twice");
       const micros = u64(ix.data, 1);
       if (micros <= 0) return no("a transfer of nothing");
@@ -159,7 +183,7 @@ export async function checkFeePayment(tx: Transaction, expect: FeePayExpect): Pr
   if (expect.memo !== undefined && memos !== 1) return no("a purchase must say what it bought");
 
   // Every account created is paid into: no paying rent for nothing.
-  if (paid.size !== created.size) return no("a USDC account is created without being paid");
+  for (const owner of created.values()) if (!paid.has(owner)) return no("a USDC account is created without being paid");
 
   // ── how much, and to whom ──
   const micros = [...paid.values()].reduce((a, b) => a + b, 0);

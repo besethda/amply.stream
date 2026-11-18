@@ -149,8 +149,8 @@ await refuses("a payee account in another token is refused",
 // ── paying the wrong people, or the wrong amounts ───────────────────────────
 await refuses("paying the thief's account is refused",
   [create(artist.publicKey), send(artist.publicKey, 70_000, { to: ata(thief.publicKey) }), create(friend.publicKey), send(friend.publicKey, 30_000)], {}, /isn't a payee/);
-await refuses("paying before the payee's account is confirmed is refused",
-  [send(artist.publicKey, 70_000), create(artist.publicKey), create(friend.publicKey), send(friend.publicKey, 30_000)], {}, /isn't a payee/);
+await refuses("creating a payee's account after paying them is refused",
+  [send(artist.publicKey, 70_000), create(artist.publicKey), create(friend.publicKey), send(friend.publicKey, 30_000)], {}, /created after/);
 await refuses("a different split is refused", honest(100_000).map((ix, i) =>
   i === 1 ? send(artist.publicKey, 80_000) : i === 3 ? send(friend.publicKey, 20_000) : ix), {}, /split/);
 await refuses("leaving out a collaborator is refused",
@@ -220,6 +220,37 @@ await refuses("an artist with no wallet is refused", honest(), { exp: { ...expec
     [create(dest), send(dest, 4_000_000, { from: fee.publicKey }), create(artist.publicKey), send(artist.publicKey, 50_000)], { exp: w }, /listener must sign/);
   await refuses("  sending SOL from the fee wallet on the side, refused",
     out(4_000_000, 50_000, [SystemProgram.transfer({ fromPubkey: fee.publicKey, toPubkey: thief.publicKey, lamports: 1e9 })]), { exp: w }, /doesn't need/);
+}
+
+// ── paying into accounts that exist, and opening only what's allowed (A3) ──
+{
+  // A payee's account that's already open is simply paid into: nothing for
+  // the fee wallet to pay rent on.
+  await accepts("paying into payees' existing USDC accounts, opening nothing, is accepted",
+    [send(artist.publicKey, 70_000), send(friend.publicKey, 30_000)]);
+  await accepts("  or opening one and paying into the other's",
+    [create(artist.publicKey), send(artist.publicKey, 70_000), send(friend.publicKey, 30_000)]);
+  await refuses("a payee's account that isn't their own USDC account is refused", [
+    create(artist.publicKey), send(artist.publicKey, 70_000),
+    new TransactionInstruction({ programId: new PublicKey(ATA_PROGRAM), data: create(friend.publicKey).data,
+      keys: create(friend.publicKey).keys.map((k, i) => (i === 1 ? { ...k, pubkey: ata(thief.publicKey) } : k)) }),
+    send(friend.publicKey, 30_000),
+  ], {}, /own USDC account/);
+
+  // A withdrawal: the destination's account may be opened only when the
+  // listener paid the node's new-account fee for it (`mayOpen`). Otherwise
+  // it could be closed between the node's look and the send, and the fee
+  // wallet would pay its rent each time.
+  const dest = Keypair.generate().publicKey;
+  const base = { ...expect, payees: [{ address: dest.toBase58() }, { address: artist.publicKey.toBase58() }], minMicros: 10_000, maxMicros: 10_000_000_000, withdrawal: { fee: 50_000 } };
+  const existing = { ...base, mayOpen: [artist.publicKey.toBase58()] };
+  await accepts("a withdrawal to an existing account, without opening it, is accepted",
+    [send(dest, 4_000_000), create(artist.publicKey), send(artist.publicKey, 50_000)], { exp: existing });
+  await refuses("  but one that also opens it, unpaid for, is refused",
+    [create(dest), send(dest, 4_000_000), create(artist.publicKey), send(artist.publicKey, 50_000)], { exp: existing }, /can't be opened/);
+  const opening = { ...base, withdrawal: { fee: 550_000 }, mayOpen: [dest.toBase58(), artist.publicKey.toBase58()] };
+  await accepts("  and with the new-account fee paid, opening it is accepted",
+    [create(dest), send(dest, 4_000_000), create(artist.publicKey), send(artist.publicKey, 550_000)], { exp: opening });
 }
 
 // ── a few facts the rules rest on ──────────────────────────────────────────

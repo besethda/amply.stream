@@ -673,21 +673,31 @@ async function stepAccess(ctx) {
   //   admits everyone   — dangerous. Anyone could sign in and take the
   //                       account over. Stop, and say how to fix it.
   //   admits nobody     — a lockout, not a risk. Add a rule for the artist.
-  //   cannot be read    — unknown, and not evidence of anything. Carry on; the
-  //                       node verifies the token's audience regardless.
+  //   cannot be read    — unknown, so it might admit everyone, and the node's
+  //                       check of the token's audience wouldn't help: anyone
+  //                       the app lets in gets a token with that audience.
+  //                       Stop, and say so plainly, rather than adopt it.
   if (existingApp) {
     const policies = await api(ctx, "GET", `/accounts/${accountId}/access/apps/${app.id}/policies`)
       .catch(() => null);
+    if (!Array.isArray(policies)) {
+      throw new ProvisionError(
+        "zt_policy_unreadable",
+        "Couldn't check who the sign-in rule protecting your editor lets in.",
+        "There is already an Access application for this address, and Cloudflare didn't say who it admits, so Amply won't use it: it could let anyone in. Run this again in a minute; if it keeps happening, delete the application in Zero Trust → Access → Applications and run this again, and Amply will make one that admits only you.",
+        { fatal: true },
+      );
+    }
 
     const admits = (rule) => (rule.decision === "allow" ? rule.include || [] : []);
-    const rules = (policies || []).flatMap(admits);
+    const rules = policies.flatMap(admits);
 
     // Only named email addresses are something setup can vouch for. Anything
     // else could be anybody: everyone, any one-time-PIN user, a whole email
     // domain, an IP range, a group. A bypass rule lets people in with no
     // sign-in at all. Either way, stop rather than adopt it.
     const vouched = (r) => Object.keys(r).length === 1 && typeof r.email?.email === "string";
-    const bypass = (policies || []).some((p) => p.decision === "bypass" || p.decision === "non_identity");
+    const bypass = policies.some((p) => p.decision === "bypass" || p.decision === "non_identity");
     if (bypass || !rules.every(vouched)) {
       throw new ProvisionError(
         "zt_policy_open",
@@ -700,7 +710,7 @@ async function stepAccess(ctx) {
     // Nothing admits this artist: add a rule rather than refusing, which is
     // the same thing setup does for an application it creates.
     const mine = rules.some((r) => r.email?.email?.toLowerCase() === ctx.email.toLowerCase());
-    if (policies && !mine) {
+    if (!mine) {
       await api(ctx, "POST", `/accounts/${accountId}/access/apps/${app.id}/policies`, {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

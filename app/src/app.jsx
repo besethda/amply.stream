@@ -259,8 +259,16 @@ export function App() {
       },
       onFinished(track, seconds) {
         // The song's own count, for the artist's "most played": nothing about
-        // who, so free tracks count too. Songs on this phone aren't anyone's.
-        if (track.id && /^https:/.test(track.url || "")) reportHeard(originOf(track.url), track.id, seconds);
+        // who is kept, so free tracks count too. A paid one is counted only
+        // with this wallet's pass. Songs on this phone aren't anyone's.
+        if (track.id && /^https:/.test(track.url || "")) {
+          const origin = originOf(track.url);
+          if (!track.needsWallet) reportHeard(origin, track.id, seconds);
+          else if (holder.current) {
+            tokenFor(holder.current, origin).catch(() => null)
+              .then((token) => token && reportHeard(origin, track.id, seconds, token));
+          }
+        }
         if (!track.needsWallet || !holder.current) return;
         // Listening that costs nothing isn't reported as listening owed for.
         const artist = library.current.find((e) => e.url === track.from);

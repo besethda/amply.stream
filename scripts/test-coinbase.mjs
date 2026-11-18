@@ -125,13 +125,17 @@ const call = (path, { method = "POST", body, env = configured, origin = ORIGIN, 
 {
   const app = await import("../app/src/topup.js");
   const relayMod = await import("../relay/src/index.ts");
-  ok("the editor signs exactly the words the relay checks to cash out", app.sellMessage(address, 99) === relayMod.sellMessage(address, 99));
-  const signed = async (signedAt = Date.now(), key) => ({ signedAt, signature: await signFor(relayMod.sellMessage(address, signedAt), key) });
-  const open = async ({ amount = 25, signedAt, signature, env = configured } = {}) => {
-    const s = await signed(signedAt);
-    const href = app.coinbaseCashoutPage(address, amount, s.signedAt, signature ?? s.signature);
+  const NONCE = app.sellNonce();
+  ok("the editor signs exactly the words the relay checks to cash out", app.sellMessage(address, 99, NONCE, 25) === relayMod.sellMessage(address, 99, NONCE, 25));
+  ok("  naming the amount and this cash-out's nonce", app.sellMessage(address, 99, NONCE, 25).includes("$25.00") && app.sellMessage(address, 99, NONCE, 25).includes(NONCE));
+  ok("  a fresh nonce each time, of the shape the relay takes", app.sellNonce() !== NONCE && relayMod.SELL_NONCE.test(NONCE));
+  const signed = async (signedAt = Date.now(), key, { nonce = app.sellNonce(), amount = 25 } = {}) =>
+    ({ signedAt, nonce, amount, signature: await signFor(relayMod.sellMessage(address, signedAt, nonce, amount), key) });
+  const open = async ({ amount = 25, signedAt, signature, env = configured, s: given, href: hrefGiven, signedAmount } = {}) => {
+    const s = given ?? await signed(signedAt, undefined, { amount: signedAmount ?? amount });
+    const href = hrefGiven ?? app.coinbaseCashoutPage(address, amount, s.signedAt, signature ?? s.signature, s.nonce);
     sent = [];
-    return relay.fetch(new Request(href.replace(app.RELAY, "https://relay.test"), { headers: { "CF-Connecting-IP": "203.0.113.4" } }), env);
+    return relay.fetch(new Request(href.replace(app.RELAY, "https://relay.test"), { headers: { "CF-Connecting-IP": `203.0.113.${Math.floor(Math.random() * 200) + 20}` } }), env);
   };
   reply = { status: 200, body: { token: "SELL-TOKEN" } };
   const res = await open();
@@ -144,6 +148,22 @@ const call = (path, { method = "POST", body, env = configured, origin = ORIGIN, 
   ok("  naming the wallet only by a hash", /^[0-9a-f]{40}$/.test(to.searchParams.get("partnerUserRef") || ""));
   const asked = JSON.parse(sent[0]?.init.body || "{}");
   ok("  Coinbase is asked for this wallet's USDC on Solana", asked.addresses?.[0]?.address === address && asked.assets?.join() === "USDC");
+  {
+    // Cloudflare's per-wallet limit is counted elsewhere; not what's tested here.
+    const unlimited = { ...configured, ONRAMP_LIMIT: { limit: async () => ({ success: true }) } };
+    const s = await signed();
+    reply = { status: 200, body: { token: "SELL-TOKEN" } };
+    const first = await open({ s, env: unlimited });
+    const ref = new URL(first.headers.get("Location")).searchParams.get("partnerUserRef");
+    const other = await signed();
+    const second = new URL((await open({ s: other, env: unlimited })).headers.get("Location")).searchParams.get("partnerUserRef");
+    ok("  a reference of its own for each cash-out (its nonce), not one per wallet", ref !== second && /^[0-9a-f]{40}$/.test(second));
+    const again = await open({ s, env: unlimited });
+    ok("the same signature can't start a second session", again.status === 403 && sent.length === 0, String(again.status));
+    const legacy = `https://relay.test/coinbase/sell?${new URLSearchParams({ address, amount: "25", signedAt: String(s.signedAt), signature: await signFor(`Amply: cash out from ${address} through Coinbase (${s.signedAt})`) })}`;
+    ok("a request from an editor before the nonce is refused", (await open({ href: legacy, env: unlimited })).status === 403 && sent.length === 0);
+    ok("a signature for another amount is refused", (await open({ amount: 25, signedAmount: 26, env: unlimited })).status === 403 && sent.length === 0);
+  }
 
   ok("an old signature is refused", (await open({ signedAt: Date.now() - 10 * 60_000 })).status === 403 && sent.length === 0);
   ok("someone else's signature is refused", (await open({ signature: (await signed(Date.now(), (await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign"])).privateKey)).signature })).status === 403);
@@ -152,11 +172,13 @@ const call = (path, { method = "POST", body, env = configured, origin = ORIGIN, 
   ok("without Amply's key it says Coinbase isn't set up", (await open({ env: bare })).status === 503);
 
   // Where to send, once the artist has pressed "Cash out now".
-  const status = async ({ signedAt = Date.now(), transactions = [], code = 200 } = {}) => {
-    const s = await signed(signedAt);
+  let lastStatusNonce = null;
+  const status = async ({ signedAt = Date.now(), transactions = [], code = 200, nonce } = {}) => {
+    const s = await signed(signedAt, undefined, nonce ? { nonce } : {});
+    lastStatusNonce = s.nonce;
     reply = { status: code, body: { transactions } };
     sent = [];
-    const r = await relay.fetch(new Request(`https://relay.test/coinbase/sell/status?${new URLSearchParams({ address, signedAt: String(s.signedAt), signature: s.signature })}`), configured);
+    const r = await relay.fetch(new Request(`https://relay.test/coinbase/sell/status?${new URLSearchParams({ address, signedAt: String(s.signedAt), signature: s.signature, nonce: s.nonce, amount: String(s.amount) })}`), configured);
     return { r, json: await r.json() };
   };
   const coinbaseAddress = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
@@ -165,6 +187,11 @@ const call = (path, { method = "POST", body, env = configured, origin = ORIGIN, 
   ok("Coinbase's waiting cash-out comes back as where and how much to send", r.status === 200 && json.send?.to === coinbaseAddress && json.send?.micros === 25_000_000, JSON.stringify(json));
   const call = sent[0];
   ok("  asked of Coinbase's sell transactions for this wallet's reference", /\/onramp\/v1\/sell\/user\/[0-9a-f]{40}\/transactions\?page_size=5$/.test(call?.url || ""), call?.url);
+  {
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${address}:${lastStatusNonce}`)));
+    const exact = Array.from(digest.slice(0, 20), (x) => x.toString(16).padStart(2, "0")).join("");
+    ok("  for exactly that cash-out's reference (wallet and nonce)", (call?.url || "").includes(`/sell/user/${exact}/`), call?.url);
+  }
   ok("  with a token for exactly that GET", (() => {
     const jwt = new Headers(call?.init.headers).get("Authorization")?.replace(/^Bearer /, "") || "";
     const claims = JSON.parse(new TextDecoder().decode(b64urlDecode(jwt.split(".")[1] || "")));
@@ -186,7 +213,21 @@ const call = (path, { method = "POST", body, env = configured, origin = ORIGIN, 
   ok("a signature over 45 minutes old can't ask", r.status === 403 && sent.length === 0);
   ({ r } = await status({ code: 500 }));
   ok("Coinbase not answering is passed on, not guessed", r.status === 502);
+  ({ r } = await (async () => {
+    reply = { status: 200, body: { transactions: [started] } };
+    sent = [];
+    const s = await signed();
+    const q = new URLSearchParams({ address, signedAt: String(s.signedAt), signature: s.signature, amount: "25" });
+    return { r: await relay.fetch(new Request(`https://relay.test/coinbase/sell/status?${q}`), configured) };
+  })());
+  ok("a status check without the nonce is refused, and Coinbase isn't asked", r.status === 403 && sent.length === 0);
   reply = { status: 200, body: { token: "SESSION-TOKEN" } };
+
+  // The editor sends only exactly what the artist entered, to a Solana address.
+  ok("the editor sends what Coinbase asks when it's the amount entered", app.cashoutProblem({ to: coinbaseAddress, micros: 25_000_000 }, 25_000_000) === null);
+  ok("  and refuses another amount", /\$30\.00, not the \$25\.00/.test(app.cashoutProblem({ to: coinbaseAddress, micros: 30_000_000 }, 25_000_000) || ""));
+  ok("  or an address that isn't Solana's", /Solana address/.test(app.cashoutProblem({ to: "0xabc", micros: 25_000_000 }, 25_000_000) || ""));
+  ok("  or anything when it doesn't know what was entered", app.cashoutProblem({ to: coinbaseAddress, micros: 25_000_000 }, undefined) !== null);
 }
 
 // ── the pieces ──────────────────────────────────────────────────────────────

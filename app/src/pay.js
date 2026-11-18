@@ -130,7 +130,9 @@ export async function sendDollarsOut(pair, destination, micros = "all", { nodes 
       const artistKey = addressOf(w.to, "This artist");
       const artistAccount = await getAssociatedTokenAddress(mint, artistKey, false, TOKEN_PROGRAM_ID);
       const tx = new Transaction();
-      tx.add(createAssociatedTokenAccountIdempotentInstruction(w.feePayer, toAccount, to, mint, TOKEN_PROGRAM_ID));
+      // The destination's account is opened only when it's missing, and paid
+      // for in the fee: the node refuses to open one that already exists.
+      if (!exists) tx.add(createAssociatedTokenAccountIdempotentInstruction(w.feePayer, toAccount, to, mint, TOKEN_PROGRAM_ID));
       tx.add(createTransferCheckedInstruction(from, mint, toAccount, pair.publicKey, amount - fee, 6, [], TOKEN_PROGRAM_ID));
       tx.add(createAssociatedTokenAccountIdempotentInstruction(w.feePayer, artistAccount, artistKey, mint, TOKEN_PROGRAM_ID));
       tx.add(createTransferCheckedInstruction(from, mint, artistAccount, pair.publicKey, fee, 6, [], TOKEN_PROGRAM_ID));

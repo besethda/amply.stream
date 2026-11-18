@@ -64,7 +64,7 @@ import { readTransaction, writeTransaction, base64, keyOf } from "../../node/src
 import { checkFeePayment } from "../../node/src/feepay.ts";
 import { SiteEditor } from "./site-editor.jsx";
 import { paymentsTo, mergePayments, usdcBalance, NETWORKS } from "./chain.js";
-import { coinbaseSolPage, coinbaseCashoutPage, sellMessage, topupUrl } from "../../app/src/topup.js";
+import { coinbaseSolPage, coinbaseCashoutPage, sellMessage, sellNonce, cashoutProblem, topupUrl } from "../../app/src/topup.js";
 
 const MAX_UPLOAD = 90 * 1024 * 1024;
 
@@ -1986,14 +1986,16 @@ function usePayments(payees, declared) {
     try {
       // Every address in the split, because a listener's payment is divided
       // between them: what the listener paid is the sum, not any one share.
+      let more = false;
       for (const address of addresses) {
         const kept = keptOf(address);
         const fresh = await paymentsTo(address, network, { until: kept?.newest || undefined, payees: addresses });
         keep(address, mergePayments(kept, fresh));
+        more ||= !!fresh.more;
       }
       const at = Date.now();
       try { localStorage.setItem(`${key}.at`, String(at)); } catch { /* fine */ }
-      setState({ ...combine(), at, network, busy: false });
+      setState({ ...combine(), at, network, busy: false, more });
     } catch (e) {
       setState((s) => ({ ...s, busy: false, error: e.message }));
     }
@@ -2247,7 +2249,7 @@ function Listeners({ api, paid, rate, settleAt }) {
               : paid.error
                 ? "Couldn't check payments just now. Try again with the arrow."
                 : paid.at
-                  ? `Payments checked at ${new Date(paid.at).toLocaleTimeString()}.`
+                  ? `Payments checked at ${new Date(paid.at).toLocaleTimeString()}.${paid.more ? " More to read: check again with the arrow." : ""}`
                   : "Payments not checked yet."}
         </span>
         <span class="reconcile-do">
@@ -2659,10 +2661,12 @@ function SendToBank({ api, payees, network, routeName }) {
 
 /**
  * Cashing out through Coinbase (Offramp). Face ID signs that the artist owns
- * the wallet; Coinbase's own page takes the amount and where the money goes
- * (bank or Coinbase balance); then Coinbase says where to send the USDC, read
- * through the artist's node, and Face ID sends exactly that. Coinbase holds
- * the request for 30 minutes after "Cash out now".
+ * the wallet, for this amount and a fresh nonce that ties Coinbase's session
+ * to this one cash-out; Coinbase's own page takes where the money goes (bank
+ * or Coinbase balance); then Coinbase says where to send the USDC, read
+ * through the artist's node. The editor shows that address and amount, and
+ * Face ID sends only if the amount is exactly what the artist entered.
+ * Coinbase holds the request for 30 minutes after "Cash out now".
  */
 function CoinbaseCashOut({ api, payees, network }) {
   const net = network === "devnet" ? "devnet" : "mainnet";
@@ -2686,9 +2690,12 @@ function CoinbaseCashOut({ api, payees, network }) {
       if (!alive) return;
       try {
         const s = signed.current;
-        const r = await api.cashoutStatus(s.address, s.signedAt, s.signature);
+        const r = await api.cashoutStatus(s.address, s.signedAt, s.signature, s.nonce, s.usd);
         if (!alive) return;
-        if (r.send) return setState({ send: r.send });
+        if (r.send) {
+          const problem = cashoutProblem(r.send, s.micros);
+          return setState(problem ? { error: problem } : { send: r.send });
+        }
         if (r.last === "success") return setState({ done: true });
       } catch { /* asked again below */ }
       delay = Math.min(delay * 1.5, 20_000);
@@ -2705,13 +2712,13 @@ function CoinbaseCashOut({ api, payees, network }) {
   async function sign() {
     setState({ busy: true, text: "Waiting for Face ID…" });
     try {
-      const signedAt = Date.now();
+      const signedAt = Date.now(), nonce = sellNonce();
       const s = await withPayoutKey(payees, async (seed, from) => ({
-        address: from, signedAt,
-        signature: base58(await signWithSeed(seed, new TextEncoder().encode(sellMessage(from, signedAt)))),
+        address: from, signedAt, nonce, usd, micros: Math.round(usd * 1e6),
+        signature: base58(await signWithSeed(seed, new TextEncoder().encode(sellMessage(from, signedAt, nonce, usd)))),
       }));
       signed.current = s;
-      setState({ signed: true, link: coinbaseCashoutPage(s.address, usd, s.signedAt, s.signature) });
+      setState({ signed: true, link: coinbaseCashoutPage(s.address, usd, s.signedAt, s.signature, s.nonce) });
     } catch (e) {
       setState(faceIdProblem(e));
     }
@@ -2719,6 +2726,9 @@ function CoinbaseCashOut({ api, payees, network }) {
 
   async function send() {
     const { to, micros } = state.send;
+    // Checked again right before Face ID: exactly what the artist entered.
+    const problem = cashoutProblem(state.send, signed.current?.micros);
+    if (problem) return setState({ error: problem });
     try {
       const signature = await sendFromPayoutWallet({ api, payees, net, dest: to, micros, step: (text) => setState({ send: state.send, busy: true, text }) });
       setState({ sent: true, usd: (micros / 1e6).toFixed(2), signature });
@@ -2739,6 +2749,10 @@ function CoinbaseCashOut({ api, payees, network }) {
     return (
       <div class="send-form">
         <p><b>Coinbase is ready for ${(state.send.micros / 1e6).toFixed(2)}.</b> Send within 30 minutes.</p>
+        <dl class="cashout-confirm">
+          <dt>Amount</dt><dd>${(state.send.micros / 1e6).toFixed(2)} USDC</dd>
+          <dt>To Coinbase at</dt><dd><code title={state.send.to}>{short(state.send.to)}</code></dd>
+        </dl>
         <button class="btn" disabled={state.busy} onClick={send}>{state.busy ? state.text : "Send with Face ID"}</button>
         {state.error && <p class="warn" role="alert">{state.error}</p>}
       </div>

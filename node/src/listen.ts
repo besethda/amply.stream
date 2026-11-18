@@ -65,6 +65,8 @@ export interface Introduction {
   ok: boolean;
   token?: string;
   why?: string;
+  /** Set when the refusal is "too many new wallets just now", not "never". */
+  busy?: boolean;
 }
 
 /**
@@ -104,6 +106,10 @@ export async function introduce(
   host: string,
   body: { address?: string; message?: string; signature?: string },
   now = Date.now(),
+  /** Asked for a wallet this node has no record of: whether one more may be
+   *  let in right now. A wallet costs nothing to make, so brand-new ones are
+   *  admitted only so fast (limits.ts, RULES.newListener). */
+  admitNew: () => Promise<boolean> = async () => true,
 ): Promise<Introduction> {
   const proof = await proveOwnership(host, body, now);
   if (!proof.ok) return { ok: false, why: proof.why };
@@ -111,6 +117,9 @@ export async function introduce(
 
   const known = await listener(db, address);
   if (known?.blocked) return { ok: false, why: "this artist has stopped serving this wallet" };
+  if (!known && !(await admitNew())) {
+    return { ok: false, busy: true, why: "too many new listeners right now; try again in a minute" };
+  }
 
   await seen(db, address, now);
   return { ok: true, token: await issueToken(db, address, now) };

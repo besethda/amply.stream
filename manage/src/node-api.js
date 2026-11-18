@@ -126,8 +126,8 @@ export function nodeApi() {
     },
 
     /** Where Coinbase is waiting for a cash-out: { waiting } | { send: { to, micros } } | { last }. */
-    async cashoutStatus(address, signedAt, signature) {
-      const q = new URLSearchParams({ address, signedAt: String(signedAt), signature });
+    async cashoutStatus(address, signedAt, signature, nonce, amount) {
+      const q = new URLSearchParams({ address, signedAt: String(signedAt), signature, nonce, amount: String(amount) });
       return (await req("GET", `/cashout/coinbase?${q}`)).json();
     },
 

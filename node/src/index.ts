@@ -24,7 +24,7 @@ import {
 } from "./preview-key";
 import { renderPage, renderPrivacy, pageCsp, pageWebManifest } from "./page";
 import {
-  setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale,
+  setting, putSetting, listeners, listener, setBlocked, counted, forget, remove, pruneStale, pruneHourly,
   subscribedUntil, pruneSubscriptions, heard, songTotals, playsToday,
 } from "./store";
 import { introduce, readToken, guardedKeys, masterKeys, proveOwnership } from "./listen";
@@ -38,7 +38,7 @@ import { cleanSite } from "../../spec/site.mjs";
 import { cashOutProblem, draftCashOut, CASHOUT_MIN_MICROS, CASHOUT_MAX_MICROS } from "./cashout";
 import { base64 } from "./solana-tx";
 import { TOKEN_PROGRAM, SYSTEM_PROGRAM, ATA_PROGRAM } from "./feepay";
-import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf, paused } from "../../spec/pricing.mjs";
+import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf, paused, needsWallet } from "../../spec/pricing.mjs";
 import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
 import { ICONS, MANIFEST_PATH, studioManifest, FAVICON, FAVICON_PATH } from "./studio";
 
@@ -57,6 +57,7 @@ export interface Env {
   LIMIT_MEDIA?: Limiter;
   LIMIT_WALLET?: Limiter;
   LIMIT_NEW?: Limiter;
+  LIMIT_HEARD?: Limiter;
 }
 
 const MANIFEST_KEY = "manifest";
@@ -103,6 +104,9 @@ function storedType(prefix: string, key: string): string {
 
 /** Audio and art are immutable once published; the manifest changes. */
 const CACHE_AUDIO = "public, max-age=31536000, immutable";
+/** Paid audio: the listener's own browser may keep it, but a shared cache
+ *  (a CDN, an office proxy) mustn't hand it to someone without a pass. */
+const CACHE_AUDIO_PAID = "private, max-age=31536000, immutable";
 const CACHE_ART = "public, max-age=86400";
 const CACHE_MANIFEST = "public, max-age=300, must-revalidate";
 
@@ -504,7 +508,10 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     const q = new URL(request.url).searchParams;
     const pay = walletOf(await manifestNowOf(env));
     if (!pay?.recipients.some((r) => r.address === q.get("address"))) return fail(400, "that isn't one of your payout wallets");
-    const ask = new URLSearchParams({ address: q.get("address") || "", signedAt: q.get("signedAt") || "", signature: q.get("signature") || "" });
+    const ask = new URLSearchParams({
+      address: q.get("address") || "", signedAt: q.get("signedAt") || "", signature: q.get("signature") || "",
+      nonce: q.get("nonce") || "", amount: q.get("amount") || "",
+    });
     const res = await fetch(`${RELAY_ORIGIN}/coinbase/sell/status?${ask}`).catch(() => null);
     const body = res ? await res.text() : JSON.stringify({ error: "Coinbase couldn't be reached" });
     return new Response(body, { status: res?.status ?? 502, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
@@ -834,6 +841,11 @@ async function feeOffer(env: Env, ctx?: ExecutionContext): Promise<{ feePayer: s
   };
 }
 
+/** Stripe's trouble, as a listener hears it. What Stripe said is about the
+ *  artist's own account (a missing permission, an inactive key) and is the
+ *  artist's to see in their editor, not every listener's. */
+const stripeTrouble = () => fail(502, "Couldn't confirm that with Stripe; try again");
+
 /** Everything a listener can do without being the artist. */
 async function handleListen(request: Request, env: Env, path: string, ctx?: ExecutionContext): Promise<Response | null> {
   const host = new URL(request.url).host;
@@ -845,8 +857,12 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
   if (path === "/token" && request.method === "POST") {
     const body = await jsonBody(request);
     if (!body) return fail(400, "bad request");
-    const result = await introduce(env.DB, host, body as never);
-    if (!result.ok) return fail(403, result.why || "refused");
+    // A wallet this node hasn't seen counts against the cap on brand-new
+    // listeners here, where its pass is issued, not only at its first play:
+    // made-up wallets otherwise get passes (and paid audio) without end.
+    const result = await introduce(env.DB, host, body as never, Date.now(),
+      () => allow(env as never, RULES.newListener, host));
+    if (!result.ok) return result.busy ? tooMany(withCors(new Headers())) : fail(403, result.why || "refused");
 
     // Whether they have paid for a subscription, so their app knows not to
     // charge them by the minute as well. And where a subscription is the only
@@ -923,10 +939,11 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (to === offer.feePayer || pay.recipients.some((r) => r.address === to)) return fail(400, "that address can't be sent to this way");
     const rpc = rpcAt(chain.rpc);
     let fee = WITHDRAW_FEE_MICROS;
+    let opensDestination = false;
     try {
       const ata = await tokenAccountOf(to, chain.mint, TOKEN_PROGRAM, ATA_PROGRAM);
       const info = await rpc("getAccountInfo", [ata, { encoding: "base64", commitment: "confirmed" }]);
-      if (!info?.value) fee += NEW_ACCOUNT_FEE_MICROS;
+      if (!info?.value) { fee += NEW_ACCOUNT_FEE_MICROS; opensDestination = true; }
     } catch {
       return fail(502, "couldn't reach the network; nothing was sent");
     }
@@ -935,11 +952,17 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
       payees: [{ address: to }, { address: offer.withdraw.to }],
       minMicros: 10_000, maxMicros: 10_000_000_000,
       withdrawal: { fee },
+      // The destination's account may be opened only when the listener is
+      // paying for that (it was missing just now): otherwise it could be
+      // closed between that look and the send, and the fee wallet would pay
+      // its rent, again and again. Existing, it's simply paid into.
+      mayOpen: opensDestination ? [to, offer.withdraw.to] : [offer.withdraw.to],
     }, {
       allowed: async (who) => !!(await listener(env.DB, who)) && allow(env as never, RULES.wallet, `${host}|withdraw|${who}`),
-      // The destination's account is paid for by the listener's fee; only the
-      // artist's own is opened once at most.
-      openOnce: [offer.withdraw.to],
+      // Each opened at most once by the fee wallet: the artist's own, and a
+      // destination opened for a listener, so neither can be closed for its
+      // rent and reopened at the fee wallet's cost.
+      openOnce: [offer.withdraw.to, to],
     });
     if (!result.ok) return fail(result.status, result.why);
     return json({ signature: result.signature, confirmed: result.confirmed });
@@ -958,7 +981,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
       const until = await subscribedUntil(env.DB, proof.address);
       return json({ outcome, subscribedUntil: until });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
 
@@ -986,7 +1009,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
       const sale = await recordSale(env.DB, { ref: c.ref, item: c.item, buyer: proof.address, gift: body.gift === true, via: "card" });
       return json({ outcome: "recorded", ...saleView(sale, proof.address) });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
 
@@ -1085,7 +1108,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
       if (!url) return fail(404, "no subscription to manage here");
       return json({ url });
     } catch (e) {
-      return fail(502, e instanceof StripeError ? e.message : "Stripe didn't answer");
+      return stripeTrouble();
     }
   }
 
@@ -1116,23 +1139,45 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     perMinute = subscribed ? 0 : Math.max(0, Number(wallet?.ratePerMinute) || 0);
     await counted(env.DB, who, Number(body?.seconds) || 0, Date.now(), perMinute);
     // Now and then, clear out wallets not heard from in a year. Here rather
-    // than on a timer, so there is nothing for an artist to set up.
-    if (Math.random() < 0.02) await pruneStale(env.DB);
+    // than on a timer, so there is nothing for an artist to set up; and at
+    // most hourly, since it reads the whole table (pruneHourly).
+    if (Math.random() < 0.02) await pruneHourly(env.DB).catch(() => {});
     return new Response(null, { status: 204, headers: noStore() });
   }
 
   // A song finished playing: counted for the song, by nobody in particular.
-  // No wallet, no token, nothing about who: free tracks count too. Only a
-  // track on the published page is counted, so made-up names can't fill the
-  // table, and each address can only report so fast (limits.ts).
+  // Nothing about who is recorded. Each report is two writes to the artist's
+  // database, whose daily allowance everything else needs too, so: a paid
+  // track is counted only with a listener's pass, at most as fast as songs
+  // end, per wallet and per address; a track anyone may hear can be reported
+  // without one, but only a few times a minute per address (limits.ts). Only
+  // a track on the published page is counted, so made-up names can't fill the
+  // table. Over a limit the play just isn't counted: nothing goes wrong for
+  // the listener.
   if (path === "/heard" && request.method === "POST") {
+    const nothing = () => new Response(null, { status: 204, headers: noStore() });
     const body = await jsonBody(request);
-    const track = String(body?.track || "");
+    const trackId = String(body?.track || "");
     const seconds = Number(body?.seconds) || 0;
-    const manifest = await manifestNowOf(env) as { releases?: { tracks?: { id: string }[] }[] } | null;
-    const known = (manifest?.releases || []).some((r) => (r.tracks || []).some((t) => t.id === track));
-    if (known && seconds >= 30) await heard(env.DB, track, seconds).catch(() => {});
-    return new Response(null, { status: 204, headers: noStore() });
+    if (seconds < 30) return nothing();
+    // As listeners get it: while payments are paused, paid songs play free.
+    let manifest: unknown = null;
+    try { manifest = JSON.parse((await listenerText(env)) || "null"); } catch { return nothing(); }
+    type Track = { id?: string; url?: string; free?: boolean; needsWallet?: boolean };
+    const track = ((manifest as { releases?: { tracks?: Track[] }[] } | null)?.releases || [])
+      .flatMap((r) => r.tracks || []).find((t) => t?.id === trackId);
+    if (!track) return nothing();
+    const from = request.headers.get("CF-Connecting-IP") || "unknown";
+    const who = await whoIsAsking(request, env);
+    if (who) {
+      if (!(await allow(env as never, RULES.wallet, `${host}|heard|${who}`))) return nothing();
+      if (!(await allow(env as never, RULES.wallet, `${host}|heard-from|${from}`))) return nothing();
+    } else {
+      if (needsWallet(manifest, track)) return nothing();
+      if (!(await allow(env as never, RULES.heard, `${host}|${from}`))) return nothing();
+    }
+    await heard(env.DB, trackId, seconds).catch(() => {});
+    return nothing();
   }
 
   // A listener holds their key, so they can prove a row is theirs and have it
@@ -1340,6 +1385,18 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
       const who = await whoIsAsking(request, env);
       if (!who) {
         return fail(401, "this track is for listeners who have said who they are");
+      }
+      return serveObject(env, request, key, CACHE_AUDIO_PAID, "audio/mpeg");
+    }
+    // Free right now only because payments are paused: still the artist's
+    // paid music, and kept for a year, so not left in shared caches to be
+    // served free once payments are back on.
+    // (The stored manifest's reading is cached too: derive() keeps it.)
+    const own = await manifestText(env).catch(() => null);
+    if (own && view && own !== view.text) {
+      const stored = derive(own);
+      if (stored.parsed !== undefined && guardedOf(stored).has(key.slice("audio/".length))) {
+        return serveObject(env, request, key, CACHE_AUDIO_PAID, "audio/mpeg");
       }
     }
 

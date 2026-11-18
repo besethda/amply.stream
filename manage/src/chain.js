@@ -87,8 +87,15 @@ async function rpcBatch(url, calls) {
  * a note (amply:buy:…, amply:tip:…), and a listener sending their own money
  * out pays the artist a small fee in a transfer that also pays someone who
  * isn't a payee. Those are counted apart, as `other`.
+ *
+ * At most `most` transactions are read in one look, oldest first, so a
+ * wallet sent thousands of junk "dust" transfers doesn't keep Earnings busy
+ * for minutes: `newest` is then the newest one read, `more` is true, and the
+ * next look carries on from there. (Before reading one, nothing says whether
+ * it pays a payee in USDC — a signature's listing has no amounts — so junk
+ * can't be skipped earlier without risking skipping a real payment.)
  */
-export async function paymentsTo(address, networkName = "devnet", { until, payees = [address], mint, pageSize = 1000 } = {}) {
+export async function paymentsTo(address, networkName = "devnet", { until, payees = [address], mint, pageSize = 1000, most = MOST_IN_ONE_LOOK } = {}) {
   const net = NETWORKS[networkName];
   if (!net) throw new Error("No such network.");
   const none = { byWallet: {}, total: 0, count: 0, newest: until || null };
@@ -113,9 +120,12 @@ export async function paymentsTo(address, networkName = "devnet", { until, payee
     before = page[page.length - 1].signature;
     await wait(150);
   }
-  const newest = found[0]?.signature || until || null;
-  const wanted = found.filter((s) => !s.err).map((s) => s.signature);
-  if (!wanted.length) return { ...none, newest };
+  const newestSeen = found[0]?.signature || until || null;
+  const succeeded = found.filter((s) => !s.err).map((s) => s.signature);   // newest first
+  if (!succeeded.length) return { ...none, newest: newestSeen };
+  const more = succeeded.length > most;
+  const wanted = more ? succeeded.slice(-most) : succeeded;
+  const newest = more ? wanted[0] : newestSeen;
 
   const byWallet = {};
   let total = 0;
@@ -170,8 +180,11 @@ export async function paymentsTo(address, networkName = "devnet", { until, payee
     }
   }
 
-  return { byWallet, total, count, checked: wanted.length, newest };
+  return { byWallet, total, count, checked: wanted.length, newest, more };
 }
+
+/** How many transactions one look reads per address (paymentsTo). */
+export const MOST_IN_ONE_LOOK = 5_000;
 
 /** One wallet's payments, added to another's. */
 export function addPaid(a, b) {
