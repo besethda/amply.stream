@@ -3033,12 +3033,13 @@ async function handleManage(request, env, path) {
     }
     const chain = CHAINS[network] || CHAINS.solana;
     const lamports = await feeBalance(rpcAt(chain.rpc), address, { fresh: true }).catch(() => null);
-    const today = await env.DB.prepare("SELECT count FROM fee_days WHERE day = ?").bind((/* @__PURE__ */ new Date()).toISOString().slice(0, 10)).first().catch(() => null);
+    const offering = walletOf(await manifestNowOf(env)) ? !!await feeOffer(env).catch(() => null) : lamports !== null && lamports >= OFFER_ABOVE_LAMPORTS;
+    const today = await env.DB.prepare("SELECT count FROM fee_days WHERE day = ?").bind(dayKey("pay", Date.now())).first().catch(() => null);
     return new Response(JSON.stringify({
       address,
       network,
       lamports,
-      offering: lamports !== null && lamports >= OFFER_ABOVE_LAMPORTS,
+      offering,
       offerAbove: OFFER_ABOVE_LAMPORTS,
       paidToday: today?.count ?? 0,
       dailyCap: DAILY_PAYMENTS

@@ -148,6 +148,28 @@ rpcDown = false;
   ok("  the same one as amply.stream's", body === readFileSync("site/favicon.svg", "utf8").trim());
 }
 
+// ── the editor's fees status says what listeners see ──
+{
+  const { PREVIEW_KEY, hashKey } = await import("./src/preview-key.ts");
+  const { countFee } = await import("./src/settle.ts");
+  const KEY = "A".repeat(42) + "w";
+  const fees = async () => (await get("/manage/fees", { Cookie: `amply_preview=${KEY}` })).json();
+  lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
+  later(24 * 60);   // another day, by the Worker's clock
+  await putSetting(DB, PREVIEW_KEY, JSON.stringify({ hash: await hashKey(KEY), until: clock + 30 * 60_000 }));
+  await countFee(DB, Date.now());
+  const on = await fees();
+  ok("the editor's fees status: on while listeners are offered it", on.offering === true && (await served()).paused === undefined, JSON.stringify(on));
+  ok("  and today's count is the day the fees were counted under", on.paidToday === 1, JSON.stringify(on));
+  // A payee that is the fees account itself: listeners aren't offered it.
+  const feeWallet = await feeAddress(DB);
+  await putSetting(DB, "manifest", JSON.stringify({ ...manifest, payment: [{ ...manifest.payment[0], address: feeWallet }] }));
+  later(1);   // past the brief cache
+  ok("  a payee that's the fees account: off in the editor, as for listeners", (await fees()).offering === false && (await served()).paused === true);
+  await putSetting(DB, "manifest", stored);
+  later(1);
+}
+
 // ── Solana not answering at all, with no balance known ──
 {
   later(61);   // anything known is over an hour old: nobody can say

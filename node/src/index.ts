@@ -28,7 +28,7 @@ import { introduce, readToken, guardedKeys, masterKeys, proveOwnership } from ".
 import { challenge } from "./identity";
 import { handleEvent, connect, disconnect, publicView, portalFor, connectionOf, claim, refresh, StripeError, setSales, claimSale, refundedSale } from "./stripe";
 import { recordSale, purchasesOf, downloadsOf, redeem, takeDownload, claimWalletSale, itemFor, CHAINS, type Sale } from "./sales";
-import { settle, feeAddress, feeBalance, feeOnrampSignature, rpcAt, BALANCE_TIMEOUT_MS, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS, WITHDRAW_FEE_MICROS, NEW_ACCOUNT_FEE_MICROS } from "./settle";
+import { settle, feeAddress, feeBalance, feeOnrampSignature, rpcAt, BALANCE_TIMEOUT_MS, dayKey, OFFER_ABOVE_LAMPORTS, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS, DAILY_PAYMENTS, WITHDRAW_FEE_MICROS, NEW_ACCOUNT_FEE_MICROS } from "./settle";
 import { tokenAccountOf, keyOf } from "./solana-tx";
 import { purchaseMemo, tipMemo, TIP_MIN_MICROS, TIP_MAX_MICROS } from "./payment-check";
 import { cleanSite } from "../../spec/site.mjs";
@@ -497,10 +497,16 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     try { network = walletOf(text ? JSON.parse(text) : null)?.network || network; } catch { /* default */ }
     const chain = CHAINS[network] || CHAINS.solana;
     const lamports = await feeBalance(rpcAt(chain.rpc), address, { fresh: true }).catch(() => null);
+    // Once a payout wallet is published, "on" is exactly what listeners are
+    // offered (feeOffer, reading the balance just asked for). Before, there's
+    // nothing to offer yet, so it's whether the fees account holds enough.
+    const offering = walletOf(await manifestNowOf(env))
+      ? !!(await feeOffer(env).catch(() => null))
+      : lamports !== null && lamports >= OFFER_ABOVE_LAMPORTS;
     const today = await env.DB.prepare("SELECT count FROM fee_days WHERE day = ?")
-      .bind(new Date().toISOString().slice(0, 10)).first<{ count: number }>().catch(() => null);
+      .bind(dayKey("pay", Date.now())).first<{ count: number }>().catch(() => null);
     return new Response(JSON.stringify({
-      address, network, lamports, offering: lamports !== null && lamports >= OFFER_ABOVE_LAMPORTS,
+      address, network, lamports, offering,
       offerAbove: OFFER_ABOVE_LAMPORTS, paidToday: today?.count ?? 0, dailyCap: DAILY_PAYMENTS,
     }), { status: 200, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }) });
   }

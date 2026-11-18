@@ -35,7 +35,9 @@ export const DAILY_PAYMENTS = 1_000;
 export const DAILY_SENDS = 50;
 
 export type FeeKind = "pay" | "send";
-const dayKey = (kind: FeeKind, now: number) => {
+/** The fee_days row a day's fees of this kind are counted under (the
+ *  editor's fees status reads the same one). */
+export const dayKey = (kind: FeeKind, now: number) => {
   const day = new Date(now).toISOString().slice(0, 10);
   return kind === "send" ? `send:${day}` : day;
 };
