@@ -2837,6 +2837,7 @@ function HomeTab({ api, manifest, payees, rate, settleAt, network, live, onGo })
 
 /** Which app the artist cashes out to; only steers which steps are shown. */
 const VIA_KEY = "amply.editor.payout-via";
+const NOT_PAID_HIDDEN = "amply.editor.not-paid-hidden";
 const readVia = () => { try { return localStorage.getItem(VIA_KEY); } catch { return null; } };
 
 /**
@@ -3554,6 +3555,9 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
   // The fees account must be on before a per-minute price is first published.
   // Once it's live it stays, so publishing a song never makes music free.
   const [feesOn, setFeesOn] = useState(null);
+  // The artist said they understand: kept in this browser, and not shown again.
+  const [notPaidHidden, setNotPaidHidden] = useState(() => { try { return localStorage.getItem(NOT_PAID_HIDDEN) === "1"; } catch { return false; } });
+  const hideNotPaid = () => { setNotPaidHidden(true); try { localStorage.setItem(NOT_PAID_HIDDEN, "1"); } catch { /* hidden for now */ } };
   useEffect(() => { api?.fees?.().then((f) => setFeesOn(!!f.offering)).catch(() => {}); }, [api]);
   // While it's off, look again every minute: money sent to it shows up here
   // by itself, and the warning below goes.
@@ -3799,10 +3803,11 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
           )}
           {/* Fans can't pay until the fees account pays their network fee, so
               until then they listen free. Said everywhere, until it's fixed. */}
-          {feesOn === false && (wasLive || payees.some((p) => p.address)) && (
-            <div class="banner error" role="alert">
+          {feesOn === false && (wasLive || payees.some((p) => p.address)) && !notPaidHidden && (
+            <div class="banner error not-paid" role="alert">
               <span><b>You're not getting paid.</b> Songs are free until you set up your transaction fees to let listeners pay you.</span>
               <button class="link" onClick={() => { setTab("earnings"); setTimeout(() => document.getElementById("fees")?.scrollIntoView({ behavior: "smooth" }), 50); }}>Add $5</button>
+              <button class="link dismiss" onClick={hideNotPaid}>I understand. Don't show this again.</button>
             </div>
           )}
           {!editorBehind && isNewer(newer, version) && !updateHidden && (
