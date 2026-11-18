@@ -239,28 +239,56 @@ async function manifestText(env: Env): Promise<string | null> {
 }
 
 /**
+ * A manifest's text, worked out once: parsed (undefined if it isn't JSON),
+ * and, when the audio route first asks, which files need a wallet and which
+ * are originals kept for downloads. Kept for the text it came from, so a
+ * page, a manifest and every ranged audio request share one parse.
+ */
+interface Derived { text: string; parsed: unknown; guarded?: Set<string>; masters?: Set<string> }
+let derivedStored: Derived | null = null;
+let derivedPaused: { source: string; view: Derived } | null = null;
+
+function derive(text: string): Derived {
+  if (derivedStored?.text === text) return derivedStored;
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { parsed = undefined; }
+  return (derivedStored = { text, parsed });
+}
+const guardedOf = (d: Derived) => (d.guarded ??= guardedKeys(d.parsed));
+const mastersOf = (d: Derived) => (d.masters ??= masterKeys(d.parsed));
+
+/**
  * The manifest as listeners get it. While the fees account can't pay fans'
  * network fees, the USDC price is marked `paused` (spec/pricing.mjs): fans
  * can't pay it, so it charges nothing, and the music it made paid plays free.
  * The artist's stored copy is never changed; only what's served. Every route
  * a listener reaches reads this, so the page, the audio and the app agree.
  */
-async function listenerText(env: Env, ctx?: ExecutionContext): Promise<string | null> {
+async function listenerView(env: Env, ctx?: ExecutionContext): Promise<Derived | null> {
   const text = await manifestText(env);
   if (text === null) return null;
-  let manifest: { payment?: Record<string, unknown>[] };
-  try { manifest = JSON.parse(text); } catch { return text; }
+  const stored = derive(text);
+  if (stored.parsed === undefined) return stored;
+  const manifest = stored.parsed as { payment?: Record<string, unknown>[] } | null;
   const at = (manifest?.payment || []).findIndex((p) => p?.type === "solana-usdc");
-  if (at < 0) return text;
-  if (await feeOffer(env, ctx).catch(() => null)) return text;
-  manifest.payment![at] = { ...manifest.payment![at], paused: true };
-  return JSON.stringify(manifest);
+  if (at < 0) return stored;
+  if (await feeOffer(env, ctx).catch(() => null)) return stored;
+  if (derivedPaused?.source !== text) {
+    const copy = { ...manifest, payment: manifest!.payment!.map((p, i) => (i === at ? { ...p, paused: true } : p)) };
+    derivedPaused = { source: text, view: { text: JSON.stringify(copy), parsed: copy } };
+  }
+  return derivedPaused.view;
+}
+
+async function listenerText(env: Env, ctx?: ExecutionContext): Promise<string | null> {
+  return (await listenerView(env, ctx))?.text ?? null;
 }
 
 /** Whether this node is taking USDC payments right now. */
 async function takingPayments(env: Env, ctx?: ExecutionContext): Promise<boolean> {
-  const text = await listenerText(env, ctx);
-  try { return !paused(text ? JSON.parse(text) : null); } catch { return false; }
+  const view = await listenerView(env, ctx);
+  if (!view) return true;
+  return view.parsed !== undefined && !paused(view.parsed);
 }
 
 async function serveManifest(env: Env, ctx?: ExecutionContext): Promise<Response> {
@@ -775,7 +803,7 @@ async function whoIsAsking(request: Request, env: Env): Promise<string | null> {
 /** Everything a listener can do without being the artist. */
 async function manifestNowOf(env: Env): Promise<unknown> {
   const text = await manifestText(env);
-  try { return text ? JSON.parse(text) : null; } catch { return null; }
+  return text ? derive(text).parsed ?? null : null;
 }
 
 /** What this node offers to pay network fees for, or null. Only for an
@@ -822,9 +850,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     // Checked with Stripe when due — a renewal, or once a day — else as known.
     const until = await refresh(env.DB, address).catch(() => subscribedUntil(env.DB, address));
     const subscribed = until !== null && until > Date.now();
-    const text = await listenerText(env, ctx);
-    let manifest: unknown = null;
-    try { manifest = text ? JSON.parse(text) : null; } catch { /* treated as nothing offered */ }
+    const manifest = (await listenerView(env, ctx))?.parsed ?? null;   // unreadable: treated as nothing offered
     if (!subscribed && subscriptionOnly(manifest)) {
       return fail(402, "subscribe to hear this artist's paid tracks");
     }
@@ -953,10 +979,6 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
   const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
     status, headers: noStore({ "Content-Type": "application/json; charset=utf-8" }),
   });
-  const manifestNow = async (): Promise<unknown> => {
-    const text = await manifestText(env);
-    try { return text ? JSON.parse(text) : null; } catch { return null; }
-  };
 
   // Back from Stripe's checkout for a song or an album.
   if (path === "/buy/claim" && request.method === "POST") {
@@ -981,7 +1003,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (!body) return fail(400, "bad request");
     const proof = await proveOwnership(host, body as never);
     if (!proof.ok) return fail(403, proof.why);
-    const r = await claimWalletSale(env.DB, await manifestNow(), {
+    const r = await claimWalletSale(env.DB, await manifestNowOf(env), {
       wallet: proof.address, signature: String(body.tx || ""), item: String(body.item || ""), gift: body.gift === true, host,
     });
     if (!r.ok) return json({ outcome: r.retry ? "pending" : "refused", error: r.why }, r.retry ? 200 : 403);
@@ -1022,7 +1044,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (!body) return fail(400, "bad request");
     const proof = await proveOwnership(host, body as never);
     if (!proof.ok) return fail(403, proof.why);
-    const manifest = await manifestNow() as { releases?: { tracks?: { id: string; title: string; url: string; master?: string }[] }[] } | null;
+    const manifest = await manifestNowOf(env) as { releases?: { tracks?: { id: string; title: string; url: string; master?: string }[] }[] } | null;
     const trackId = String(body.track || "");
     const track = (manifest?.releases || []).flatMap((r) => r.tracks || []).find((t) => t.id === trackId);
     if (!track) return fail(404, "no such song");
@@ -1098,10 +1120,9 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     const until = await subscribedUntil(env.DB, who).catch(() => null);
     const subscribed = until !== null && until > Date.now();
     let perMinute = 0;
-    try {
-      const wallet = (JSON.parse((await manifestText(env)) || "{}")?.payment || []).find((p: { type?: string }) => p?.type === "solana-usdc");
-      perMinute = subscribed ? 0 : Math.max(0, Number(wallet?.ratePerMinute) || 0);
-    } catch { /* unpriced */ }
+    const priced = (await manifestNowOf(env)) as { payment?: { type?: string; ratePerMinute?: unknown }[] } | null;
+    const wallet = (priced?.payment || []).find((p) => p?.type === "solana-usdc");
+    perMinute = subscribed ? 0 : Math.max(0, Number(wallet?.ratePerMinute) || 0);
     await counted(env.DB, who, Number(body?.seconds) || 0, Date.now(), perMinute);
     // Now and then, clear out wallets not heard from in a year. Here rather
     // than on a timer, so there is nothing for an artist to set up.
@@ -1239,14 +1260,10 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
         && await previewSession(request, readPreviewKey(await setting(env.DB, PREVIEW_KEY)))) {
       return new Response(null, { status: 302, headers: noStore({ Location: "/manage" }) });
     }
-    const body = await listenerText(env, ctx);
-    if (body === null) return fail(404, "no manifest published yet");
-    let manifest: unknown;
-    try {
-      manifest = JSON.parse(body);
-    } catch {
-      return fail(500, "manifest is not valid JSON");
-    }
+    const view = await listenerView(env, ctx);
+    if (view === null) return fail(404, "no manifest published yet");
+    if (view.parsed === undefined) return fail(500, "manifest is not valid JSON");
+    const manifest = view.parsed;
     const nonce = crypto.randomUUID().replace(/-/g, "");
     const headers = withCors(new Headers({
       "Content-Type": "text/html; charset=utf-8",
@@ -1335,21 +1352,16 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
     // Paid tracks are served only to a listener who has said who they are.
     // Everything else is served to anyone, and that default is what keeps a
     // shared link working.
-    const manifest = await listenerText(env, ctx);
-    let guarded = new Set<string>();
-    let masters = new Set<string>();
-    try {
-      if (manifest) { const m = JSON.parse(manifest); guarded = guardedKeys(m); masters = masterKeys(m); }
-    } catch {
-      // An unreadable manifest must not be a way past the guard. Nothing is
-      // known to be open, so nothing is served without a wallet.
-      return fail(503, "this music is temporarily unavailable");
-    }
+    // Worked out once per manifest, not for every ranged piece of a song.
+    const view = await listenerView(env, ctx);
+    // An unreadable manifest must not be a way past the guard. Nothing is
+    // known to be open, so nothing is served without a wallet.
+    if (view && view.parsed === undefined) return fail(503, "this music is temporarily unavailable");
     // An original behind an evened-out copy: only ever a purchase download.
-    if (masters.has(key.slice("audio/".length))) {
+    if (view && mastersOf(view).has(key.slice("audio/".length))) {
       return fail(403, "this file is only available as a download, to someone who bought it");
     }
-    if (guarded.has(key.slice("audio/".length))) {
+    if (view && guardedOf(view).has(key.slice("audio/".length))) {
       const who = await whoIsAsking(request, env);
       if (!who) {
         return fail(401, "this track is for listeners who have said who they are");

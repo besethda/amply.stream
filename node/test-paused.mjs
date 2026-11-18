@@ -148,6 +148,27 @@ rpcDown = false;
   ok("  the same one as amply.stream's", body === readFileSync("site/favicon.svg", "utf8").trim());
 }
 
+// ── the manifest is worked out once, not for every ranged piece of a song ──
+{
+  const parse = JSON.parse;
+  let parses = 0;
+  const pieces = async () => {
+    await get("/audio/song.mp3", { Range: "bytes=0-1" });   // warms the cache
+    parses = 0;
+    JSON.parse = (...a) => { parses++; return parse(...a); };
+    for (let i = 0; i < 5; i++) await get("/audio/song.mp3", { Range: `bytes=${i}-${i + 1}` });
+    await get("/manifest.json");
+    JSON.parse = parse;
+    return parses;
+  };
+  later(6);
+  lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
+  ok("ranged audio and the manifest share one reading of it", (await pieces()) === 0, `${parses} parses`);
+  later(6);
+  lamports = 0;
+  ok("  paused too", (await pieces()) === 0 && (await served()).paused === true, `${parses} parses`);
+}
+
 // ── the editor's fees status says what listeners see ──
 {
   const { PREVIEW_KEY, hashKey } = await import("./src/preview-key.ts");

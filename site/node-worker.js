@@ -2847,28 +2847,42 @@ async function manifestText(env) {
   cachedManifest = { at: now, body };
   return body;
 }
-async function listenerText(env, ctx) {
+var derivedStored = null;
+var derivedPaused = null;
+function derive(text) {
+  if (derivedStored?.text === text) return derivedStored;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = void 0;
+  }
+  return derivedStored = { text, parsed };
+}
+var guardedOf = (d) => d.guarded ??= guardedKeys(d.parsed);
+var mastersOf = (d) => d.masters ??= masterKeys(d.parsed);
+async function listenerView(env, ctx) {
   const text = await manifestText(env);
   if (text === null) return null;
-  let manifest;
-  try {
-    manifest = JSON.parse(text);
-  } catch {
-    return text;
-  }
+  const stored = derive(text);
+  if (stored.parsed === void 0) return stored;
+  const manifest = stored.parsed;
   const at = (manifest?.payment || []).findIndex((p) => p?.type === "solana-usdc");
-  if (at < 0) return text;
-  if (await feeOffer(env, ctx).catch(() => null)) return text;
-  manifest.payment[at] = { ...manifest.payment[at], paused: true };
-  return JSON.stringify(manifest);
+  if (at < 0) return stored;
+  if (await feeOffer(env, ctx).catch(() => null)) return stored;
+  if (derivedPaused?.source !== text) {
+    const copy = { ...manifest, payment: manifest.payment.map((p, i) => i === at ? { ...p, paused: true } : p) };
+    derivedPaused = { source: text, view: { text: JSON.stringify(copy), parsed: copy } };
+  }
+  return derivedPaused.view;
+}
+async function listenerText(env, ctx) {
+  return (await listenerView(env, ctx))?.text ?? null;
 }
 async function takingPayments(env, ctx) {
-  const text = await listenerText(env, ctx);
-  try {
-    return !paused(text ? JSON.parse(text) : null);
-  } catch {
-    return false;
-  }
+  const view = await listenerView(env, ctx);
+  if (!view) return true;
+  return view.parsed !== void 0 && !paused(view.parsed);
 }
 async function serveManifest(env, ctx) {
   const body = await listenerText(env, ctx);
@@ -3267,11 +3281,7 @@ async function whoIsAsking(request, env) {
 }
 async function manifestNowOf(env) {
   const text = await manifestText(env);
-  try {
-    return text ? JSON.parse(text) : null;
-  } catch {
-    return null;
-  }
+  return text ? derive(text).parsed ?? null : null;
 }
 async function feeOffer(env, ctx) {
   const pay = walletOf(await manifestNowOf(env));
@@ -3305,12 +3315,7 @@ async function handleListen(request, env, path, ctx) {
     const address = String(body.address);
     const until = await refresh(env.DB, address).catch(() => subscribedUntil(env.DB, address));
     const subscribed = until !== null && until > Date.now();
-    const text = await listenerText(env, ctx);
-    let manifest = null;
-    try {
-      manifest = text ? JSON.parse(text) : null;
-    } catch {
-    }
+    const manifest = (await listenerView(env, ctx))?.parsed ?? null;
     if (!subscribed && subscriptionOnly(manifest)) {
       return fail(402, "subscribe to hear this artist's paid tracks");
     }
@@ -3427,14 +3432,6 @@ async function handleListen(request, env, path, ctx) {
     status,
     headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
   });
-  const manifestNow = async () => {
-    const text = await manifestText(env);
-    try {
-      return text ? JSON.parse(text) : null;
-    } catch {
-      return null;
-    }
-  };
   if (path === "/buy/claim" && request.method === "POST") {
     const body = await jsonBody(request);
     if (!body) return fail(400, "bad request");
@@ -3455,7 +3452,7 @@ async function handleListen(request, env, path, ctx) {
     if (!body) return fail(400, "bad request");
     const proof = await proveOwnership(host, body);
     if (!proof.ok) return fail(403, proof.why);
-    const r = await claimWalletSale(env.DB, await manifestNow(), {
+    const r = await claimWalletSale(env.DB, await manifestNowOf(env), {
       wallet: proof.address,
       signature: String(body.tx || ""),
       item: String(body.item || ""),
@@ -3492,7 +3489,7 @@ async function handleListen(request, env, path, ctx) {
     if (!body) return fail(400, "bad request");
     const proof = await proveOwnership(host, body);
     if (!proof.ok) return fail(403, proof.why);
-    const manifest = await manifestNow();
+    const manifest = await manifestNowOf(env);
     const trackId = String(body.track || "");
     const track = (manifest?.releases || []).flatMap((r) => r.tracks || []).find((t) => t.id === trackId);
     if (!track) return fail(404, "no such song");
@@ -3553,11 +3550,9 @@ async function handleListen(request, env, path, ctx) {
     const until = await subscribedUntil(env.DB, who).catch(() => null);
     const subscribed = until !== null && until > Date.now();
     let perMinute2 = 0;
-    try {
-      const wallet = (JSON.parse(await manifestText(env) || "{}")?.payment || []).find((p) => p?.type === "solana-usdc");
-      perMinute2 = subscribed ? 0 : Math.max(0, Number(wallet?.ratePerMinute) || 0);
-    } catch {
-    }
+    const priced = await manifestNowOf(env);
+    const wallet = (priced?.payment || []).find((p) => p?.type === "solana-usdc");
+    perMinute2 = subscribed ? 0 : Math.max(0, Number(wallet?.ratePerMinute) || 0);
     await counted(env.DB, who, Number(body?.seconds) || 0, Date.now(), perMinute2);
     if (Math.random() < 0.02) await pruneStale(env.DB);
     return new Response(null, { status: 204, headers: noStore() });
@@ -3656,14 +3651,10 @@ async function serve(request, env, ctx) {
     if (arriving(request) && !(await accessConfig(env)).set && await previewSession(request, readPreviewKey(await setting(env.DB, PREVIEW_KEY)))) {
       return new Response(null, { status: 302, headers: noStore({ Location: "/manage" }) });
     }
-    const body = await listenerText(env, ctx);
-    if (body === null) return fail(404, "no manifest published yet");
-    let manifest;
-    try {
-      manifest = JSON.parse(body);
-    } catch {
-      return fail(500, "manifest is not valid JSON");
-    }
+    const view = await listenerView(env, ctx);
+    if (view === null) return fail(404, "no manifest published yet");
+    if (view.parsed === void 0) return fail(500, "manifest is not valid JSON");
+    const manifest = view.parsed;
     const nonce = crypto.randomUUID().replace(/-/g, "");
     const headers = withCors(new Headers({
       "Content-Type": "text/html; charset=utf-8",
@@ -3752,22 +3743,12 @@ async function serve(request, env, ctx) {
   if (pathname.startsWith("/audio/")) {
     const key = safeKey("audio", pathname.slice("/audio/".length));
     if (key === null) return fail(400, "bad key");
-    const manifest = await listenerText(env, ctx);
-    let guarded = /* @__PURE__ */ new Set();
-    let masters = /* @__PURE__ */ new Set();
-    try {
-      if (manifest) {
-        const m = JSON.parse(manifest);
-        guarded = guardedKeys(m);
-        masters = masterKeys(m);
-      }
-    } catch {
-      return fail(503, "this music is temporarily unavailable");
-    }
-    if (masters.has(key.slice("audio/".length))) {
+    const view = await listenerView(env, ctx);
+    if (view && view.parsed === void 0) return fail(503, "this music is temporarily unavailable");
+    if (view && mastersOf(view).has(key.slice("audio/".length))) {
       return fail(403, "this file is only available as a download, to someone who bought it");
     }
-    if (guarded.has(key.slice("audio/".length))) {
+    if (view && guardedOf(view).has(key.slice("audio/".length))) {
       const who = await whoIsAsking(request, env);
       if (!who) {
         return fail(401, "this track is for listeners who have said who they are");
