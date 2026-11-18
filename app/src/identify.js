@@ -241,11 +241,14 @@ export async function signedPost(pair, origin, path, extra = {}) {
 }
 
 /** Tell the artist's node a song finished, for its per-song total. Nothing
- *  about the listener is sent: no wallet, no token. */
-export async function reportHeard(origin, track, seconds) {
+ *  about the listener is recorded. A paid track is counted only with the
+ *  listener's pass (`token`), which goes in the address the way it does for
+ *  the audio itself, so no extra header needs the node's leave; a free one
+ *  needs none, and is sent without. */
+export async function reportHeard(origin, track, seconds, token = null) {
   if (!(seconds >= 30)) return;
   try {
-    await fetch(`${origin}/listen/heard`, {
+    await fetch(audioUrl(`${origin}/listen/heard`, token), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ track, seconds: Math.round(seconds) }),

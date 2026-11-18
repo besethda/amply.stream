@@ -31,8 +31,12 @@ export const RULES = {
   media: { binding: "LIMIT_MEDIA", limit: 600, period: 60 },
   /** Play reports from any one wallet: a song can't finish every ten seconds. */
   wallet: { binding: "LIMIT_WALLET", limit: 6, period: 60 },
-  /** Brand-new listeners, across the whole service. */
+  /** Brand-new listeners, across the whole service: counted where a wallet
+   *  gets its first pass (/listen/token) and where its first play is kept. */
   newListener: { binding: "LIMIT_NEW", limit: 20, period: 60 },
+  /** Song plays reported with no wallet (free tracks), per address: each one
+   *  is two writes, so a few a minute, not the forty other requests get. */
+  heard: { binding: "LIMIT_HEARD", limit: 3, period: 60 },
 } satisfies Record<string, Rule>;
 
 // ── the stand-in: counted in this copy of the Worker ────────────────────────

@@ -12,7 +12,7 @@
  * Run via `npm run test:store`. Uses node:sqlite, wrapped to look like D1.
  */
 import { DatabaseSync } from "node:sqlite";
-import { SCHEMA, seen, counted, listener, listeners, setBlocked, forget, signingKey, pruneStale, remove, heard, playsToday } from "./src/store.ts";
+import { SCHEMA, seen, counted, listener, listeners, setBlocked, forget, signingKey, pruneStale, pruneHourly, remove, heard, playsToday } from "./src/store.ts";
 
 /** The slice of D1's interface store.ts actually uses. */
 function d1(db) {
@@ -125,6 +125,18 @@ ok("and is the same one next time", (await signingKey(DB)) === first);
   ok("a wallet not heard from in over a year is deleted", (await listener(DB, OLD)) === null);
   ok("  one heard from last month is kept", (await listener(DB, RECENT)) !== null);
   ok("  and a barred one stays barred however old", (await listener(DB, BARRED))?.blocked === 1);
+
+  // From plays, at most hourly: the clean-up reads the whole table.
+  const STALE1 = "WalletST10000000000000000000000000000000000";
+  const STALE2 = "WalletST20000000000000000000000000000000000";
+  await counted(DB, STALE1, 60, NOW - 2 * YEAR);
+  ok("pruning from plays runs when it hasn't lately", (await pruneHourly(DB, NOW)) && (await listener(DB, STALE1)) === null);
+  await counted(DB, STALE2, 60, NOW - 2 * YEAR);
+  ok("  but not again within the hour", !(await pruneHourly(DB, NOW + 59 * 60_000)) && (await listener(DB, STALE2)) !== null);
+  ok("  and an hour on, it does", (await pruneHourly(DB, NOW + 61 * 60_000)) && (await listener(DB, STALE2)) === null);
+  ok("  a time recorded in the future doesn't stop it for ever", (await pruneHourly(DB, NOW)));
+  ok("finding stale wallets uses an index on last_seen",
+    /listeners_by_last_seen/.test(JSON.stringify(db.prepare("EXPLAIN QUERY PLAN DELETE FROM listeners WHERE blocked = 0 AND last_seen < ?").all(0))));
 }
 
 // ── the artist deleting a record themselves ─────────────────────────────────

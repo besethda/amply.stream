@@ -54,7 +54,7 @@ for (let i = 1; i < migrations.length; i++) {
 // bind. Each gets a fixed namespace: Cloudflare counts per namespace within an
 // account, and the Worker's keys already name its own host.
 const limitsSrc = await readFile(here("../node/src/limits.ts"), "utf8");
-const NAMESPACES = { LIMIT_LISTEN: "7101", LIMIT_MEDIA: "7102", LIMIT_WALLET: "7103", LIMIT_NEW: "7104" };
+const NAMESPACES = { LIMIT_LISTEN: "7101", LIMIT_MEDIA: "7102", LIMIT_WALLET: "7103", LIMIT_NEW: "7104", LIMIT_HEARD: "7105" };
 const limits = [...limitsSrc.matchAll(/binding: "(LIMIT_[A-Z]+)", limit: (\d+), period: (\d+)/g)]
   .map((m) => ({ binding: m[1], limit: Number(m[2]), period: Number(m[3]), namespace: NAMESPACES[m[1]] }));
 if (limits.length !== Object.keys(NAMESPACES).length || limits.some((l) => !l.namespace || ![10, 60].includes(l.period))) {

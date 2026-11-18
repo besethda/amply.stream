@@ -987,6 +987,15 @@ async function pruneStale(db, now = Date.now()) {
   await db.prepare("DELETE FROM listeners WHERE blocked = 0 AND last_seen < ?").bind(now - KEEP_FOR).run();
   await forgetOwed(db);
 }
+var PRUNED_AT = "pruned-at";
+var PRUNE_EVERY = 36e5;
+async function pruneHourly(db, now = Date.now()) {
+  const last = Number(await setting(db, PRUNED_AT).catch(() => null)) || 0;
+  if (last <= now && now - last < PRUNE_EVERY) return false;
+  await putSetting(db, PRUNED_AT, String(now));
+  await pruneStale(db, now);
+  return true;
+}
 async function remove(db, pubkey) {
   await db.prepare("DELETE FROM listeners WHERE pubkey = ?").bind(pubkey).run();
   await db.prepare("DELETE FROM subscriptions WHERE wallet = ?").bind(pubkey).run();
@@ -1135,12 +1144,15 @@ async function proveOwnership(host, body, now = Date.now()) {
   if (!await verifySignature(address, message, signature)) return { ok: false, why: "that signature does not match that wallet" };
   return { ok: true, address };
 }
-async function introduce(db, host, body, now = Date.now()) {
+async function introduce(db, host, body, now = Date.now(), admitNew = async () => true) {
   const proof = await proveOwnership(host, body, now);
   if (!proof.ok) return { ok: false, why: proof.why };
   const address = proof.address;
   const known = await listener(db, address);
   if (known?.blocked) return { ok: false, why: "this artist has stopped serving this wallet" };
+  if (!known && !await admitNew()) {
+    return { ok: false, busy: true, why: "too many new listeners right now; try again in a minute" };
+  }
   await seen(db, address, now);
   return { ok: true, token: await issueToken(db, address, now) };
 }
@@ -2414,8 +2426,12 @@ var RULES = {
   media: { binding: "LIMIT_MEDIA", limit: 600, period: 60 },
   /** Play reports from any one wallet: a song can't finish every ten seconds. */
   wallet: { binding: "LIMIT_WALLET", limit: 6, period: 60 },
-  /** Brand-new listeners, across the whole service. */
-  newListener: { binding: "LIMIT_NEW", limit: 20, period: 60 }
+  /** Brand-new listeners, across the whole service: counted where a wallet
+   *  gets its first pass (/listen/token) and where its first play is kept. */
+  newListener: { binding: "LIMIT_NEW", limit: 20, period: 60 },
+  /** Song plays reported with no wallet (free tracks), per address: each one
+   *  is two writes, so a few a minute, not the forty other requests get. */
+  heard: { binding: "LIMIT_HEARD", limit: 3, period: 60 }
 };
 var counts = /* @__PURE__ */ new Map();
 var MAX_KEYS = 1e4;
@@ -2494,7 +2510,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.24.5";
+var VERSION = "3.24.6";
 var SPEC_VERSION = 1;
 var RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
 var MANAGE_CSP = [
@@ -2725,6 +2741,7 @@ function storedType(prefix, key) {
   return table[ext] ?? "application/octet-stream";
 }
 var CACHE_AUDIO = "public, max-age=31536000, immutable";
+var CACHE_AUDIO_PAID = "private, max-age=31536000, immutable";
 var CACHE_ART = "public, max-age=86400";
 var CACHE_MANIFEST = "public, max-age=300, must-revalidate";
 var MANIFEST_CACHE = 5e3;
@@ -3264,8 +3281,14 @@ async function handleListen(request, env, path) {
   if (path === "/token" && request.method === "POST") {
     const body = await jsonBody(request);
     if (!body) return fail(400, "bad request");
-    const result = await introduce(env.DB, host, body);
-    if (!result.ok) return fail(403, result.why || "refused");
+    const result = await introduce(
+      env.DB,
+      host,
+      body,
+      Date.now(),
+      () => allow(env, RULES.newListener, host)
+    );
+    if (!result.ok) return result.busy ? tooMany(withCors(new Headers())) : fail(403, result.why || "refused");
     const address = String(body.address);
     const until = await refresh(env.DB, address).catch(() => subscribedUntil(env.DB, address));
     const subscribed = until !== null && until > Date.now();
@@ -3523,18 +3546,36 @@ async function handleListen(request, env, path) {
     } catch {
     }
     await counted(env.DB, who, Number(body?.seconds) || 0, Date.now(), perMinute2);
-    if (Math.random() < 0.02) await pruneStale(env.DB);
+    if (Math.random() < 0.02) await pruneHourly(env.DB).catch(() => {
+    });
     return new Response(null, { status: 204, headers: noStore() });
   }
   if (path === "/heard" && request.method === "POST") {
+    const nothing = () => new Response(null, { status: 204, headers: noStore() });
     const body = await jsonBody(request);
-    const track = String(body?.track || "");
+    const trackId = String(body?.track || "");
     const seconds = Number(body?.seconds) || 0;
-    const manifest = await manifestNowOf(env);
-    const known = (manifest?.releases || []).some((r) => (r.tracks || []).some((t) => t.id === track));
-    if (known && seconds >= 30) await heard(env.DB, track, seconds).catch(() => {
+    if (seconds < 30) return nothing();
+    let manifest = null;
+    try {
+      manifest = JSON.parse(await listenerText(env) || "null");
+    } catch {
+      return nothing();
+    }
+    const track = (manifest?.releases || []).flatMap((r) => r.tracks || []).find((t) => t?.id === trackId);
+    if (!track) return nothing();
+    const from = request.headers.get("CF-Connecting-IP") || "unknown";
+    const who = await whoIsAsking(request, env);
+    if (who) {
+      if (!await allow(env, RULES.wallet, `${host}|heard|${who}`)) return nothing();
+      if (!await allow(env, RULES.wallet, `${host}|heard-from|${from}`)) return nothing();
+    } else {
+      if (needsWallet(manifest, track)) return nothing();
+      if (!await allow(env, RULES.heard, `${host}|${from}`)) return nothing();
+    }
+    await heard(env.DB, trackId, seconds).catch(() => {
     });
-    return new Response(null, { status: 204, headers: noStore() });
+    return nothing();
   }
   if (path === "/forget" && request.method === "POST") {
     const body = await jsonBody(request);
@@ -3736,6 +3777,16 @@ async function serve(request, env) {
       if (!who) {
         return fail(401, "this track is for listeners who have said who they are");
       }
+      return serveObject(env, request, key, CACHE_AUDIO_PAID, "audio/mpeg");
+    }
+    const own = await manifestText(env).catch(() => null);
+    if (own && own !== manifest) {
+      let paid = /* @__PURE__ */ new Set();
+      try {
+        paid = guardedKeys(JSON.parse(own));
+      } catch {
+      }
+      if (paid.has(key.slice("audio/".length))) return serveObject(env, request, key, CACHE_AUDIO_PAID, "audio/mpeg");
     }
     return serveObject(env, request, key, CACHE_AUDIO, "audio/mpeg");
   }
