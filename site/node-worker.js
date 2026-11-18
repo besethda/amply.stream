@@ -2437,7 +2437,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.20.4";
+var VERSION = "3.20.5";
 var SPEC_VERSION = 1;
 var RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
 var MANAGE_CSP = [
@@ -2635,6 +2635,10 @@ function quotaFailure(e, now = Date.now()) {
 var MANIFEST_KEY = "manifest";
 var ACCESS_KEY = "access";
 var MANAGE_PREFIX = "manage";
+function bundledEditor() {
+  const html = globalThis.__amplyEditor;
+  return typeof html === "string" && html.length > 0 ? html : null;
+}
 var MAX_MANIFEST = 2 * 1024 * 1024;
 var AUDIO_TYPES = {
   mp3: "audio/mpeg",
@@ -2840,10 +2844,12 @@ async function handleManage(request, env, path) {
     if (!sameOrigin) return fail(403, "that request did not come from your editor");
   }
   if (request.method === "GET" && (path === "" || path === "/")) {
-    const obj = await media(env).get(`${MANAGE_PREFIX}/index.html`);
-    if (obj === null || !("body" in obj)) return fail(404, "editor not installed on this node");
     const h = noStore({ "Content-Type": "text/html; charset=utf-8" });
     h.set("Content-Security-Policy", MANAGE_CSP);
+    const bundled = bundledEditor();
+    if (bundled) return new Response(bundled, { status: 200, headers: h });
+    const obj = await media(env).get(`${MANAGE_PREFIX}/index.html`);
+    if (obj === null || !("body" in obj)) return fail(404, "editor not installed on this node");
     return new Response(obj.body, { status: 200, headers: h });
   }
   if (request.method === "GET" && path === "/whoami") {

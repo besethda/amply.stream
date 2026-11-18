@@ -58,6 +58,18 @@ export interface Env {
 const MANIFEST_KEY = "manifest";
 const ACCESS_KEY = "access";       // { team, aud } — written at setup
 const MANAGE_PREFIX = "manage";    // the editor's own files, never public
+
+/**
+ * The editor, when setup put it inside this Worker's upload: it prepends one
+ * line, `globalThis.__amplyEditor = "<the editor's HTML>";`, to this code
+ * (site/js/provision.js). So the editor needs no storage write of its own
+ * (Amply's sign-in can't write KV, where a page started before signup keeps
+ * its files), and it can't be a different version from the Worker.
+ */
+function bundledEditor(): string | null {
+  const html = (globalThis as { __amplyEditor?: unknown }).__amplyEditor;
+  return typeof html === "string" && html.length > 0 ? html : null;
+}
 const MAX_MANIFEST = 2 * 1024 * 1024;
 
 /**
@@ -363,12 +375,16 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
     if (!sameOrigin) return fail(403, "that request did not come from your editor");
   }
 
-  // The editor itself, stored in R2 and served only to a signed-in artist.
+  // The editor itself, served only to a signed-in artist. It arrives inside
+  // this Worker's own upload (bundledEditor), so it's always the same version
+  // as the Worker; a service set up before that keeps its copy in storage.
   if (request.method === "GET" && (path === "" || path === "/")) {
-    const obj = await media(env).get(`${MANAGE_PREFIX}/index.html`);
-    if (obj === null || !("body" in obj)) return fail(404, "editor not installed on this node");
     const h = noStore({ "Content-Type": "text/html; charset=utf-8" });
     h.set("Content-Security-Policy", MANAGE_CSP);
+    const bundled = bundledEditor();
+    if (bundled) return new Response(bundled, { status: 200, headers: h });
+    const obj = await media(env).get(`${MANAGE_PREFIX}/index.html`);
+    if (obj === null || !("body" in obj)) return fail(404, "editor not installed on this node");
     return new Response(obj.body, { status: 200, headers: h });
   }
 

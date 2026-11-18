@@ -26,6 +26,7 @@ globalThis.sessionStorage = storage(session);
 
 const { provisionInstant, provision, claimLink, editorLink, pendingPreview, clearProgress, ProvisionError } =
   await import("../site/js/provision.js");
+const EDITOR_IN = (code) => String(code || "").startsWith('globalThis.__amplyEditor = "<!doctype html><title>editor</title>";\n');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = "") => {
@@ -101,6 +102,7 @@ function cloudflare(world) {
     if (path.endsWith("/workers/subdomain") && method === "PUT") { world.subdomain = JSON.parse(body).subdomain; return reply(ok_({ subdomain: world.subdomain })); }
     if (/\/workers\/scripts\/[^/]+$/.test(path) && method === "PUT") {
       world.uploads.push(JSON.parse(await body.get("metadata").text()).bindings);
+      world.code = await body.get("index.js").text();
       return reply(ok_({}));
     }
     if (path.includes("/access/organizations") && method === "GET") return reply(ok_(null));
@@ -142,10 +144,13 @@ ok("every call to the account carries the temporary token",
   log.filter((r) => r.path.startsWith("/api/")).every((r) => r.token === "Bearer temporary-token"));
 ok("audio lives in KV", world.uploads[0]?.some((b) => b.type === "kv_namespace" && b.name === "MEDIA_KV" && b.namespace_id === KV));
 ok("  and nothing touches R2", !world.r2);
-ok("the editor is stored in KV, its key encoded", world.kvWrites.some((p) => p.endsWith("/values/manage%2Findex.html")));
+// The editor comes inside the Worker's own upload: Amply's sign-in can't
+// write KV, so a page started here would otherwise keep its first editor.
+ok("the editor goes inside the Worker's upload", EDITOR_IN(world.code), String(world.code).slice(0, 80));
+ok("  not into storage", !world.kvWrites.some((p) => p.includes("manage")));
 ok("no Access yet: temporary accounts can't have it", !world.accessApp && !("access" in world.settings));
 ok("a starter page is published", JSON.parse(world.settings.manifest || "{}").artist?.name === "Hollow Coast");
-ok("every step reports in", ["preview", "bucket", "database", "worker", "subdomain", "editor", "manifest"]
+ok("every step reports in", ["preview", "bucket", "database", "worker", "subdomain", "manifest"]
   .every((id) => steps.includes(`${id}:done`)), steps.join(" "));
 ok("this browser remembers there's one to finish", pendingPreview()?.accountId === ACC);
 {
@@ -219,7 +224,8 @@ ok("this browser remembers there's one to finish", pendingPreview()?.accountId =
   await provision({ token: "oauth-token", relay: "https://relay.test", artistName: "Hollow Coast", slug: "hollow-coast", email: "a@b.co" });
   ok("another browser finds the node's KV and keeps using it",
     w.uploads.at(-1)?.some((b) => b.name === "MEDIA_KV" && b.namespace_id === KV) && !w.r2);
-  ok("  writes the editor there", w.kvWrites.some((p) => p.endsWith("/values/manage%2Findex.html")));
+  ok("  brings its editor up to date, with no KV write (which this sign-in can't do)",
+    EDITOR_IN(w.code) && !w.kvWrites.some((p) => p.includes("manage")));
   ok("  locks it", w.accessApp);
   ok("  and doesn't replace the track list", JSON.parse(w.settings.manifest).releases.length === 1);
 }
