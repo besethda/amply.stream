@@ -318,6 +318,7 @@ textarea { resize: vertical; line-height: 1.5; min-height: 110px; }
 .track-problem .what { flex: 1 1 260px; min-width: 0; }
 .track-problem strong { display: block; color: var(--bad); font-size: 16.5px; margin-bottom: 3px; }
 .track-problem p { margin: 0; font-size: 15.5px; }
+.track-problem .problem-do { display: flex; gap: 10px; flex-wrap: wrap; }
 
 /* A heavy file. Orange rather than red: nothing failed, the music is up and
    plays, it is just slow to reach people. */

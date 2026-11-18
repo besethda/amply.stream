@@ -640,9 +640,13 @@ function Release({
             <div class="track-problem">
               <div class="what">
                 <strong>This one didn't finish uploading</strong>
-                <p>{p.message} Nothing else was affected, the file is still on your computer.</p>
+                <p>{p.message.replace(/[.!?]?\s*$/, ".")} Nothing else was affected, the file is still on your computer.</p>
               </div>
-              <button class="btn sm dark" onClick={() => retry(p)}>Try again</button>
+              <div class="problem-do">
+                <button class="btn sm dark" onClick={() => retry(p)}>Try again</button>
+                {/* Or give up on this file, say to add a smaller one instead. */}
+                <button class="btn sm ghost" onClick={() => setProblems((all) => all.filter((x) => x !== p))}>Remove</button>
+              </div>
             </div>
           </li>
         ))}
