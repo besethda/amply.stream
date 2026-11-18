@@ -60,6 +60,18 @@ export function createWallet() {
   return pair;
 }
 
+/** Make one without keeping it: kept (keepWallet) only once its key is saved,
+ *  so a listener who backs out never leaves an unsaved wallet behind. */
+export const generateWallet = () => Keypair.generate();
+
+/** Keep one made by generateWallet. Never over another. */
+export function keepWallet(pair) {
+  const had = loadWallet();
+  if (had && had.publicKey.toBase58() !== pair.publicKey.toBase58()) throw new Error("This device already has a wallet.");
+  if (!had) save(pair);
+  return pair;
+}
+
 function save(pair) {
   try {
     localStorage.setItem(KEY, JSON.stringify(Array.from(pair.secretKey)));

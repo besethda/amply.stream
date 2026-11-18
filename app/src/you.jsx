@@ -3,7 +3,7 @@
  */
 import { useState } from "preact/hooks";
 import { Icon } from "./icons.jsx";
-import { money, SetUp, TopUp, SendBack, SaveBackup } from "./wallet-ui.jsx";
+import { money, TopUp, SendBack, SaveBackup } from "./wallet-ui.jsx";
 import { backupSaved, machinery, passkeyWallet } from "./paying.js";
 import { NETWORKS, networkName, useNetwork } from "./networks.js";
 import { isSubscribed, subscriptionUntil, originOf } from "./identify.js";
@@ -34,7 +34,7 @@ function Sub({ title, onBack, children }) {
   );
 }
 
-export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenArtist, view, setView, themeName, onTheme, purchases }) {
+export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenArtist, view, setView, themeName, onTheme, purchases, onSetUp }) {
   const [where, setWhere] = useState(networkName);
   const network = NETWORKS[where];
   const saved = pair && backupSaved(pair.publicKey.toBase58());
@@ -94,7 +94,9 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
     <div class="screen">
       <div class="head"><h1>You</h1></div>
       <div class="pad stack">
-        {!pair ? <SetUp onMade={setPair} /> : <>
+        {!pair ? (
+          <button class="btn-primary wide" onClick={() => onSetUp?.()}><Icon.key size={18} /> Save your ID</button>
+        ) : <>
           {passkeyWallet(pair.publicKey.toBase58()) ? (
             <p class="note-line good-ink small"><Icon.check size={14} /> Protected by your passkey. Use it to open this
               wallet on your other devices.</p>
