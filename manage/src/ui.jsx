@@ -11,7 +11,7 @@
  * Talks to an injected `api` adapter rather than fetching directly, so the
  * interface stays testable without a live node.
  */
-import { createContext, Fragment } from "preact";
+import { createContext, Fragment, Component } from "preact";
 import { useState, useEffect, useCallback, useRef, useMemo, useContext } from "preact/hooks";
 
 /**
@@ -21,6 +21,22 @@ import { useState, useEffect, useCallback, useRef, useMemo, useContext } from "p
  */
 const Jobs = createContext(null);
 const noJob = { step() {}, done() {} };
+/**
+ * A component that renders again only when one of its props changes (by
+ * identity), like preact/compat's memo without pulling in compat.
+ */
+export function memo(Inner) {
+  return class Memo extends Component {
+    shouldComponentUpdate(next) {
+      const was = this.props;
+      for (const k in next) if (next[k] !== was[k]) return true;
+      for (const k in was) if (!(k in next)) return true;
+      return false;
+    }
+    render(props) { return <Inner {...props} />; }
+  };
+}
+
 const useJob = () => { const jobs = useContext(Jobs); return (title) => (jobs ? jobs.start(title) : noJob); };
 
 function JobCard({ job }) {
@@ -297,10 +313,13 @@ function PlayIcon({ playing = false }) {
     : <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M3.5 1.2v9.6a.6.6 0 0 0 .9.5l7.2-4.8a.6.6 0 0 0 0-1L4.4.7a.6.6 0 0 0-.9.5Z" fill="currentColor" /></svg>;
 }
 
-function Track({
-  track, first, last, playing, onPlay, onChange, onMove, onRemove, onReplace,
+/** One track's row. Its callbacks are the release's, stable and taking the
+ *  track (or its id), so a row redraws only when its own props change. */
+const Track = memo(function Track({
+  track, first, last, playing, onPlay, onChange: changeTrack, onMove, onRemove, onReplace,
   heavy, warnOpen, onWarn, charging,
 }) {
+  const onChange = (next) => changeTrack(track.id, next);
   // If the artist charges, every track is paid for unless they make it free —
   // the same rule their server enforces (spec/pricing.mjs). Free is the choice
   // an artist makes, one track at a time; paid is simply what charging means.
@@ -323,11 +342,11 @@ function Track({
     <div class={`track-block${open ? " open" : ""}`}>
       <div class="track-row">
         <div class="track-order">
-          <button class="icon stack2" disabled={first} onClick={() => onMove(-1)} aria-label="Move up">▲</button>
-          <button class="icon stack2" disabled={last} onClick={() => onMove(1)} aria-label="Move down">▼</button>
+          <button class="icon stack2" disabled={first} onClick={() => onMove(track.id, -1)} aria-label="Move up">▲</button>
+          <button class="icon stack2" disabled={last} onClick={() => onMove(track.id, 1)} aria-label="Move down">▼</button>
         </div>
         <button
-          class={`play${playing ? " on" : ""}`} onClick={onPlay} disabled={!track.url}
+          class={`play${playing ? " on" : ""}`} onClick={() => onPlay(track)} disabled={!track.url}
           aria-label={playing ? `Pause ${track.title}` : `Play ${track.title}`}
         >
           <PlayIcon playing={playing} />
@@ -345,7 +364,7 @@ function Track({
           {track.sale?.price > 0 && <span class="track-mark sale" title="What it costs to buy and keep">${track.sale.price.toFixed(2)}</span>}
           {heavy && (
             <button
-              class="warn-toggle" aria-expanded={warnOpen} onClick={onWarn}
+              class="warn-toggle" aria-expanded={warnOpen} onClick={() => onWarn(track.id)}
               aria-label={`${track.title || "This track"} is too large to stream properly. ${warnOpen ? "Hide" : "Show"} why.`}
               title="Too large to stream properly"
             >! too large</button>
@@ -358,7 +377,7 @@ function Track({
         </button>
         <input
           ref={ref} type="file" accept={AUDIO_ACCEPT} hidden
-          onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) onReplace(f); }}
+          onChange={(e) => { const f = e.target.files[0]; e.target.value = ""; if (f) onReplace(track.id, f); }}
         />
       </div>
 
@@ -386,12 +405,12 @@ function Track({
             >{free ? "Charge for this" : "Make free"}</button>
           )}
           <button class="btn ghost" onClick={() => ref.current.click()}>Replace audio</button>
-          <button class="btn ghost danger" onClick={onRemove}>Remove</button>
+          <button class="btn ghost danger" onClick={() => onRemove(track.id)}>Remove</button>
         </div>
       )}
     </div>
   );
-}
+});
 
 /**
  * Upload a song's files in order, with one progress figure for all of them.
@@ -424,7 +443,10 @@ export async function sendParts(parts, required, upload, onProgress = () => {}, 
   return arrived;
 }
 
-function Release({
+/** A release and its tracks. Drawn again only when its props change: the
+ *  music tab hands it stable callbacks, so playing a song or a toast
+ *  appearing doesn't redraw every release. */
+const Release = memo(function Release({
   release, node, manifest, art, player,
   onChange, onRemove, upload, notify, sizeOf, charging, deleteObject,
 }) {
@@ -618,6 +640,19 @@ function Release({
     return t;
   });
 
+  // The tracks' callbacks, the same functions every render (so each Track
+  // can skip redrawing), always reaching this render's state.
+  const latest = useRef(null);
+  latest.current = { player, moveTrack, replaceAudio, setTracks };
+  const trackDo = useMemo(() => ({
+    play: (t) => latest.current.player.toggle(t),
+    move: (id, d) => latest.current.moveTrack(id, d),
+    replace: (id, f) => latest.current.replaceAudio(id, f),
+    change: (id, next) => latest.current.setTracks((all) => all.map((x) => (x.id === id ? next : x))),
+    remove: (id) => { latest.current.player.stopIf(id); latest.current.setTracks((all) => all.filter((x) => x.id !== id)); },
+    warn: (id) => setWarnOpen((open) => (open === id ? null : id)),
+  }), []);
+
   return (
     <section class="card release">
       <div class="release-head">
@@ -689,14 +724,14 @@ function Release({
             <Track
               track={t} first={i === 0} last={i === tracks.length - 1} charging={charging}
               playing={player.current === t.id && player.playing}
-              onPlay={() => player.toggle(t)}
-              onMove={(d) => moveTrack(t.id, d)}
-              onReplace={(f) => replaceAudio(t.id, f)}
-              onChange={(next) => setTracks((all) => all.map((x) => (x.id === t.id ? next : x)))}
-              onRemove={() => { player.stopIf(t.id); setTracks((all) => all.filter((x) => x.id !== t.id)); }}
+              onPlay={trackDo.play}
+              onMove={trackDo.move}
+              onReplace={trackDo.replace}
+              onChange={trackDo.change}
+              onRemove={trackDo.remove}
               heavy={!!sizeAdvice(sizes[t.url], t.duration)}
               warnOpen={warnOpen === t.id}
-              onWarn={() => setWarnOpen((open) => (open === t.id ? null : t.id))}
+              onWarn={trackDo.warn}
             />
             {warnOpen === t.id && sizeAdvice(sizes[t.url], t.duration) && (
               <SizeWarning advice={sizeAdvice(sizes[t.url], t.duration)} duration={t.duration} />
@@ -746,7 +781,7 @@ function Release({
       </div>
     </section>
   );
-}
+});
 
 /**
  * What a new artist does, in order, until their music is live: shown at the
@@ -887,6 +922,25 @@ function EvenOut({ manifest, node, update, upload, readAudio, notify }) {
 
 function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf, charging, paid, live, onSettings, readAudio, deleteObject }) {
   const trackCount = (manifest.releases || []).reduce((n, r) => n + (r.tracks?.length || 0), 0);
+  // Each release's callbacks, made once per release id, so Release can skip
+  // redrawing when nothing of its own changed.
+  const latestUpdate = useRef(update);
+  latestUpdate.current = update;
+  const handlers = useRef(new Map());
+  const handlersFor = (id) => {
+    let made = handlers.current.get(id);
+    if (!made) {
+      made = {
+        onChange: (change) => latestUpdate.current((m) => ({
+          ...m,
+          releases: (m.releases || []).map((x) => (x.id === id ? (typeof change === "function" ? change(x) : change) : x)),
+        })),
+        onRemove: () => latestUpdate.current((m) => ({ ...m, releases: (m.releases || []).filter((x) => x.id !== id) })),
+      };
+      handlers.current.set(id, made);
+    }
+    return made;
+  };
 
   const addRelease = () => {
     const taken = collectIds(manifest);
@@ -925,11 +979,7 @@ function MusicTab({ manifest, node, update, upload, art, notify, player, sizeOf,
           <Release
             key={r.id} release={r} node={node} manifest={manifest} charging={charging}
             upload={upload} art={art} notify={notify} player={player} sizeOf={sizeOf} deleteObject={deleteObject}
-            onChange={(change) => update((m) => ({
-              ...m,
-              releases: (m.releases || []).map((x) => (x.id === r.id ? (typeof change === "function" ? change(x) : change) : x)),
-            }))}
-            onRemove={() => update((m) => ({ ...m, releases: (m.releases || []).filter((x) => x.id !== r.id) }))}
+            onChange={handlersFor(r.id).onChange} onRemove={handlersFor(r.id).onRemove}
           />
         ))}
 
@@ -3215,54 +3265,71 @@ function EarningsTab({ node, api, payees, setPayees, manifest, update, live, rat
 
 // ── the player ──────────────────────────────────────────────────────────────
 
-function usePlayer() {
+/**
+ * The preview player: which track, and whether it's playing. The same object
+ * until one of those changes. Where it is in the song is PlayerBar's alone,
+ * so the time ticking doesn't redraw the editor four times a second.
+ */
+export function usePlayer() {
   const audio = useRef(null);
   const [current, setCurrent] = useState(null);
   const [playing, setPlaying] = useState(false);
-  const [at, setAt] = useState(0);
-  const [of, setOf] = useState(0);
+  const now = useRef(null);
+  now.current = current;
 
   useEffect(() => {
     const a = new Audio();
     a.preload = "none";
     audio.current = a;
-    const tick = () => { setAt(a.currentTime); setOf(a.duration || 0); };
-    a.addEventListener("timeupdate", tick);
-    a.addEventListener("loadedmetadata", tick);
-    a.addEventListener("ended", () => { setPlaying(false); setAt(0); });
+    a.addEventListener("ended", () => setPlaying(false));
     a.addEventListener("pause", () => setPlaying(false));
     a.addEventListener("play", () => setPlaying(true));
     return () => { a.pause(); a.src = ""; };
   }, []);
 
-  const toggle = (track) => {
-    const a = audio.current;
-    if (!a || !track.url) return;
-    if (current?.id === track.id) {
-      if (a.paused) a.play().catch(() => {}); else a.pause();
-      return;
-    }
-    a.src = track.url;
-    setCurrent(track);
-    setAt(0);
-    a.play().catch(() => {});
-  };
+  const controls = useMemo(() => {
+    const stop = () => {
+      audio.current?.pause();
+      setCurrent(null);
+    };
+    const toggle = (track) => {
+      const a = audio.current;
+      if (!a || !track.url) return;
+      if (now.current?.id === track.id) {
+        if (a.paused) a.play().catch(() => {}); else a.pause();
+        return;
+      }
+      a.src = track.url;
+      setCurrent(track);
+      a.play().catch(() => {});
+    };
+    return { toggle, stop, stopIf: (id) => { if (now.current?.id === id) stop(); } };
+  }, []);
 
-  const stop = () => {
-    audio.current?.pause();
-    setCurrent(null);
-  };
-
-  return {
-    current: current?.id ?? null, track: current, playing, at, of,
-    toggle, stop,
-    stopIf: (id) => { if (current?.id === id) stop(); },
-  };
+  return useMemo(() => ({ current: current?.id ?? null, track: current, playing, audio, ...controls }), [current, playing, controls]);
 }
 
 function PlayerBar({ player }) {
+  const [at, setAt] = useState(0);
+  const [of, setOf] = useState(0);
+  // Listens to the audio element itself, for as long as a track is up.
+  const a = player.audio?.current;
+  useEffect(() => {
+    if (!a || !player.track) return;
+    const tick = () => { setAt(a.currentTime || 0); setOf(a.duration || 0); };
+    const ended = () => setAt(0);
+    tick();
+    a.addEventListener("timeupdate", tick);
+    a.addEventListener("loadedmetadata", tick);
+    a.addEventListener("ended", ended);
+    return () => {
+      a.removeEventListener("timeupdate", tick);
+      a.removeEventListener("loadedmetadata", tick);
+      a.removeEventListener("ended", ended);
+    };
+  }, [a, player.track]);
   if (!player.track) return null;
-  const pct = player.of ? (player.at / player.of) * 100 : 0;
+  const pct = of ? (at / of) * 100 : 0;
   return (
     <div class="player">
       <div class="player-track"><i style={`width:${pct}%`} /></div>
@@ -3278,7 +3345,7 @@ function PlayerBar({ player }) {
           <b>{player.track.title || "Untitled"}</b>
           <span>doesn't count as a listen</span>
         </div>
-        <span class="time">{mmss(player.at)} / {mmss(player.of || player.track.duration)}</span>
+        <span class="time">{mmss(at)} / {mmss(of || player.track.duration)}</span>
         <button class="close" onClick={player.stop} aria-label="Close the player">×</button>
       </div>
     </div>
@@ -3579,7 +3646,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
   const changes = manifestChanges + (siteDirty ? 1 : 0);
   const dirty = live === null || changes > 0;
 
-  const notify = (kind, text, action = null) => setMsg({ kind, text, action });
+  const notify = useCallback((kind, text, action = null) => setMsg({ kind, text, action }), []);
   const update = useCallback((m) => setManifest(m), []);
 
   // Browsers only honour this after the page has been interacted with, which is
@@ -3593,7 +3660,7 @@ export function Editor({ api, node, initial, published = true, initialTab = "hom
     return () => window.removeEventListener("beforeunload", warn);
   }, [dirty, working]);
 
-  const upload = (key, file, onProgress) => api.putObject(key, file, onProgress);
+  const upload = useCallback((key, file, onProgress) => api.putObject(key, file, onProgress), [api]);
 
   /**
    * Put an image on the node and hand its public URL back to the caller —

@@ -343,5 +343,22 @@ cmp("with no payment point published, a dollar is the default", behind(c(120), 0
   check("  the email is for GDPR compliance", profile.includes("Email for GDPR compliance"));
 }
 
+// ── previewing a song doesn't redraw the editor as it plays ─────────────────
+{
+  const { memo, usePlayer } = await import("./src/ui.jsx");
+  const check = (name, cond) => { cond ? pass++ : fail++; console.log(`${cond ? "ok  " : "FAIL"}  ${name}`); };
+  let player;
+  renderToString(h(() => { player = usePlayer(); return null; }));
+  check("the player the editor holds is which track and whether it plays, not where it is",
+    "current" in player && "playing" in player && typeof player.toggle === "function" && typeof player.stop === "function"
+    && !("at" in player) && !("of" in player));
+  const Row = memo(() => null);
+  const row = new Row({ a: 1, f: Math.max });
+  row.props = { a: 1, f: Math.max };
+  check("  and releases and tracks redraw only when their own props change",
+    !row.shouldComponentUpdate({ a: 1, f: Math.max }) && row.shouldComponentUpdate({ a: 2, f: Math.max })
+    && row.shouldComponentUpdate({ a: 1, f: Math.min }) && row.shouldComponentUpdate({ a: 1 }));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
