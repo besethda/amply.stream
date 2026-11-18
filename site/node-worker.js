@@ -2210,7 +2210,7 @@ async function feeOnrampSignature(db, signedAt, now = Date.now()) {
 }
 var RpcError = class extends Error {
 };
-function rpcAt(url) {
+function rpcAt(url, timeoutMs = RPC_TIMEOUT_MS) {
   return async (method, params) => {
     let res;
     try {
@@ -2219,7 +2219,7 @@ function rpcAt(url) {
         // Solana's public endpoint refuses a Worker without a User-Agent.
         headers: { "Content-Type": "application/json", "User-Agent": "amply-node/1.0" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-        signal: AbortSignal.timeout(RPC_TIMEOUT_MS)
+        signal: AbortSignal.timeout(timeoutMs)
       });
     } catch {
       throw new RpcError("couldn't reach the network");
@@ -2232,19 +2232,53 @@ function rpcAt(url) {
 }
 var balances = /* @__PURE__ */ new Map();
 var BALANCE_FRESH_MS = 5 * 6e4;
-async function feeBalance(rpc, address, { fresh = false, now = Date.now() } = {}) {
+var BALANCE_STANDS_MS = 36e5;
+var FAILURE_REMEMBERED_MS = 3e4;
+var BALANCE_TIMEOUT_MS = 3e3;
+var failures = /* @__PURE__ */ new Map();
+var asking = /* @__PURE__ */ new Map();
+function askBalance(rpc, address, now) {
+  const already = asking.get(address);
+  if (already) return already;
+  const p = (async () => {
+    try {
+      const r = await rpc("getBalance", [address, { commitment: "confirmed" }]);
+      const lamports = Number(r?.value ?? 0);
+      balances.set(address, { lamports, at: now });
+      failures.delete(address);
+      return lamports;
+    } catch (e) {
+      failures.set(address, now);
+      throw e;
+    } finally {
+      asking.delete(address);
+    }
+  })();
+  asking.set(address, p);
+  return p;
+}
+async function feeBalance(rpc, address, { fresh = false, now = Date.now(), later } = {}) {
   const known = balances.get(address);
+  const stands = !!known && now - known.at < BALANCE_STANDS_MS;
   if (known && !fresh && now - known.at < BALANCE_FRESH_MS) return known.lamports;
-  let r;
+  if (!fresh) {
+    if (stands && later) {
+      later(askBalance(rpc, address, now).catch(() => {
+      }));
+      return known.lamports;
+    }
+    const failed = failures.get(address);
+    if (failed !== void 0 && now - failed < FAILURE_REMEMBERED_MS) {
+      if (stands) return known.lamports;
+      throw new RpcError("couldn't reach the network just now");
+    }
+  }
   try {
-    r = await rpc("getBalance", [address, { commitment: "confirmed" }]);
+    return await askBalance(rpc, address, now);
   } catch (e) {
-    if (!fresh && known && now - known.at < 36e5) return known.lamports;
+    if (!fresh && stands) return known.lamports;
     throw e;
   }
-  const lamports = Number(r?.value ?? 0);
-  balances.set(address, { lamports, at: now });
-  return lamports;
 }
 async function feeRoom(db, kind = "pay", now = Date.now()) {
   try {
@@ -2494,7 +2528,7 @@ var studioManifest = () => JSON.stringify({
 });
 
 // src/constants.ts
-var VERSION = "3.24.5";
+var VERSION = "3.24.7";
 var SPEC_VERSION = 1;
 var RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
 var MANAGE_CSP = [
@@ -2813,7 +2847,7 @@ async function manifestText(env) {
   cachedManifest = { at: now, body };
   return body;
 }
-async function listenerText(env) {
+async function listenerText(env, ctx) {
   const text = await manifestText(env);
   if (text === null) return null;
   let manifest;
@@ -2824,20 +2858,20 @@ async function listenerText(env) {
   }
   const at = (manifest?.payment || []).findIndex((p) => p?.type === "solana-usdc");
   if (at < 0) return text;
-  if (await feeOffer(env).catch(() => null)) return text;
+  if (await feeOffer(env, ctx).catch(() => null)) return text;
   manifest.payment[at] = { ...manifest.payment[at], paused: true };
   return JSON.stringify(manifest);
 }
-async function takingPayments(env) {
-  const text = await listenerText(env);
+async function takingPayments(env, ctx) {
+  const text = await listenerText(env, ctx);
   try {
     return !paused(text ? JSON.parse(text) : null);
   } catch {
     return false;
   }
 }
-async function serveManifest(env) {
-  const body = await listenerText(env);
+async function serveManifest(env, ctx) {
+  const body = await listenerText(env, ctx);
   if (body === null) {
     return fail(404, "no manifest published yet");
   }
@@ -3238,13 +3272,14 @@ async function manifestNowOf(env) {
     return null;
   }
 }
-async function feeOffer(env) {
+async function feeOffer(env, ctx) {
   const pay = walletOf(await manifestNowOf(env));
   const chain = pay && CHAINS[pay.network];
   if (!pay || !chain) return null;
   const feePayer = await feeAddress(env.DB);
   if (pay.recipients.some((r) => r.address === feePayer)) return null;
-  if (await feeBalance(rpcAt(chain.rpc), feePayer) < OFFER_ABOVE_LAMPORTS) return null;
+  const later = ctx ? (p) => ctx.waitUntil(p) : void 0;
+  if (await feeBalance(rpcAt(chain.rpc, BALANCE_TIMEOUT_MS), feePayer, { later }) < OFFER_ABOVE_LAMPORTS) return null;
   return {
     feePayer,
     network: pay.network,
@@ -3253,7 +3288,7 @@ async function feeOffer(env) {
     withdraw: { to: pay.recipients[0].address, fee: WITHDRAW_FEE_MICROS, newAccountFee: NEW_ACCOUNT_FEE_MICROS }
   };
 }
-async function handleListen(request, env, path) {
+async function handleListen(request, env, path, ctx) {
   const host = new URL(request.url).host;
   if (path === "/challenge" && request.method === "POST") {
     return new Response(JSON.stringify({ challenge: challenge(host) }), {
@@ -3269,7 +3304,7 @@ async function handleListen(request, env, path) {
     const address = String(body.address);
     const until = await refresh(env.DB, address).catch(() => subscribedUntil(env.DB, address));
     const subscribed = until !== null && until > Date.now();
-    const text = await listenerText(env);
+    const text = await listenerText(env, ctx);
     let manifest = null;
     try {
       manifest = text ? JSON.parse(text) : null;
@@ -3284,7 +3319,7 @@ async function handleListen(request, env, path) {
     });
   }
   if (path === "/fees" && request.method === "GET") {
-    const offer = await feeOffer(env).catch(() => null);
+    const offer = await feeOffer(env, ctx).catch(() => null);
     return new Response(JSON.stringify(offer ?? { feePayer: null }), {
       status: 200,
       headers: noStore({ "Content-Type": "application/json; charset=utf-8" })
@@ -3512,7 +3547,7 @@ async function handleListen(request, env, path) {
     if (!await listener(env.DB, who) && !await allow(env, RULES.newListener, host)) {
       return new Response(null, { status: 204, headers: noStore() });
     }
-    if (!await takingPayments(env)) return new Response(null, { status: 204, headers: noStore() });
+    if (!await takingPayments(env, ctx)) return new Response(null, { status: 204, headers: noStore() });
     const body = await jsonBody(request);
     const until = await subscribedUntil(env.DB, who).catch(() => null);
     const subscribed = until !== null && until > Date.now();
@@ -3574,9 +3609,9 @@ async function handleListen(request, env, path) {
   return null;
 }
 var index_default = {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
-      return await serve(request, env);
+      return await serve(request, env, ctx);
     } catch (e) {
       const said = quotaFailure(e);
       if (said) return fail(said.status, said.message);
@@ -3584,7 +3619,7 @@ var index_default = {
     }
   }
 };
-async function serve(request, env) {
+async function serve(request, env, ctx) {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: withCors() });
   }
@@ -3608,7 +3643,7 @@ async function serve(request, env) {
     });
   }
   if (pathname === "/listen" || pathname.startsWith("/listen/")) {
-    const answered = await handleListen(request, env, pathname.slice("/listen".length));
+    const answered = await handleListen(request, env, pathname.slice("/listen".length), ctx);
     if (answered) return answered;
     return fail(404, "not found");
   }
@@ -3620,7 +3655,7 @@ async function serve(request, env) {
     if (arriving(request) && !(await accessConfig(env)).set && await previewSession(request, readPreviewKey(await setting(env.DB, PREVIEW_KEY)))) {
       return new Response(null, { status: 302, headers: noStore({ Location: "/manage" }) });
     }
-    const body = await listenerText(env);
+    const body = await listenerText(env, ctx);
     if (body === null) return fail(404, "no manifest published yet");
     let manifest;
     try {
@@ -3651,7 +3686,7 @@ async function serve(request, env) {
       headers
     });
   }
-  if (pathname === "/manifest.json") return serveManifest(env);
+  if (pathname === "/manifest.json") return serveManifest(env, ctx);
   if (pathname === "/privacy") {
     const body = await manifestText(env);
     let manifest = {};
@@ -3716,7 +3751,7 @@ async function serve(request, env) {
   if (pathname.startsWith("/audio/")) {
     const key = safeKey("audio", pathname.slice("/audio/".length));
     if (key === null) return fail(400, "bad key");
-    const manifest = await listenerText(env);
+    const manifest = await listenerText(env, ctx);
     let guarded = /* @__PURE__ */ new Set();
     let masters = /* @__PURE__ */ new Set();
     try {

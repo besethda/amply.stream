@@ -44,11 +44,14 @@ const MEDIA_KV = {
 const env = { DB, MEDIA_KV };
 
 // The network: only the fees account's balance is ever asked here.
-let lamports = 0, rpcDown = false;
+let lamports = 0, rpcDown = false, rpcHangs = false, asked = 0;
 globalThis.fetch = async (url, init) => {
   const body = JSON.parse(init?.body || "{}");
   if (body.method !== "getBalance") throw new Error(`unexpected ${url} ${body.method}`);
+  asked++;
   if (rpcDown) throw new TypeError("fetch failed");
+  // An outage that doesn't refuse, just never answers: only the timeout ends it.
+  if (rpcHangs) return new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(init.signal.reason)));
   return new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { value: lamports } }));
 };
 // The balance is remembered a few minutes; the clock moves past that.
@@ -143,6 +146,42 @@ rpcDown = false;
   const body = await res.text();
   ok("the artist's server serves the favicon, as an SVG", res.status === 200 && res.headers.get("Content-Type") === "image/svg+xml");
   ok("  the same one as amply.stream's", body === readFileSync("site/favicon.svg", "utf8").trim());
+}
+
+// ── Solana not answering at all, with no balance known ──
+{
+  later(61);   // anything known is over an hour old: nobody can say
+  rpcHangs = true;
+  // Node doesn't stay up for AbortSignal.timeout's timer alone; a Worker would.
+  const awake = setInterval(() => {}, 1_000);
+  const before = asked;
+  let t = performance.now();
+  const first = await served();
+  const firstMs = performance.now() - t;
+  ok("Solana hanging, nothing known: paused, after a short wait rather than ten seconds", first.paused === true && firstMs < 9_000, `${Math.round(firstMs)} ms`);
+  t = performance.now();
+  const second = await served();
+  const audio = await get("/audio/song.mp3");
+  const secondMs = performance.now() - t;
+  ok("  the next requests don't wait on it again", second.paused === true && audio.status !== 401 && secondMs < 1_000 && asked === before + 1,
+    `${Math.round(secondMs)} ms, asked ${asked - before}`);
+  clearInterval(awake);
+  later(1);   // past the half minute a failure is remembered
+  rpcHangs = false;
+  lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
+  ok("  half a minute on, it asks again", (await served()).paused === undefined && asked === before + 2);
+}
+
+// ── a balance a few minutes old: used at once, refreshed in the background ──
+{
+  later(6);
+  lamports = 0;
+  const waiting = [];
+  const ctx = { waitUntil: (p) => waiting.push(p), passThroughOnException() {} };
+  const res = await worker.fetch(new Request(`${ORIGIN}/manifest.json`), env, ctx);
+  ok("a stale balance is used straight away", (await res.json()).payment[0].paused === undefined && waiting.length === 1);
+  await Promise.all(waiting);
+  ok("  and the background check is what the next request sees", (await served()).paused === true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

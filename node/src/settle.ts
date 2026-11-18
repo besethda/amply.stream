@@ -123,7 +123,7 @@ export class RpcError extends Error {}
 
 export type Rpc = (method: string, params: unknown[]) => Promise<any>;
 
-export function rpcAt(url: string): Rpc {
+export function rpcAt(url: string, timeoutMs = RPC_TIMEOUT_MS): Rpc {
   return async (method, params) => {
     let res: Response;
     try {
@@ -132,7 +132,7 @@ export function rpcAt(url: string): Rpc {
         // Solana's public endpoint refuses a Worker without a User-Agent.
         headers: { "Content-Type": "application/json", "User-Agent": "amply-node/1.0" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-        signal: AbortSignal.timeout(RPC_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch {
       throw new RpcError("couldn't reach the network");
@@ -149,22 +149,70 @@ export function rpcAt(url: string): Rpc {
  *  each time would be slow and rude to a free endpoint. */
 const balances = new Map<string, { lamports: number; at: number }>();
 const BALANCE_FRESH_MS = 5 * 60_000;
+/** A balance this old still stands while the network can't be asked. */
+const BALANCE_STANDS_MS = 3_600_000;
+/** After a failed ask, how long the balance is simply unknown, without asking
+ *  again: during an outage, one request waits for the network, not every one. */
+const FAILURE_REMEMBERED_MS = 30_000;
+/** How long a listener's request waits for the balance when nothing is known.
+ *  The network answers in well under a second when it's well. */
+export const BALANCE_TIMEOUT_MS = 3_000;
+const failures = new Map<string, number>();
+const asking = new Map<string, Promise<number>>();
 
-export async function feeBalance(rpc: Rpc, address: string, { fresh = false, now = Date.now() } = {}): Promise<number> {
+/** One question to the network at a time per wallet; the answer, or the
+ *  failure, is remembered. */
+function askBalance(rpc: Rpc, address: string, now: number): Promise<number> {
+  const already = asking.get(address);
+  if (already) return already;
+  const p = (async () => {
+    try {
+      const r = await rpc("getBalance", [address, { commitment: "confirmed" }]);
+      const lamports = Number(r?.value ?? 0);
+      balances.set(address, { lamports, at: now });
+      failures.delete(address);
+      return lamports;
+    } catch (e) {
+      failures.set(address, now);
+      throw e;
+    } finally {
+      asking.delete(address);
+    }
+  })();
+  asking.set(address, p);
+  return p;
+}
+
+/**
+ * `later`, where given, is the request's ctx.waitUntil: a balance that's a few
+ * minutes old is then used at once and asked again in the background, so no
+ * listener waits on the network for it. Without it, the ask is awaited.
+ */
+export async function feeBalance(rpc: Rpc, address: string, { fresh = false, now = Date.now(), later }:
+  { fresh?: boolean; now?: number; later?: (p: Promise<unknown>) => void } = {}): Promise<number> {
   const known = balances.get(address);
+  const stands = !!known && now - known.at < BALANCE_STANDS_MS;
   if (known && !fresh && now - known.at < BALANCE_FRESH_MS) return known.lamports;
-  let r;
+  if (!fresh) {
+    if (stands && later) {
+      later(askBalance(rpc, address, now).catch(() => {}));
+      return known!.lamports;
+    }
+    // The network failed just now: don't wait on it again so soon.
+    const failed = failures.get(address);
+    if (failed !== undefined && now - failed < FAILURE_REMEMBERED_MS) {
+      if (stands) return known!.lamports;
+      throw new RpcError("couldn't reach the network just now");
+    }
+  }
   try {
-    r = await rpc("getBalance", [address, { commitment: "confirmed" }]);
+    return await askBalance(rpc, address, now);
   } catch (e) {
     // A busy network for a minute shouldn't pause the artist's price: what
     // was true within the hour stands. Any older, and nobody can say.
-    if (!fresh && known && now - known.at < 3_600_000) return known.lamports;
+    if (!fresh && stands) return known!.lamports;
     throw e;
   }
-  const lamports = Number(r?.value ?? 0);
-  balances.set(address, { lamports, at: now });
-  return lamports;
 }
 
 // ── the daily cap ───────────────────────────────────────────────────────────
