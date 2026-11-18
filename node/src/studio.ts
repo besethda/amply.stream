@@ -5,9 +5,11 @@
  * they say nothing about anyone (a name, colours, a logo), and the editor must
  * keep working even if amply.stream is gone, so nothing here points there.
  */
-import icon180 from "../../site/app/icon-180.png";
-import icon192 from "../../site/app/icon-192.png";
-import icon512 from "../../site/app/icon-512.png";
+// The editor's own icon: the logo on black, so it's told apart from the
+// listening app (orange on white) on an artist's Home Screen.
+import icon180 from "../studio/icon-180.png";
+import icon192 from "../studio/icon-192.png";
+import icon512 from "../studio/icon-512.png";
 
 export const ICONS: Record<string, Uint8Array> = {
   "/studio/icon-180.png": icon180,
@@ -24,7 +26,7 @@ export const studioManifest = () => JSON.stringify({
   start_url: "/manage",
   scope: "/manage",
   display: "standalone",
-  background_color: "#ffffff",
+  background_color: "#000000",   // the launch screen, around the black icon
   theme_color: "#ffffff",
   icons: [
     { src: "/studio/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
