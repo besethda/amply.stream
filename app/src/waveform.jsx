@@ -146,12 +146,12 @@ function hillColours(accent, light, n) {
 }
 
 /** Every box's colour, column by column and row by row, from the accent. */
-function boxColours(accent, light, cols) {
+function boxColours(accent, light, cols, rows = BOX_ROWS) {
   const { h, s } = hsl(accent || ORANGE);
   return Array.from({ length: cols }, (_, c) => {
     const across = (c / Math.max(1, cols - 1) - 0.5) * HUE_ACROSS;
-    return Array.from({ length: BOX_ROWS }, (_, r) => {
-      const up = r / (BOX_ROWS - 1);
+    return Array.from({ length: rows }, (_, r) => {
+      const up = r / (rows - 1);
       const hue = h - HUE_UP * 0.4 + HUE_UP * up + across;
       return light
         ? rgb(hue, s * (0.75 + 0.25 * up), 0.72 - 0.4 * up)
@@ -160,10 +160,10 @@ function boxColours(accent, light, cols) {
   });
 }
 
-export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20, style = "ribbons" }) {
+export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20, style = "ribbons", wide = false }) {
   const canvas = useRef(null);
-  const live = useRef({ playing, progress, accent, style });
-  live.current = { playing, progress, accent, style };
+  const live = useRef({ playing, progress, accent, style, wide });
+  live.current = { playing, progress, accent, style, wide };
 
   useEffect(() => {
     const el = canvas.current;
@@ -188,7 +188,8 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
     // Gradients and each ribbon's swell only change with the size and theme,
     // so work them out once rather than every frame.
     const prepared = (w, h, pad, light, accent) => {
-      const key = `${w}x${h}${light}${accent}`;
+      const wide = !!live.current.wide;
+      const key = `${w}x${h}${light}${accent}${wide}`;
       const hillsFor = () => {
         // A gradient per band, paler towards the tips on both sides of the line.
         const reach = h * HILL_HEIGHT, n = HILLS.length, a = light ? 0.42 : 0.5;
@@ -204,11 +205,15 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
       };
       const boxesFor = () => {
         // Columns of square cells across the width, centred on the middle line.
-        const avail = w - 2 * pad, cols = Math.max(12, Math.min(40, Math.round(avail / (BOX_PX * dpr))));
+        // A desktop window is far wider than a phone: more, slightly bigger
+        // boxes and taller columns, rather than a few huge ones.
+        const px = wide ? 15 : BOX_PX, most = wide ? 112 : 40;
+        const rows = wide ? Math.max(BOX_ROWS, Math.min(7, Math.floor((h / 2 - 4 * dpr) / (px * dpr)))) : BOX_ROWS;
+        const avail = w - 2 * pad, cols = Math.max(12, Math.min(most, Math.round(avail / (px * dpr))));
         const cell = avail / cols, size = cell * BOX_FILL;
         return {
-          cols, size, cell, x0: pad + (cell - size) / 2, radius: Math.min(2.5 * dpr, size / 3),
-          colours: boxColours(accent, light, cols),
+          cols, size, cell, rows, x0: pad + (cell - size) / 2, radius: Math.min(2.5 * dpr, size / 3),
+          colours: boxColours(accent, light, cols, rows),
         };
       };
       if (cached?.key === key) return cached;
@@ -288,9 +293,10 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
     const drawRibbons = (P, w, h, mid, t, light) => {
       g.globalCompositeOperation = light ? "source-over" : "lighter";
       LOOK.forEach((look, i) => {
-        const amp = h * 0.46 * (0.04 + shown[i]);
+        const amp = h * 0.46 * (0.04 + shown[i]) * (live.current.wide ? 1.3 : 1);
         const phase = still ? 0 : t * look.speed;
-        const k = (look.cycles * Math.PI * 2) / w;
+        // Across a desktop window, more waves, so it doesn't stretch into a few long swells.
+        const k = (look.cycles * (live.current.wide ? Math.min(2.4, Math.max(1, w / dpr / 520)) : 1) * Math.PI * 2) / w;
         const shape = P.shape[i];
         g.beginPath();
         P.xs.forEach((x, j) => {
@@ -299,7 +305,7 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
         });
         const c = P.ribbons[i];
         g.strokeStyle = `rgba(${c},${light ? 0.85 : 0.95})`;
-        g.lineWidth = look.width * dpr;
+        g.lineWidth = look.width * dpr * (live.current.wide ? 1.35 : 1);
         g.stroke();
       });
     };
@@ -374,15 +380,16 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
           v = live.current.playing ? 0.3 + 0.18 * Math.sin(t * 1.3 + c * 0.35) : 0;
         }
         // How many boxes it lights, the last one partly.
-        const lit = (BOX_FLOOR + (1 - BOX_FLOOR) * Math.max(0, Math.min(1, v))) * BOX_ROWS;
+        const lit = (BOX_FLOOR + (1 - BOX_FLOOR) * Math.max(0, Math.min(1, v))) * B.rows;
         const left = B.x0 + c * B.cell;
-        for (let r = 0; r < BOX_ROWS; r++) {
+        const reflect = B.rows > BOX_ROWS ? REFLECT_ROWS + 1 : REFLECT_ROWS;
+        for (let r = 0; r < B.rows; r++) {
           const fill = Math.min(1, lit - r);
           if (fill <= 0.02) break;
           const colour = B.colours[c][r];
           // Above the line, and (for the first few) its reflection below.
           const at = [[mid - gap / 2 - (r + 1) * B.cell + gap, fill]];
-          if (r < REFLECT_ROWS) at.push([mid + gap / 2 + r * B.cell, fill * REFLECTION * (1 - r / REFLECT_ROWS / 1.5)]);
+          if (r < reflect) at.push([mid + gap / 2 + r * B.cell, fill * REFLECTION * (1 - r / reflect / 1.5)]);
           for (const [y, a] of at) {
             g.fillStyle = `rgba(${colour},${a})`;
             if (round) { g.beginPath(); g.roundRect(left, y, B.size, B.size, B.radius); g.fill(); }
@@ -396,7 +403,7 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
       // Still to come: dim the ribbons after the playhead. Not the boxes: across,
       // they're frequencies, and cutting them at the playhead only confuses.
       if (live.current.style === "ribbons") {
-        g.fillStyle = "rgba(0,0,0,0.55)";
+        g.fillStyle = light ? "rgba(0,0,0,0.4)" : "rgba(0,0,0,0.55)";
         g.fillRect(head, 0, w - head, h);
       }
 
@@ -420,8 +427,14 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
       g.fillStyle = halo;
       g.beginPath(); g.arc(head, mid, 18 * dpr, 0, Math.PI * 2); g.fill();
       g.globalCompositeOperation = "source-over";
-      g.fillStyle = light ? "#131110" : "#fff7ef";
-      g.beginPath(); g.arc(head, mid, 6.5 * dpr, 0, Math.PI * 2); g.fill();
+      if (light) {
+        // On a light screen: the cover's colour with a white ring, not a black dot.
+        g.fillStyle = "#fff"; g.beginPath(); g.arc(head, mid, 8 * dpr, 0, Math.PI * 2); g.fill();
+        g.fillStyle = `rgb(${P.line})`; g.beginPath(); g.arc(head, mid, 5.5 * dpr, 0, Math.PI * 2); g.fill();
+      } else {
+        g.fillStyle = "#fff7ef";
+        g.beginPath(); g.arc(head, mid, 6.5 * dpr, 0, Math.PI * 2); g.fill();
+      }
       next(now, real, settled);
     };
     const next = (now, real, settled) => {

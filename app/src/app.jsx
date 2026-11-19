@@ -40,7 +40,9 @@ import { You } from "./you.jsx";
 import { Onboard } from "./onboard.jsx";
 import { AddScreen } from "./add.jsx";
 import { createVisualizer } from "./visualizer.js";
-import { pageScroll, setPageScroll } from "./scroll.js";
+import { pageScroll, setPageScroll, scrollToTop } from "./scroll.js";
+import { createEq } from "./eq.js";
+import { useDesktop, MainPanel, TopBar, Sidebar, PlayerBar, SidePanel, Expanded, useKeys, useVolume } from "./desktop.jsx";
 import {
   LOCAL, localSongs, audioUrl as localAudio, wavesResponse, albums as albumsOf, editSong, removeSong, saveOwned, ownedIndex, setOwned, filesOf,
   cover as coverOf,
@@ -61,6 +63,14 @@ import { createUpdater, IDLE_MS as UPDATE_IDLE_MS } from "./update.js";
 import {
   behindSplash, showSplash, fontsLoaded, imagesInView, laidOut, START_MS as SPLASH_START_MS, RESUME_MS as SPLASH_RESUME_MS,
 } from "./splash.js";
+
+/** How long some songs last together: "23 min", or "1 hr 4 min". */
+function totalTime(rows) {
+  const s = rows.reduce((n, r) => n + (Number(r.track?.duration) || 0), 0);
+  if (!s) return "";
+  const m = Math.round(s / 60);
+  return m < 60 ? `${Math.max(1, m)} min` : `${Math.floor(m / 60)} hr ${m % 60} min`;
+}
 
 /** A refusal the player can show: it carries a `kind` (see sheets.jsx). */
 function refuse(kind, message = kind, data = {}) {
@@ -93,6 +103,10 @@ export function App() {
   // it. It's swiped down, or closed with its arrow.
   const [np, setNpOpen] = useState(false);
   const npRef = useRef(np); npRef.current = np;
+  // On a computer: a sidebar, a player bar, and a panel beside the music.
+  const desk = useDesktop();
+  const [panel, setPanelState] = useState(() => { try { const p = localStorage.getItem("amply.panel"); return p === "" ? null : p || "np"; } catch { return "np"; } });
+  const setPanel = (p) => { setPanelState(p); try { localStorage.setItem("amply.panel", p || ""); } catch { /* fine */ } };
   const youView = ui.you;
   const [, bump] = useState(0);                   // redraw after likes/playlists change
   const [shared, setShared] = useState(null);     // a playlist opened from a link
@@ -196,6 +210,8 @@ export function App() {
       // artist's songs are free, and they must be charged for once they aren't.
       if (track?.from) heardFrom.current.add(track.from);
       if (!track?.from || !track.needsWallet) return;
+      // Muted isn't listening: nothing is charged while the volume is off.
+      if (silent.current) return;
       // A subscriber has paid by card; charging by the minute too would be twice.
       if (isSubscribed(originOf(track.url))) return;
       pending.current[track.from] = (pending.current[track.from] || 0) + seconds;
@@ -226,6 +242,10 @@ export function App() {
           return (localBlob.current = url);
         }
         if (!track.needsWallet) return track.url;
+        // A paid song's pass identifies this wallet to whoever serves it, so
+        // it's only ever asked of the artist's own server — never another
+        // host a manifest happens to name.
+        if (originOf(track.url) !== originOf(track.from)) throw refuse("refused", "This song isn't served by the artist's own service.");
         const artist = library.current.find((e) => e.url === track.from);
         const data = {
           url: track.from, name: nameOf(artist), art: artist?.manifest?.artist?.image || track.art || null,
@@ -276,7 +296,7 @@ export function App() {
         // The song's own count, for the artist's "most played": nothing about
         // who is kept, so free tracks count too. A paid one is counted only
         // with this wallet's pass. Songs on this phone aren't anyone's.
-        if (track.id && /^https:/.test(track.url || "")) {
+        if (track.id && /^https:/.test(track.url || "") && originOf(track.url) === originOf(track.from)) {
           const origin = originOf(track.url);
           if (!track.needsWallet) reportHeard(origin, track.id, seconds);
           else if (holder.current) {
@@ -293,6 +313,20 @@ export function App() {
     },
   ), []);
   try { if (location.hostname === "localhost") window.__amplyPlayer = player; } catch { /* not a browser */ }
+  // A computer's volume slider, and its keys: space, arrows, M, L.
+  // The equaliser: nothing routed through it until it's first switched on.
+  const eq = useMemo(() => (typeof window !== "undefined" ? createEq(player.element(), {
+    onTrouble: () => flash({ bad: true, text: "This song can't play through the EQ. Reload to hear it without." }),
+  }) : null), []);
+  const volume = useVolume(player, eq);
+  const silent = useRef(false);
+  silent.current = volume.muted || volume.vol === 0;
+  useEffect(() => {
+    const a = player.element(), wake = () => eq?.wake();
+    a.addEventListener("play", wake);
+    return () => a.removeEventListener("play", wake);
+  }, []);
+  useKeys({ player, state, volume, onLike: () => { if (state.track) { toggleLike(state.track); bump((n) => n + 1); } } });
 
   // ── listening, banked and paid for ────────────────────────────────────────
 
@@ -554,9 +588,11 @@ export function App() {
     const claim = claimOf(url);
     const entry = library.current.find((e) => e.url === url);
     view.state = state;
+    // What the Pay button pays is what this shows, and no more (payOwes).
+    view.owes = claim ? Math.max(claim.remaining, 0) : view.owes;
     setSheet({ ...unpaidSheet({
       name: entry ? nameOf(entry) : view.name, art: view.art,
-      owes: claim ? Math.max(claim.remaining, 0) : view.owes,
+      owes: view.owes, mine: loadLedger()[url]?.micros || 0,
       state, ...extra,
     }, {
       money,
@@ -594,7 +630,10 @@ export function App() {
     showOwes(url, "paying");
     let r;
     try {
-      r = await payWith(() => payClaim(pair, entry, { ...claimOptions(), explicit: true }));
+      // At most what the sheet showed: a server can't raise it between the
+      // listener reading the amount and tapping Pay.
+      const shown = owesView.current?.url === url ? owesView.current.owes : claimOf(url)?.remaining;
+      r = await payWith(() => payClaim(pair, entry, { ...claimOptions(), explicit: true, max: shown ?? 0 }));
     } catch (e) {
       setLedger(loadLedger());
       if (e.kind === "paused") noteFees([url], [false]);
@@ -1037,6 +1076,8 @@ export function App() {
     (async () => {
       try {
         const e = await knownArtist(url);
+        // Opening it tells their server this wallet's ID: asked first.
+        if (!(await ask({ title: `Open a gift from ${nameOf(e)}?`, body: "Your wallet ID is shared with them.", confirm: "Open", icon: <Icon.heart size={22} /> }))) return;
         const who = await ensureWallet();
         setSheet({ title: "Opening your gift…", body: `From ${nameOf(e)}'s streaming service`, icon: <Icon.heart size={22} />, secondaryLabel: "Hide" });
         const r = await redeemGift(who, originOf(e.url), code);
@@ -1100,7 +1141,7 @@ export function App() {
     const e = byUrl(r.from);
     const t = e && tracksOf(e).find((x) => x.id === r.id);
     return t ? [{ track: decorate(t), entry: e }] : [];
-  }).slice(0, 5);
+  }).slice(0, desk ? 6 : 5);
 
   /** The current song's cost, for the mini player and Now playing. */
   const cost = (() => {
@@ -1124,7 +1165,7 @@ export function App() {
   const goTab = (t) => {
     // The tab you're already on, at its top level: back to the top of it.
     const u = uiRef.current;
-    if (t === u.tab && !u.open && !u.coll && !u.you && !u.add) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    if (t === u.tab && !u.open && !u.coll && !u.you && !u.add) { scrollToTop(); return; }
     go({ ...BASE, tab: t }, { replace: true });
   };
   const followed = followedOnly(entries);
@@ -1396,8 +1437,8 @@ export function App() {
     const e = byUrl(coll.from);
     const rel = e && (e.manifest.releases || []).find((r) => r.id === coll.rid);
     const rows = rel ? tracksOf(e).filter((t) => t.releaseId === rel.id).map((t) => ({ track: decorate(t), entry: e })) : [];
-    screen = <Collection kind="album" title={rel?.title || "Album"} art={rel?.art || null}
-      meta={[rel?.artistName || nameOf(e), rel?.date?.slice(0, 4), `${rows.length} songs`].filter(Boolean).join(" · ")}
+    screen = <Collection kind="album" title={rel?.title || "Album"} art={rel?.art || null} tint={rel?.colors?.accent || null}
+      meta={[rel?.artistName || nameOf(e), rel?.date?.slice(0, 4), `${rows.length} songs`, totalTime(rows)].filter(Boolean).join(" · ")}
       rows={rows} {...collProps}
       liked={rows.length > 0 && rows.every((r) => isLiked(r.track, likedNow))}
       buy={(() => {
@@ -1421,6 +1462,11 @@ export function App() {
       } : null}
       onPlay={(tracks, i) => { player.setShuffle(false); play(tracks, i, rel?.title); }}
       onShuffle={(tracks) => { player.setShuffle(true); play(tracks, 0, rel?.title); }} />;
+  } else if (coll?.kind === "liked") {
+    screen = <Collection kind="liked" title="Liked songs" art={null} likedArt
+      meta={`${liked.length} song${liked.length === 1 ? "" : "s"}`} rows={liked} {...collProps}
+      onPlay={(tracks, i) => { player.setShuffle(false); play(tracks, i, "Liked songs"); }}
+      onShuffle={(tracks) => { player.setShuffle(true); play(tracks, 0, "Liked songs"); }} />;
   } else if (coll?.kind === "playlist") {
     const pl = lists.find((p) => p.id === coll.id);
     const { rows, missing } = found(pl?.tracks || []);
@@ -1431,7 +1477,7 @@ export function App() {
         if (!setPlaylistArt(pl.id, art)) flash({ bad: true, text: "There isn't room to keep that picture" });
         redraw();
       } : null}
-      meta={`${rows.length} song${rows.length === 1 ? "" : "s"}`} rows={rows} missing={missing} {...collProps}
+      meta={[`${rows.length} song${rows.length === 1 ? "" : "s"}`, totalTime(rows)].filter(Boolean).join(" · ")} rows={rows} missing={missing} {...collProps}
       onPlay={(tracks, i) => { player.setShuffle(false); play(tracks, i, pl?.name); }}
       onShuffle={(tracks) => { player.setShuffle(true); play(tracks, 0, pl?.name); }}
       onShare={() => pl && shareList(pl.name, pl.tracks)}
@@ -1477,15 +1523,66 @@ export function App() {
       <You pair={pair} setPair={setPair} balance={balance} owed={owedAll} onRefresh={refresh}
         onSetUp={() => needWallet()}
         entries={entries} onOpenArtist={(u) => go({ open: u })} view={youView} setView={setYouView}
-        themeName={themeName} onTheme={toggleTheme}
+        themeName={themeName} onTheme={toggleTheme} eq={eq}
         purchases={<Purchases pair={pair} entries={entries} owned={ownedMap} onOpenArtist={(u) => go({ open: u })}
           onDownload={(e, ids) => keepSongs(e, ids, titleOfItem(e, ids[0]))}
           onShareGift={(e, code, title) => giftSheet(e, code, title)} />} />
     );
   } else {
     screen = <Home entries={followed.filter(reachable)} recentTracks={recentTracks} onOpenArtist={setOpen} onPlay={play}
+      onOpenAlbum={desk ? openAlbum : null}
       current={state.track} playing={state.playing} onAdd={openAdd} onMore={openMenu}
       lists={lists} onOpenPlaylist={(id) => go({ coll: { kind: "playlist", id } })} onNewPlaylist={newPlaylist} />;
+  }
+
+  const onTip = () => setSheet({ title: `Tip ${tipsNow.name}`, icon: <Icon.tip size={22} />, body: "Straight to them. Amply takes nothing.", children: <Tips tips={tipsNow} />, secondaryLabel: "Close" });
+  const overlays = <>
+    {handoff && <Handoff link={handoff.link} url={handoff.url} onStay={() => { const l = handoff.link; setHandoff(null); openLink(l); }} />}
+    <Sheet sheet={sheet} onClose={closeSheet} />
+    {onboard && (
+      <Onboard pair={pair} needsMoney={onboard.needsMoney} balance={balance} network={NETWORKS[networkName()]}
+        onPair={(p) => { setPair(p); }}
+        onDone={(p) => { setOnboard(null); refresh(); onboard.done(p); }}
+        onClose={() => { setOnboard(null); onboard.done(null); }} />
+    )}
+    <Toast toast={toast} />
+  </>;
+
+  if (desk) {
+    const t = state.track;
+    const here = entry ? entry.url : coll?.kind === "playlist" ? `pl:${coll.id}` : coll?.kind === "liked" ? "liked" : null;
+    const artistNow = t && !t.local ? byUrl(t.from) : null;
+    const showPanel = panel && !np && !!t;
+    return (
+      <div class={`app d-app${showPanel ? " with-panel" : ""}`}>
+        <Sidebar tab={tab} onTab={goTab} here={here} entries={followed} lists={lists} liked={liked.length} localEntry={localEntry}
+          onOpenArtist={setOpen} onOpenPlaylist={(id) => go({ coll: { kind: "playlist", id }, open: null, np: false })}
+          onOpenLiked={() => go({ coll: { kind: "liked" }, open: null, np: false })} onOpenLocal={() => goTab("library")}
+          onNewPlaylist={newPlaylist} onAdd={openAdd} playingFrom={t?.from} playing={state.playing} needsBackup={needsBackup} />
+        <MainPanel screenKey={screenKey}
+          top={<TopBar onAdd={add} depth={ui.depth} themeName={themeName} onTheme={toggleTheme} balance={balance} pair={pair}
+            onYou={() => goYou()} needsBackup={needsBackup} low={lowBalance} />}>
+          <RowSwipe.Provider value={rowActs}>{screen}</RowSwipe.Provider>
+        </MainPanel>
+        {showPanel && (
+          <SidePanel mode={panel} state={state} player={player} artist={artistNow} liked={!!t && isLiked(t)}
+            onLike={() => { toggleLike(t); redraw(); }} onArtist={() => t && toArtist(t)}
+            followed={!!artistNow && isFollowed(artistNow)} onFollow={() => artistNow && follow(artistNow.url, true)}
+            onClose={() => setPanel(null)} onAddTo={() => pickPlaylist(t)} onShare={() => shareSong(t)}
+            onTip={onTip} tips={tipsNow} onPlayAt={(k) => player.jump(k)} />
+        )}
+        <PlayerBar state={state} player={player} viz={viz} cost={cost} liked={!!t && isLiked(t)}
+          onLike={() => { if (t) { toggleLike(t); redraw(); } }} onArtist={() => t && toArtist(t)}
+          onAlbum={() => t && t.releaseId && openAlbum(t.from, t.releaseId)}
+          panel={showPanel ? panel : null} onPanel={(p) => { if (np) setNp(false); setPanel(panel === p && !np ? null : p); }}
+          expanded={np} onExpand={() => setNp(!np)} volume={volume} />
+        {np && t && <Expanded state={state} player={player} viz={viz} cost={cost} wave={wave} onWave={nextWave}
+          onClose={() => setNp(false)} onArtist={() => toArtist(t)} liked={isLiked(t)}
+          onLike={() => { toggleLike(t); redraw(); }} onAddTo={() => pickPlaylist(t)} onShare={() => shareSong(t)}
+          onTip={onTip} tips={tipsNow} session={sessionLabel} onPlayAt={(k) => player.jump(k)} />}
+        {overlays}
+      </div>
+    );
   }
 
   return (
@@ -1516,16 +1613,8 @@ export function App() {
         onLike={() => { toggleLike(state.track); redraw(); }}
         onAddTo={() => pickPlaylist(state.track)}
         onShare={() => shareSong(state.track)}
-        onTip={() => setSheet({ title: `Tip ${tipsNow.name}`, icon: <Icon.tip size={22} />, body: "Straight to them. Amply takes nothing.", children: <Tips tips={tipsNow} />, secondaryLabel: "Close" })} viz={viz} tips={tipsNow} wave={wave} onWave={nextWave} />}
-      {handoff && <Handoff link={handoff.link} url={handoff.url} onStay={() => { const l = handoff.link; setHandoff(null); openLink(l); }} />}
-      <Sheet sheet={sheet} onClose={closeSheet} />
-      {onboard && (
-        <Onboard pair={pair} needsMoney={onboard.needsMoney} balance={balance} network={NETWORKS[networkName()]}
-          onPair={(p) => { setPair(p); }}
-          onDone={(p) => { setOnboard(null); refresh(); onboard.done(p); }}
-          onClose={() => { setOnboard(null); onboard.done(null); }} />
-      )}
-      <Toast toast={toast} />
+        onTip={onTip} viz={viz} tips={tipsNow} wave={wave} onWave={nextWave} />}
+      {overlays}
     </div>
   );
 }
