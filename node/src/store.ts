@@ -16,6 +16,11 @@
  * demanded, or be mishandled by someone who never wanted to be a data
  * controller.
  *
+ * One exception, kept as small as it can be: `served`, how many seconds of
+ * each paid track were sent to each wallet on each day (meter.ts). Without it
+ * an app that never reports its listening would listen for nothing. It holds
+ * no times, only the day, and is deleted after three days (pruneStale).
+ *
  * D1 rather than KV because KV allows a thousand writes a day on the free plan
  * and a single enthusiastic listener would spend a tenth of that in an evening.
  */
@@ -118,6 +123,23 @@ export const SCHEMA = [
      at INTEGER NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS paid_sigs_by_pubkey ON paid_sigs (pubkey)`,
+  // How much of each paid track this server sent each wallet, per UTC day, in
+  // seconds of audio (meter.ts): `delivered` worked out from the bytes it
+  // served, `reported` what the listener's app said it played (/listen/played),
+  // and `billed` how much of the two has been added to `owed` already. So
+  // listening is paid for even by an app that never reports it. The one place
+  // a track is kept beside a wallet, and only for three days (pruneStale).
+  // Beside the other tables, so nothing existing changes; without it, metering
+  // is simply off.
+  `CREATE TABLE IF NOT EXISTS served (
+     pubkey TEXT NOT NULL,
+     track TEXT NOT NULL,
+     day INTEGER NOT NULL,
+     delivered REAL NOT NULL DEFAULT 0,
+     reported REAL NOT NULL DEFAULT 0,
+     billed REAL NOT NULL DEFAULT 0,
+     PRIMARY KEY (pubkey, track, day)
+   ) WITHOUT ROWID`,
 ];
 
 /**
@@ -360,6 +382,123 @@ async function forgetOwed(db: D1Database, pubkey?: string): Promise<void> {
       ).run();
     } catch { /* no such table yet */ }
   }
+  // What was sent to this wallet in the last three days goes too. Not swept
+  // with the others below: a wallet whose listening hasn't cost anything yet
+  // (still within the metering's slack) has rows here and no record in
+  // listeners, and those rows are what lets it be charged. They go by age
+  // instead (pruneStale).
+  if (pubkey) {
+    try { await db.prepare("DELETE FROM served WHERE pubkey = ?").bind(pubkey).run(); } catch { /* no such table yet */ }
+  }
+}
+
+// ── what was sent, metered (meter.ts) ──────────────────────────────────────
+
+/** How many days of `served` are kept: today and the two before it. Long
+ *  enough for a play that runs past midnight, or a report that arrives late,
+ *  to find the row it belongs with; short enough to be no history. */
+export const SERVED_KEEP_DAYS = 3;
+
+/** A UTC day as a whole number (days since 1970), as `served.day` holds it. */
+export const servedDay = (now = Date.now()) => Math.floor(now / 86_400_000);
+
+/** Who and what one `served` row is about. */
+export interface ServedKey { pubkey: string; track: string; day: number }
+
+/**
+ * Bring a `served` row's billing up to date, as statements to run after the
+ * one that changed it, in the same batch (one transaction).
+ *
+ * What is billable is the larger of what the app reported and what was sent
+ * less the slack (meter.ts, SLACK): whole seconds, never fewer than before.
+ * Whatever of it hasn't been billed yet is added to `owed` exactly as a
+ * reported play always was (counted(), below: the same upsert, priced at
+ * `perMinute` now), and to the wallet's totals in `listeners`, which is what
+ * makes a wallet that never reports known to Auto-block at all. `plays` is 1
+ * for a report from the app (a play, as before) and 0 for metering. Then
+ * `billed` catches up. Written so nothing is written when nothing is due.
+ */
+export function billServed(
+  db: D1Database, k: ServedKey, { slack, perMinute, plays = 0, now = Date.now() }: { slack: number; perMinute: number; plays?: number; now?: number },
+): D1PreparedStatement[] {
+  const B = "CAST(MAX(reported, delivered - ?4) AS INTEGER)";
+  const row = "pubkey = ?1 AND track = ?2 AND day = ?3";
+  const perSecond = perMinute > 0 ? (perMinute * 1_000_000) / 60 : 0;
+  const slackS = Math.max(0, Number(slack) || 0);
+  return [
+    db.prepare(
+      `INSERT INTO owed (pubkey, micros, seconds)
+         SELECT pubkey, CAST(ROUND((${B} - billed) * ?5) AS INTEGER), ${B} - billed FROM served
+          WHERE ${row} AND ${B} > billed
+       ON CONFLICT(pubkey) DO UPDATE SET micros = micros + excluded.micros, seconds = seconds + excluded.seconds`,
+    ).bind(k.pubkey, k.track, k.day, slackS, perSecond),
+    db.prepare(
+      `INSERT INTO listeners (pubkey, plays, seconds, first_seen, last_seen)
+         SELECT pubkey, ?5, MAX(0, ${B} - billed), ?6, ?6 FROM served
+          WHERE ${row} AND (${B} > billed OR ?5 > 0)
+       ON CONFLICT(pubkey) DO UPDATE SET
+         plays = plays + excluded.plays, seconds = seconds + excluded.seconds, last_seen = excluded.last_seen`,
+    ).bind(k.pubkey, k.track, k.day, slackS, plays, now),
+    db.prepare(`UPDATE served SET billed = ${B} WHERE ${row} AND ${B} > billed`)
+      .bind(k.pubkey, k.track, k.day, slackS),
+  ];
+}
+
+/**
+ * Add to a `served` row: seconds sent (`delivered`, never past `cap`, see
+ * meter.ts) and seconds the app reported (`reported`). A statement, so it can
+ * go in one batch with billServed's.
+ */
+export function addServed(
+  db: D1Database, k: ServedKey, { delivered = 0, reported = 0, cap }: { delivered?: number; reported?: number; cap: number },
+): D1PreparedStatement {
+  return db.prepare(
+    `INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?1, ?2, ?3, MIN(?4, ?6), ?5, 0)
+     ON CONFLICT(pubkey, track, day) DO UPDATE SET
+       delivered = MAX(delivered, MIN(?6, delivered + excluded.delivered)),
+       reported = reported + excluded.reported`,
+  ).bind(k.pubkey, k.track, k.day, Math.max(0, delivered), Math.max(0, reported), Math.max(0, cap));
+}
+
+/** Run statements as one transaction: D1's batch. A stand-in database
+ *  without batch runs them in turn. */
+export async function inOneGo(db: D1Database, statements: D1PreparedStatement[]): Promise<void> {
+  if (typeof (db as { batch?: unknown }).batch === "function") { await db.batch(statements); return; }
+  for (const s of statements) await s.run();
+}
+
+/** Which row today's (or a late) report for this track belongs to: today's
+ *  if there is one, else yesterday's if the track was sent then (a play that
+ *  ran past midnight), else today's. Throws without the table. */
+export async function servedDayFor(db: D1Database, pubkey: string, track: string, now = Date.now()): Promise<number> {
+  const today = servedDay(now);
+  const { results } = await db.prepare("SELECT day FROM served WHERE pubkey = ? AND track = ? AND day IN (?, ?)")
+    .bind(pubkey, track, today, today - 1).all<{ day: number }>();
+  const days = (results || []).map((r) => Number(r.day));
+  return days.includes(today) || !days.length ? today : today - 1;
+}
+
+/** For a report that doesn't say which track (an app from before it did):
+ *  the track sent to this wallet today or yesterday that is furthest ahead of
+ *  what was reported for it, which is almost always the one that just ended.
+ *  Null when nothing sent is waiting for a report. Throws without the table. */
+export async function unreportedServed(db: D1Database, pubkey: string, now = Date.now()): Promise<{ track: string; day: number } | null> {
+  const today = servedDay(now);
+  const row = await db.prepare(
+    `SELECT track, day FROM served WHERE pubkey = ? AND day IN (?, ?) AND track != '' AND delivered > reported
+      ORDER BY delivered - reported DESC LIMIT 1`,
+  ).bind(pubkey, today, today - 1).first<{ track: string; day: number }>();
+  return row ? { track: String(row.track), day: Number(row.day) } : null;
+}
+
+/** How many tracks this wallet has rows for (/listen/mine): null without the table. */
+export async function servedCount(db: D1Database, pubkey: string): Promise<number | null> {
+  try {
+    const row = await db.prepare("SELECT COUNT(*) AS n FROM served WHERE pubkey = ?").bind(pubkey).first<{ n: number }>();
+    return Number(row?.n) || 0;
+  } catch {
+    return null;
+  }
 }
 
 // ── what a wallet has paid, and Auto-block ─────────────────────────────────
@@ -499,6 +638,10 @@ export async function pruneStale(db: D1Database, now = Date.now()): Promise<void
   await db.prepare("DELETE FROM listeners WHERE blocked = 0 AND last_seen < ?")
     .bind(now - KEEP_FOR).run();
   await forgetOwed(db);
+  // What was sent, after three days (SERVED_KEEP_DAYS).
+  try {
+    await db.prepare("DELETE FROM served WHERE day <= ?").bind(servedDay(now) - SERVED_KEEP_DAYS).run();
+  } catch { /* no such table yet */ }
 }
 
 /** When pruneStale last ran from listening (pruneHourly), in settings. */

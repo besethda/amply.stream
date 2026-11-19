@@ -369,5 +369,66 @@ same("nothing owed is nothing sent", o.pieces(0), []);
   is("one that never arrived is sent when it can be", posts.length, 3);
 }
 
+
+// ── a pass that says what's owed (the server meters what it sends) ──────────
+{
+  // The real tokenFor, against a server that hands out a pass and says, with
+  // it, how much it counts as unpaid.
+  fresh(); agreeRate(URL_A, 0.01);
+  let owes = 1_500_000;
+  globalThis.fetch = async (url) => {
+    const u = new URL(url);
+    if (u.pathname === "/listen/challenge") return new Response(JSON.stringify({ challenge: `amply:${u.host}:${Date.now()}:abc` }));
+    if (u.pathname === "/listen/token") return new Response(JSON.stringify({ token: "pass", subscribedUntil: null, owes }));
+    throw new Error(`unexpected ${url}`);
+  };
+  is("a pass is a pass, whatever it says is owed", await id.tokenFor(pair, ORIGIN_A), "pass");
+  is("  what it says is owed is kept for the app to look at", id.takePassOwes(ORIGIN_A), 1_500_000);
+  is("  once: an old number can't be paid twice", id.takePassOwes(ORIGIN_A), null);
+  same("passOwes reads it as strictly as a refusal", [o.passOwes({ owes: 5 }), o.passOwes({ owes: 1.5 }), o.passOwes({ owes: -1 }), o.passOwes({ owes: 5e12 }), o.passOwes({})], [5, null, null, null, null]);
+
+  // Above the artist's $1 payment point, but this device's ledger holds only
+  // 10 cents of it: what the device backs up (and the rounding margin) goes
+  // on its own; the rest waits for the listener's tap (paying.js settleClaim).
+  store.set("amply.owed.v2", JSON.stringify({ [URL_A]: { micros: 100_000, seconds: 600, since: Date.now(), network: "mainnet" } }));
+  const claim = o.claimFromPass(A, 1_500_000);
+  ok("$1.50 owed, over the $1 point: noted as a claim, due now", claim?.remaining === 1_500_000 && o.claimDue(claim));
+  const r = await p.settleAll(pair, [A], p.loadLedger(), { token: async () => "pass" });
+  same("  only what this device backs up is paid without asking", sent, [100_000 + p.CLAIM_SLACK_MICROS]);
+  ok("  the rest is put to the listener", r.claimed[0]?.state === "ask" && o.claimOf(URL_A)?.remaining === 1_500_000 - 100_000 - p.CLAIM_SLACK_MICROS, JSON.stringify(r.claimed[0]));
+  ok("  the ledger's 10 cents went with it, not paid again", !(p.loadLedger()[URL_A]?.micros > 0), JSON.stringify(p.loadLedger()[URL_A]));
+  const tap = await p.payClaim(pair, A, { explicit: true, max: o.claimOf(URL_A).remaining, token: async () => "pass" });
+  ok("  their tap pays the rest, and the claim is forgotten", tap.state === "clear" && sum(sent) === 1_500_000 && o.claimOf(URL_A) === null, JSON.stringify(tap));
+
+  // Below the point: nothing. The ledger settles as it always does.
+  fresh(); agreeRate(URL_A, 0.01);
+  is("90 cents owed, under the $1 point: no claim", o.claimFromPass(A, 900_000), null);
+  await p.settleAll(pair, [A], p.loadLedger(), { token: async () => "pass" });
+  ok("  and nothing sent", sent.length === 0 && o.claimOf(URL_A) === null);
+  is("  a payment point of 50 cents: 90 cents is due", o.claimFromPass(artist(URL_A, 0.01, 0.5), 900_000)?.owes, 900_000);
+  fresh();
+  is("  nothing owed: nothing", o.claimFromPass(A, 0), null);
+  is("  no number at all (an older server): nothing", o.claimFromPass(A, null), null);
+
+  // After paying a claim, a pass that still says enough is owed is taken as
+  // a refusal saying so: noted and backed off, not paid again on the spot.
+  fresh(); agreeRate(URL_A, 0.01); owedHere(800_000);
+  o.claimFromPass(artist(URL_A, 0.01, 0.5), 800_000);
+  const still = async () => { const e = new Error("still"); e.unpaid = true; e.owes = 700_000; throw e; };
+  const again = await p.payClaim(pair, A, { token: still });
+  ok("  a pass after paying that still says $0.70: backed off, paid at the next try", again.state === "owes" && sent.length === 1 && o.claimOf(URL_A).next > Date.now(), JSON.stringify(again));
+
+  // The report of a play names the song, so the server bills it once.
+  const posts = [];
+  globalThis.fetch = async (url, init) => {
+    const u = new URL(url);
+    if (u.pathname === "/listen/played") { posts.push(JSON.parse(init.body)); return new Response(null, { status: 204 }); }
+    if (u.pathname === "/listen/challenge") return new Response(JSON.stringify({ challenge: `amply:${u.host}:${Date.now()}:abc` }));
+    return new Response(JSON.stringify({ token: "pass", owes: 0 }));
+  };
+  await id.reportPlayed(pair, ORIGIN_A, 241.4, "song-1");
+  same("a play is reported with the song's id", posts, [{ seconds: 241, track: "song-1" }]);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -2345,7 +2345,7 @@ function Listeners({ api, paid, rate, settleAt }) {
         lastSeen: row.last_seen ? new Date(row.last_seen).toISOString() : null,
         servingStopped: !!row.blocked,
       },
-      notHeld: "Which tracks were played, and when. This server never records that.",
+      notHeld: "A history of which tracks were played, or when. For three days only, the server keeps how many seconds of each paid track it sent this wallet each day, to charge for listening fairly; the listener's own copy (from their app) includes it.",
       keptFor: "A year after the wallet was last heard from, then deleted automatically.",
       exported: new Date().toISOString(),
     };

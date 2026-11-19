@@ -45,6 +45,48 @@ export function unpaidRefusal(status, body) {
   return { owes, error: typeof body.error === "string" ? body.error.slice(0, 300) : "" };
 }
 
+/**
+ * What a pass (a `/listen/token` success) says is still owed, in micros, or
+ * null when it doesn't say or says nonsense. Read as strictly as a refusal.
+ */
+export function passOwes(body) {
+  if (!body || body.owes == null) return null;
+  const owes = Number(body.owes);
+  if (!Number.isSafeInteger(owes) || owes < 0 || owes > MAX_CLAIM_MICROS) return null;
+  return owes;
+}
+
+/** The artist's payment point (settleAt, dollars) in micros: $1 when unset,
+ *  as the spec says. */
+export function settleAtMicros(manifest) {
+  const usdc = (manifest?.payment || []).find((p) => p?.type === "solana-usdc");
+  const at = Number(usdc?.settleAt);
+  return Math.round((at > 0 ? at : 1) * 1_000_000);
+}
+
+/**
+ * Whether what a server said was owed alongside a pass is to be paid now, as
+ * if it had refused the pass: when it's at least the artist's payment point
+ * (and at least a cent, the least one payment can be). That covers "behind"
+ * as the server judges it too (more than one and a half payment points
+ * unpaid, spec/standing.mjs), which is always past the point. Below it,
+ * nothing is done: the app's own ledger settles as usual, at the point or
+ * within the week, and the server's number is the artist's to see.
+ */
+export function passOwesDue(owes, manifest) {
+  return Number.isSafeInteger(owes) && owes >= LISTEN_MIN_MICROS && owes >= settleAtMicros(manifest);
+}
+
+/**
+ * A pass said this much is owed: note it as a claim, exactly as a refusal's
+ * would be (so it's paid the same way, with the same back-off and sheet),
+ * when it's due (passOwesDue). Returns the claim, or null.
+ */
+export function claimFromPass(entry, owes, now = Date.now()) {
+  if (!entry?.url || !passOwesDue(owes, entry.manifest)) return null;
+  return noteClaim(entry.url, owes, now);
+}
+
 // ── what each server last said ──────────────────────────────────────────────
 
 /** `{ [manifestUrl]: { owes, remaining, at, tries, next, kind, message } }` */

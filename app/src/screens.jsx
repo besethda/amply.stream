@@ -420,10 +420,10 @@ function WhatTheyKeep({ entry, pair, toast }) {
   return (
     <section class="keep">
       <span class="label">WHAT THEY KEEP</span>
-      <p class="dim small">Play totals only — never which songs. Deleted after a year.{" "}
+      <p class="dim small">Play totals, kept a year. What each song sent you, kept three days, to charge fairly.{" "}
         <a class="link-dim" href={`${origin}/privacy`} target="_blank" rel="noopener">Privacy <Icon.external size={12} /></a></p>
       {held && (h
-        ? <p class="mono-box">{h.plays} plays · {Math.round((h.seconds || 0) / 60)} min{h.lastSeen ? ` · last ${new Date(h.lastSeen).toLocaleDateString()}` : ""}{h.servingStopped ? " · stopped serving you" : ""}</p>
+        ? <p class="mono-box">{h.plays} plays · {Math.round((h.seconds || 0) / 60)} min{h.lastSeen ? ` · last ${new Date(h.lastSeen).toLocaleDateString()}` : ""}{h.servedTracks ? ` · ${h.servedTracks} sent in 3 days` : ""}{h.servingStopped ? " · stopped serving you" : ""}</p>
         : <p class="mono-box">Nothing.</p>)}
       {pair && (
         <div class="row">
