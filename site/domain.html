@@ -30,6 +30,24 @@
   #log li[data-state="run"]::before { content: "→"; color: var(--orange); }
   #log li[data-state="ok"] { color: var(--ink); }
   #log li[data-state="ok"]::before { content: "✓"; color: var(--orange); }
+  .q { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 14px; }
+  .choices { display: grid; gap: 12px; margin: 0 0 28px; max-width: 34em; }
+  .choice {
+    text-align: left; font: inherit; font-size: 17px; padding: 16px 18px; border-radius: var(--r);
+    border: 1.5px solid var(--line); background: var(--bg2); color: var(--ink); cursor: pointer;
+  }
+  .choice b { display: block; font-size: 18px; margin-bottom: 2px; }
+  .choice span { color: var(--ink3); font-size: 15.5px; }
+  .choice[aria-pressed="true"] { border-color: var(--orange); background: #fff; }
+  .choice:focus-visible { outline: 2.5px solid var(--orange); outline-offset: 1px; }
+  .branch { display: none; }
+  .branch[data-on] { display: block; }
+  .branch .aside { margin-bottom: 18px; }
+  .branch h2 { font-size: 21px; margin: 0 0 8px; }
+  .now { background: var(--bg2); border-radius: var(--r); padding: 13px 17px; margin: 0 0 22px; max-width: 30em; font-size: 15.5px; }
+  .now code { font-family: var(--mono); font-size: 15px; word-break: break-all; }
+  .now button { font: inherit; font-size: 14.5px; color: var(--orange); background: none; border: 0; padding: 0; margin-left: 8px; cursor: pointer; text-decoration: underline; }
+  .fine { font-size: 15px; color: var(--ink3); max-width: 34em; margin: 18px 0 0; }
   .big-link { font-family: var(--mono); font-size: 19px; word-break: break-all; }
 </style>
 </head>
@@ -44,36 +62,54 @@
 <section class="col narrow" style="padding-top:clamp(40px,6vw,72px);padding-bottom:110px">
 
 <div class="panel" data-panel="intro" data-on>
-  <h1 class="step">Host it on<br>your own domain.</h1>
+  <h1 class="step">Give your page<br>its own address.</h1>
   <p class="lead">
-    Put your streaming service at <strong>listen.yourname.com</strong>. Only the owner of
-    yourname.com can do that, so anyone who sees the address knows it's really you.
+    Put your page at an address you own, like <strong>music.yourname.com</strong>.
+    Your old address keeps working.
   </p>
 
-  <div class="aside">
-    <strong>This is for domains already on Cloudflare.</strong> If yours is with Squarespace,
-    Wix, GoDaddy or anyone else, you don't need this: open your editor, go to Profile, and
-    link your domain with one DNS record. It takes a minute and gives listeners the same proof.
+  <p class="q" id="q-where">Is your domain on Cloudflare?</p>
+  <div class="choices" role="group" aria-labelledby="q-where">
+    <button type="button" class="choice" data-choice="yes" aria-pressed="false">
+      <b>Yes</b><span>I see it at dash.cloudflare.com</span>
+    </button>
+    <button type="button" class="choice" data-choice="no" aria-pressed="false">
+      <b>No, or not sure</b><span>Squarespace, GoDaddy, Wix, Namecheap…</span>
+    </button>
   </div>
 
-  <label class="field">
-    <span>Your streaming service's address</span>
-    <input id="addr" type="text" inputmode="url" placeholder="yourname.something.workers.dev" autocomplete="off">
-    <span class="hint">The address from setup.</span>
-  </label>
+  <div class="branch" data-branch="no">
+    <div class="aside">
+      <strong>Prove it's yours instead.</strong> In your editor, open <strong>Profile → Link your website</strong>
+      and add the one record it shows. Listeners see your domain beside your name.
+      <p style="margin:12px 0 0"><a class="btn sm" id="open-editor" href="#">Open your editor</a></p>
+    </div>
+    <p class="fine">Want the new address anyway? Move the domain to
+      <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">Cloudflare</a> (free), then come back.</p>
+  </div>
 
-  <label class="field">
-    <span>The address you want</span>
-    <input id="host" type="text" inputmode="url" placeholder="listen.yourname.com" autocomplete="off">
-    <span class="hint">A new part in front of your domain — listen, music, or anything unused. Your
-    website stays exactly where it is.</span>
-  </label>
-
-  <div class="actions">
-    <button class="btn" id="connect">Connect to Cloudflare</button>
+  <div class="branch" data-branch="yes">
+    <label class="field">
+      <span>The address you want</span>
+      <input id="host" type="text" inputmode="url" placeholder="music.yourname.com" autocomplete="off">
+      <span class="hint">Your domain with a word in front. Not one already in use.</span>
+    </label>
+    <div class="now" id="now-box">
+      Your page now: <code id="now-code"></code>
+      <button type="button" id="now-change">Not right?</button>
+    </div>
+    <label class="field" id="addr-field" hidden>
+      <span>Your page's current address</span>
+      <input id="addr" type="text" inputmode="url" placeholder="yourname.something.workers.dev" autocomplete="off">
+      <span class="hint">Ends in .workers.dev. It's at the top of your editor.</span>
+    </label>
+    <div class="actions">
+      <button class="btn" id="connect">Continue to Cloudflare</button>
+    </div>
+    <p class="fine">Cloudflare will ask you to allow Amply. It only adds this address, replaces nothing,
+      and lets go right after.</p>
   </div>
 </div>
-
 <div class="panel" data-panel="working">
   <h1 class="step">Setting it up.</h1>
   <p class="lead">Leave this open. It usually takes under a minute.</p>
@@ -117,7 +153,7 @@ const CONFIG = {
 
 const $ = (s) => document.querySelector(s);
 const KEY = "amply.domain.v1";
-let state = { address: "", host: "" };
+let state = { address: "", host: "", choice: "" };
 try { Object.assign(state, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch {}
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {} };
 
@@ -130,7 +166,7 @@ function show(name) {
 const FIXES = {
   domain_not_on_cloudflare: [
     "That domain isn't on your Cloudflare account",
-    "This only works for a domain on Cloudflare. If yours is with Squarespace, Wix or anyone else, link it from your editor instead: Settings → Your own domain. One DNS record, and listeners get the same proof.",
+    "This only works for a domain on Cloudflare. If yours is with Squarespace, Wix or anyone else, you can still prove it's yours: in your editor, open Profile → Link your website and add the one record it shows. Your page stays where it is, and listeners see your domain next to your name.",
   ],
   domain_pending: [
     "Your domain isn't active on Cloudflare yet",
@@ -174,9 +210,42 @@ if (given && /^[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev$/i.test(given)) state.addres
 $("#addr").value = state.address || "";
 $("#host").value = state.host || "";
 
+// What the page says about the artist's current address: stated, with a way to
+// correct it, when it's known (from the editor, or from last time); asked for
+// when it isn't.
+const WORKERS = /^[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev$/i;
+function paintAddress({ editing = false } = {}) {
+  const known = WORKERS.test((state.address || "").trim());
+  const showField = editing || !known;
+  $("#now-box").hidden = showField || !known;
+  $("#addr-field").hidden = !showField;
+  if (known) {
+    $("#now-code").textContent = state.address.trim();
+  }
+  const editor = $("#open-editor");
+  if (known) editor.href = `https://${state.address.trim()}/manage`;
+  editor.hidden = !known;
+}
+paintAddress();
+$("#now-change").addEventListener("click", () => { paintAddress({ editing: true }); $("#addr").focus(); });
+
+// "Is your domain on Cloudflare?" decides which of the two things is shown.
+function choose(which) {
+  document.querySelectorAll(".choice").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.choice === which)));
+  document.querySelectorAll(".branch").forEach((b) => b.toggleAttribute("data-on", b.dataset.branch === which));
+  state.choice = which;
+  save();
+}
+document.querySelectorAll(".choice").forEach((b) => b.addEventListener("click", () => {
+  choose(b.dataset.choice);
+  document.querySelector(`.branch[data-on]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}));
+if (state.choice === "yes" || state.choice === "no") choose(state.choice);
+
 $("#connect").addEventListener("click", async () => {
   state.address = $("#addr").value.trim();
   state.host = cleanHost($("#host").value);
+  paintAddress();
   if (!slugFrom(state.address)) return fail("That address doesn't look right", "It should look like yourname.something.workers.dev.");
   const problem = domainProblem(state.host);
   if (problem) return fail("That address won't work", problem);

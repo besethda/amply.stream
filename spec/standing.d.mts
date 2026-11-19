@@ -6,6 +6,7 @@ export interface StandingRow {
   last_seen?: number;
 }
 export const DAY: number;
+export const ALLOWANCE_FACTOR: number;
 export function owedOf(row: StandingRow | null | undefined, ratePerMinute: number): number;
 export function behind(owedMicros: number, paidMicros: number, settleAt: unknown): boolean;
 export function overdue(owedMicros: number, paidMicros: number, lastSeen: unknown, now?: number): boolean;
