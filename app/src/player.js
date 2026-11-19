@@ -70,8 +70,6 @@ export function createPlayer(onChange, onListened, {
   random = Math.random,
   /** Milliseconds, for the watchdog; injectable for tests. */
   clock = () => Date.now(),
-  /** Whether the listener has the sound off: then nothing is heard. */
-  silent = () => false,
   /** Milliseconds paused before the download is stopped (rest). */
   restAfter = REST_AFTER_MS,
 } = {}) {
@@ -232,8 +230,7 @@ export function createPlayer(onChange, onListened, {
     // pocket reports less often. A seek moves further than the clock did.
     const rate = audio.playbackRate || 1;
     const real = step > 0 && (step <= MAX_STEP || step <= since * rate + 0.5);
-    // Muted isn't heard: nothing counts toward the play, nor is charged.
-    if (real && !audio.paused && !silent()) {
+    if (real && !audio.paused) {
       heard += step;
       if (heard >= countsAfter(lengthNow())) {
         // Counts now: what was held is counted with this step, once.

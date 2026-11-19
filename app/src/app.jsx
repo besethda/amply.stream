@@ -313,9 +313,6 @@ export function App() {
         if (!(seconds > 0)) return;
         reportPlayed(holder.current, originOf(track.url), seconds, track.id);
       },
-      // Muted (the volume slider at 0, or M): nothing is heard, so nothing
-      // counts toward a play or is charged (player.js).
-      silent: () => !!silent.current,
     },
   ), []);
   try { if (location.hostname === "localhost") window.__amplyPlayer = player; } catch { /* not a browser */ }
@@ -325,8 +322,6 @@ export function App() {
     onTrouble: () => flash({ bad: true, text: "This song can't play through the EQ. Reload to hear it without." }),
   }) : null), []);
   const volume = useVolume(player, eq);
-  const silent = useRef(false);
-  silent.current = volume.muted || volume.vol === 0;
   useEffect(() => {
     const a = player.element(), wake = () => eq?.wake();
     a.addEventListener("play", wake);

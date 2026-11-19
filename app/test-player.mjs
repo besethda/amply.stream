@@ -261,34 +261,6 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   pl.cycleRepeat();
 }
 
-// ── muted isn't heard ───────────────────────────────────────────────────────
-{
-  let wall = 0, mute = false;
-  const counted = [], told = [];
-  const pm = createPlayer(() => {}, (t, step) => counted.push(step), {
-    clock: () => wall, silent: () => mute, onFinished: (t, seconds) => told.push(seconds),
-  });
-  const a = pm.element();
-  const on = (e) => (a.handlers[e] || []).forEach((f) => f());
-  pm.play(tracks.slice(0, 2), 0);
-  await tick();
-  a.paused = false; on("play");
-  const at = (t) => { wall += 1000; a.currentTime = t; on("timeupdate"); };
-  mute = true;
-  for (let t = 1; t <= 60; t++) at(t);
-  ok("a minute played muted: nothing heard, nothing counted", counted.length === 0);
-  mute = false;
-  for (let t = 61; t <= 89; t++) at(t);
-  ok("  unmuted for 29 s: still short of a play", counted.length === 0);
-  at(90);
-  ok("  at 30 s heard it counts: those 30 s, not the muted minute", Math.abs(counted.reduce((n, x) => n + x, 0) - 30) < 0.01, JSON.stringify(counted));
-  pm.next(); await tick();
-  ok("  and the play is reported as 30 s", told.length === 1 && Math.abs(told[0] - 30) < 0.01, JSON.stringify(told));
-  // Skipped with nothing heard: nothing reported at all.
-  pm.next(); await tick();
-  ok("a song skipped before it counted isn't reported", told.length === 1, JSON.stringify(told));
-}
-
 // ── paused a while: the download stops, and picks up where it was ──────────
 {
   let st = {};
