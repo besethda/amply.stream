@@ -283,13 +283,19 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
     await reader.cancel();
   }
   await settled();
-  ok("ten seeks in a row share one allowance, not ten bursts", total / 1000 <= PACE.burst + PACE.rate * ((clock - t0) / 1000) + 20, `${total / 1000} s sent in ${(clock - t0) / 1000} s`);
+  // Each new request may have the restart allowance, but at most once every
+  // 5 s (so a jump starts at once without scrubbing stacking them up).
+  const took = (clock - t0) / 1000;
+  ok("ten seeks in a row share one allowance, not ten bursts", total / 1000 <= PACE.burst + PACE.rate * took + PACE.restart * (1 + Math.floor(took / 5)) + 20, `${total / 1000} s sent in ${took} s`);
   // The same song started six times, skipped at 10 s each time: only the
   // first start gets the burst.
   const d = await makeWallet();
   let sentAll = 0;
   for (let i = 0; i < 6; i++) { sentAll += await reading(d, "song.mp3", 10); tick(60_000); }
-  ok("a song started six times a day and skipped at 10 s: one burst, not six", sentAll <= PACE.burst + 5 * PACE.restart + 6 * (PACE.rate * 10) + 6 * PIECE / 1000, `${sentAll}`);
+  // What it re-reads of what was sent already goes unpaced (it isn't billed
+  // again); what's new is what the burst and pacing bound.
+  const counted = row(d, "song.mp3")?.delivered ?? 0;
+  ok("a song started six times a day and skipped at 10 s: one burst, not six", counted <= PACE.burst + 5 * PACE.restart + 6 * (PACE.rate * 10) + 6 * PIECE / 1000, `${counted} (read ${sentAll})`);
   // A start landing on another copy of the Worker, which has no memory of
   // this wallet: what the database says decides, so no new burst.
   const e = await makeWallet();
@@ -555,6 +561,33 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
   lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
   await feeBalance(async () => ({ value: lamports }), FEES, { fresh: true });
   tick(6_000);
+}
+
+// ── a jump while playing: the new request isn't held up by the old one ──────
+{
+  const w = await makeWallet();
+  // A wait that only ends when let go: the old request is mid-wait for pacing.
+  const held = [];
+  paceHooks.sleep = (ms) => new Promise((r) => held.push(() => { tick(Math.ceil(ms)); r(); }));
+  const oldRes = await call(`/audio/song.mp3?t=${encodeURIComponent(w.token)}`, { headers: { Range: "bytes=0-" } });
+  const old = oldRes.body.getReader();
+  let read = 0;
+  const reading = (async () => { for (;;) { const { done, value } = await old.read(); if (done) break; read += value.byteLength; } })().catch(() => {});
+  for (let i = 0; i < 50 && !held.length; i++) await new Promise((r) => setTimeout(r, 5));
+  ok("(the old request is waiting its turn)", held.length === 1, `${held.length} waits, ${read} bytes`);
+  tick(6_000);
+  await old.cancel();
+  // Waits from now on end as they should; the old one's never does. If the
+  // jump were queued behind it, it would never start.
+  paceHooks.sleep = async (ms) => { tick(Math.ceil(ms)); };
+  // The jump: from two minutes in. Its first audio comes without the old wait ending.
+  const res = await call(`/audio/song.mp3?t=${encodeURIComponent(w.token)}`, { headers: { Range: "bytes=120000-" } });
+  const first = await Promise.race([res.body.getReader().read().then(({ value }) => value?.byteLength || 0), new Promise((r) => setTimeout(() => r(-1), 500))]);
+  ok("a jump while playing starts at once: not held up behind the request it replaced", first > 0, String(first));
+  held.forEach((go) => go());
+  await reading;
+  paceHooks.sleep = async () => {};
+  await settled();
 }
 
 // ── a free song reported as played: nothing kept about the wallet ───────────

@@ -83,8 +83,10 @@ export const DELIVERED_CAP = 3;
  * Faster than anyone listens, so playback never waits once started; slow
  * enough that what's sent follows what's heard. Any later start that day —
  * the song again, a seek, a request landing on another copy of the Worker —
- * gets only `restart` seconds up front, so the one SLACK a day covers one
- * burst, not one per start. Whether it was sent already today is read from
+ * gets `restart` seconds (6) up front: enough to start playing at once and
+ * ride out a short hiccup, small enough that the one SLACK a day covers a
+ * burst and a handful of starts. Audio already sent isn't held back at all
+ * (it isn't billed again). Whether it was sent already today is read from
  * the database (store.ts `served`), not this copy's memory, and the row is
  * made before a burst is given; two copies starting the same song in the
  * same instant can still both give one.
@@ -93,7 +95,7 @@ export const DELIVERED_CAP = 3;
  * while paused (app/src/player.js), since a browser left to itself would go
  * on reading a paused song, and this server can't tell that from listening.
  */
-export const PACE = { burst: 30, restart: 3, rate: 1.25 } as const;
+export const PACE = { burst: 30, restart: 6, rate: 1.25 } as const;
 
 /** The clock and the wait the pacing uses: stood in for by tests. */
 export const paceHooks = {
@@ -103,7 +105,10 @@ export const paceHooks = {
   gap: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
 };
 
-interface Bucket { tokens: number; at: number; queue: Promise<void> }
+/** How often a new request may have the restart allowance again (paced). */
+const RESTART_EVERY_MS = 5_000;
+
+interface Bucket { tokens: number; at: number; queue: Promise<void>; started: number }
 const buckets = new Map<string, Bucket>();
 
 /**
@@ -111,13 +116,17 @@ const buckets = new Map<string, Bucket>();
  * a time per wallet and track, so two requests share the allowance. `fresh`:
  * the track hasn't been sent to this wallet today, so it gets the burst;
  * otherwise only the restart allowance. Idle time refills up to the restart
- * allowance, never back to a burst.
+ * allowance, never back to a burst. `starting`: the first piece of a new
+ * request (a jump, the song again): it gets the restart allowance even while
+ * another request had used it all up, so a jump made while playing starts at
+ * once instead of waiting with nothing ahead. At most once every
+ * RESTART_EVERY_MS, so opening request after request isn't a way round pacing.
  */
-function paced(id: string, seconds: number, fresh: boolean): Promise<void> {
+function paced(id: string, seconds: number, fresh: boolean, starting = false, gone: Promise<void> = new Promise(() => {})): Promise<void> {
   let b = buckets.get(id);
   if (!b) {
     if (buckets.size >= MAX_KEYS) buckets.delete(buckets.keys().next().value as string);
-    b = { tokens: fresh ? PACE.burst : PACE.restart, at: paceHooks.now(), queue: Promise.resolve() };
+    b = { tokens: fresh ? PACE.burst : PACE.restart, at: paceHooks.now(), queue: Promise.resolve(), started: paceHooks.now() };
     buckets.set(id, b);
   }
   const bucket = b;
@@ -125,10 +134,18 @@ function paced(id: string, seconds: number, fresh: boolean): Promise<void> {
     const now = paceHooks.now();
     const refilled = bucket.tokens + ((now - bucket.at) / 1000) * PACE.rate;
     bucket.tokens = bucket.tokens >= PACE.restart ? Math.min(bucket.tokens, Math.max(PACE.restart, refilled)) : Math.min(PACE.restart, refilled);
+    if (starting && now - bucket.started >= RESTART_EVERY_MS) {
+      bucket.tokens = Math.max(bucket.tokens, PACE.restart);
+      bucket.started = now;
+    }
     bucket.at = now;
     if (bucket.tokens < seconds) {
       const wait = ((seconds - bucket.tokens) / PACE.rate) * 1000;
-      await paceHooks.sleep(wait);
+      // A request the player gave up on (a jump: it asks again from
+      // elsewhere) stops waiting at once, so the next one isn't held up
+      // behind a wait for audio nobody will get. Its piece isn't sent.
+      const waited = await Promise.race([paceHooks.sleep(wait).then(() => true), gone.then(() => false)]);
+      if (!waited) return;
       bucket.at = paceHooks.now();
       bucket.tokens = 0;
     } else {
@@ -210,7 +227,7 @@ const MAX_SPANS = 64;
  * How far a request from a file's start reads before it's a new play: 45 s
  * of audio. Past the 30 s a play needs to count (spec/pricing.mjs), with what
  * the pacing lets a player read ahead by then (PACE.restart + 1.25 x 30 s is
- * 40.5 s). So the song played again and skipped before it counts is never
+ * 43.5 s). So the song played again and skipped before it counts is never
  * billed again; played on, it's billed again in full. And a player picking a
  * paused song back up isn't taken for a replay: it reads the start for its
  * headers before it jumps to where it was, or, paused in the song's first
@@ -221,6 +238,17 @@ export const REPLAY_AFTER_S = 45;
 
 /** A new play of this file from its start: nothing of it counted yet. */
 function startOver(id: string): void { covered.delete(id); }
+
+/** How many of the bytes [from, to) haven't been counted here yet, without
+ *  counting them (see newBytes). */
+function unsentBytes(id: string, from: number, to: number): number {
+  if (!(to > from)) return 0;
+  const spans = covered.get(id);
+  if (!spans) return to - from;
+  let seen = 0;
+  for (const [a, b] of spans) seen += Math.max(0, Math.min(b, to) - Math.max(a, from));
+  return to - from - seen;
+}
 
 /** How many of the bytes [from, to) of this file haven't been counted here
  *  yet for this key; and they are now. */
@@ -320,12 +348,14 @@ export function metered(
     }
     return price;
   };
-  let first = true;
+  let first = true, pacedYet = false;
   // Where in the file the next piece is: bytes counted already aren't again.
   let at = Number.isFinite(t.start) && (t.start as number) >= 0 ? (t.start as number) : 0;
   let fromStart = at === 0, skipped = 0;
   const replayAt = REPLAY_AFTER_S * (t.duration && t.duration > 0 && t.size > 0 ? t.size / t.duration : FALLBACK_BYTES_PER_SECOND);
-  const end = () => { ended = true; };
+  let leave = () => {};
+  const gone = new Promise<void>((r) => { leave = r; });
+  const end = () => { ended = true; leave(); };
   const reader = body.getReader();
   const counting = new ReadableStream<Uint8Array>({
     async pull(c) {
@@ -340,8 +370,16 @@ export function metered(
         if (first && freshNow && perMinute !== 0 && t.markSent) await t.markSent().catch(() => {});
         first = false;
         // Not sent until it may be (PACE): what's sent follows what's heard.
-        const seconds = secondsOf(value.byteLength, t.size, t.duration);
-        await paced(pace, seconds, freshNow);
+        // Only what hasn't been sent already is held back: pacing is there so
+        // what's billed follows what's heard, and audio sent before isn't
+        // billed again (newBytes). So a song picked up after a pause, or
+        // dragged back, gets back what it had read ahead at once.
+        // Except from the file's start until it's clear whether it's the song
+        // again (see REPLAY_AFTER_S): that's judged by how far it reads, so
+        // it reads at the pace of listening.
+        const unsent = perMinute !== 0 && !fromStart ? unsentBytes(idOf(key), at, at + value.byteLength) : value.byteLength;
+        if (unsent > 0) { await paced(pace, secondsOf(unsent, t.size, t.duration), freshNow, !pacedYet, gone); pacedYet = true; }
+        if (ended) return;   // given up on while it waited: nothing more is sent or counted
         c.enqueue(value);
         const from = at;
         at += value.byteLength;
