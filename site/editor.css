@@ -408,6 +408,11 @@ table.listeners .chip.unpaid {
    switch wraps under the heading rather than squeezing it. */
 .listeners-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
 .listeners-head h2 { margin-bottom: 0; }
+.ab-group { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.ab-group .why { margin-left: 0; }
+.ab-explain p, .ab-ask p { margin: 0 0 8px; }
+.ab-explain p:last-child, .ab-ask p:last-child { margin-bottom: 0; }
+.ab-ask-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
 .ab-switch {
   display: inline-flex; align-items: center; gap: 10px; flex: none; min-height: 44px; padding: 0 2px;
   font: inherit; font-weight: 600; color: var(--ink); background: none; border: 0; cursor: pointer;

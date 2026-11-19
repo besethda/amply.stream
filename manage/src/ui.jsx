@@ -53,8 +53,8 @@ function JobCard({ job }) {
   );
 }
 import { validate } from "../../spec/manifest-rules.mjs";
-import { charges } from "../../spec/pricing.mjs";
-import { behind, overdue, owedOf, autoBlock } from "../../spec/standing.mjs";
+import { charges, SETTLE_WITHIN_DAYS } from "../../spec/pricing.mjs";
+import { behind, overdue, owedOf, autoBlock, ALLOWANCE_FACTOR } from "../../spec/standing.mjs";
 import { bareDomain, recordFor, lookup, confirms } from "../../spec/domain.mjs";
 import { makeWaves, wavesKey } from "./waves.js";
 import { prepareStream, TooLong } from "./stream-copy.js";
@@ -2162,6 +2162,8 @@ function useAutoBlock({ api, paid, rate, settleAt, rows, onChanged }) {
   const [state, setState] = useState(null);       // { enabled, since } once known
   const [working, setWorking] = useState(false);
   const [problem, setProblem] = useState(null);
+  const [asking, setAsking] = useState(null);     // { count, owed }: turning it on, waiting for a yes
+  const [explaining, setExplaining] = useState(false);
   const sentAt = useRef(null);
 
   useEffect(() => {
@@ -2185,18 +2187,20 @@ function useAutoBlock({ api, paid, rate, settleAt, rows, onChanged }) {
 
   const reason = on || !state ? null : autoBlockWaits(rate, paid);
 
-  async function toggle() {
+  /** The switch. Turning it on asks first, in the page (see AutoBlockHelp). */
+  function toggle() {
     if (!state || working) return;
     setProblem(null);
-    if (!on) {
-      if (reason) return;
-      const caught = wouldAutoBlock(rows, paid, rate, settleAt);
-      const owed = caught.reduce((sum, s) => sum + s.owes, 0);
-      const said = caught.length
-        ? `${caught.length} listener${caught.length === 1 ? " is" : "s are"} behind right now and won't be served until they pay (${fromMicros(owed)} owed in total). Their app is told what they owe and pays it.`
-        : "Nobody is behind right now. From now on, anyone who falls behind won't be served until they pay.";
-      if (!window.confirm(`${said}\n\nTurn on Auto-block?`)) return;
-    }
+    if (on) return apply();
+    if (reason) return;
+    if (asking) return setAsking(null);
+    const caught = wouldAutoBlock(rows, paid, rate, settleAt);
+    setAsking({ count: caught.length, owed: caught.reduce((sum, c) => sum + c.owes, 0) });
+    setExplaining(false);
+  }
+
+  async function apply() {
+    setAsking(null);
     setWorking(true);
     try {
       if (on) {
@@ -2217,7 +2221,15 @@ function useAutoBlock({ api, paid, rate, settleAt, rows, onChanged }) {
     }
   }
 
-  return { known: !!state, on, disabled: !state || working || (!on && !!reason), reason, problem, toggle, working };
+  // A listener is auto-blocked past this much owed (autoBlock, spec/standing.mjs).
+  const limit = (Number(settleAt) > 0 ? Number(settleAt) : 1) * ALLOWANCE_FACTOR;
+
+  return {
+    known: !!state, on, disabled: !state || working || (!on && !!reason), reason, problem, toggle, working,
+    asking, cancel: () => setAsking(null), confirm: apply,
+    explaining, explain: () => { setExplaining((e) => !e); setAsking(null); },
+    limit, settleAt: Number(settleAt) > 0 ? Number(settleAt) : 1,
+  };
 }
 
 /** Beside a listener the server isn't serving until they pay. */
@@ -2234,22 +2246,72 @@ export function AutoBlockChip({ row }) {
 export function AutoBlockSwitch({ ab }) {
   if (!ab.known && !ab.problem) return null;
   return (
-    <button type="button" role="switch" aria-checked={ab.on ? "true" : "false"} class={`ab-switch${ab.on ? " on" : ""}`}
-      disabled={ab.disabled} onClick={ab.toggle} aria-describedby="autoblock-help">
-      <span class="ab-knob" aria-hidden="true" />
-      <span>Auto-block</span>
-    </button>
+    <span class="ab-group">
+      <button type="button" role="switch" aria-checked={ab.on ? "true" : "false"} class={`ab-switch${ab.on ? " on" : ""}`}
+        disabled={ab.disabled} onClick={ab.toggle} aria-describedby="autoblock-help">
+        <span class="ab-knob" aria-hidden="true" />
+        <span>Auto-block</span>
+      </button>
+      <button type="button" class={`why${ab.explaining ? " on" : ""}`} aria-expanded={!!ab.explaining}
+        aria-controls="autoblock-explain" aria-label={ab.explaining ? "Hide how Auto-block works" : "How does Auto-block work?"}
+        onClick={ab.explain}>?</button>
+    </span>
   );
 }
 
+/** Under the heading: what Auto-block does, how it decides (with this artist's
+ *  own numbers), and the question before it is turned on. All in the page. */
 export function AutoBlockHelp({ ab }) {
   if (!ab.known && !ab.problem) return null;
+  const money = (d) => fromMicros(Math.round(d * 1_000_000));
+  const point = ab.settleAt ?? 1, limit = ab.limit ?? 1.5;
   return (
-    <p class="autoblock-help muted" id="autoblock-help">
-      Stop serving listeners who are behind on paying, until they pay. Their app is told what they owe and pays it.
-      {ab.reason && <> <strong>{ab.reason}</strong></>}
-      {ab.problem && <> <span class="bad">{ab.problem}</span></>}
-    </p>
+    <>
+      <p class="autoblock-help muted" id="autoblock-help">
+        Stop serving listeners who are behind on paying, until they pay. Their app is told what they owe and pays it.
+        {ab.reason && <> <strong>{ab.reason}</strong></>}
+        {ab.problem && <> <span class="bad">{ab.problem}</span></>}
+      </p>
+      {ab.explaining && (
+        <div class="help ab-explain" id="autoblock-explain" role="note">
+          <p><strong>How Auto-block works</strong></p>
+          <p>Your paid tracks stop playing for a listener who owes you more than <strong>{money(limit)}</strong> (one
+            and a half times your payment point of {money(point)}, which is how much their app normally holds back
+            before paying you). Someone who owes anything and hasn't opened Amply for over {SETTLE_WITHIN_DAYS + 1} days is
+            stopped too.</p>
+          <p>The moment they pay what they owe, they're served again. You never have to unblock anyone. Their app is
+            told how much it is and pays it on its own, so most people are back within a minute.</p>
+          <p>It never stops subscribers, anyone who owes less than a cent, or anyone while your page can't take
+            payments (for example, your fees account is empty). People you've blocked yourself stay blocked, and
+            your free tracks always play. A block starts the next time a listener's app asks for access, within about
+            half an hour.</p>
+        </div>
+      )}
+      {ab.asking && <AutoBlockAsk ab={ab} />}
+    </>
+  );
+}
+
+/** "Turn it on?", in place of a pop-up: says who it would stop right now. */
+function AutoBlockAsk({ ab }) {
+  const yes = useRef(null);
+  useEffect(() => { yes.current?.focus(); }, []);
+  const { count, owed } = ab.asking;
+  return (
+    <div class="help ab-ask" role="group" aria-label="Turn on Auto-block?"
+      onKeyDown={(e) => { if (e.key === "Escape") ab.cancel(); }}>
+      <p><strong>Turn on Auto-block?</strong></p>
+      <p>
+        {count
+          ? <>{count} listener{count === 1 ? " is" : "s are"} behind right now and won't be served until they pay
+              ({fromMicros(owed)} owed in total). Their app is told what they owe and pays it.</>
+          : <>Nobody is behind right now. From now on, anyone who falls behind won't be served until they pay.</>}
+      </p>
+      <div class="ab-ask-actions">
+        <button type="button" class="btn sm" ref={yes} onClick={ab.confirm}>Turn on Auto-block</button>
+        <button type="button" class="btn ghost sm" onClick={ab.cancel}>Cancel</button>
+      </div>
+    </div>
   );
 }
 
@@ -3071,7 +3133,7 @@ const NOT_PAID_HIDDEN = "amply.editor.not-paid-hidden";
 const readVia = () => { try { return localStorage.getItem(VIA_KEY); } catch { return null; } };
 
 /** The price and how often it's paid, one line each. */
-function Pricing({ wallet, onChange, held = false }) {
+export function Pricing({ wallet, onChange, held = false }) {
   const rate = wallet.ratePerMinute ?? DEFAULT_RATE;
   const batch = batchOf(wallet);
   return (
@@ -3108,8 +3170,13 @@ function Pricing({ wallet, onChange, held = false }) {
       {rate > 0 && (() => {
         const { payment, share } = payoutFee(batch, rate);
         const pct = share * 100 < 1 ? Number((share * 100).toFixed(1)) : Math.round(share * 100);
-        // Said only when the fee is a noticeable part of each payment.
-        return share > 0.02 && <p class="small warn">Fee: {pct}% of each {cents(payment)} payment · pick more songs</p>;
+        // Every choice says what a payment comes to; the fee is said as well
+        // only where it's a noticeable part of it.
+        return (
+          <p class={`small payout-est${share > 0.02 ? " warn" : ""}`}>
+            Each payment is about {cents(payment)}{share > 0.02 && <> · fee {pct}% of it · pick more songs</>}
+          </p>
+        );
       })()}
     </section>
   );
