@@ -293,7 +293,7 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
     const drawRibbons = (P, w, h, mid, t, light) => {
       g.globalCompositeOperation = light ? "source-over" : "lighter";
       LOOK.forEach((look, i) => {
-        const amp = h * 0.46 * (0.04 + shown[i]);
+        const amp = h * 0.46 * (0.04 + shown[i]) * (live.current.wide ? 1.3 : 1);
         const phase = still ? 0 : t * look.speed;
         // Across a desktop window, more waves, so it doesn't stretch into a few long swells.
         const k = (look.cycles * (live.current.wide ? Math.min(2.4, Math.max(1, w / dpr / 520)) : 1) * Math.PI * 2) / w;

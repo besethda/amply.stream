@@ -1359,3 +1359,5 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 .tx { padding: 8px 0; }
 .desk .tx { padding: 8px 10px; margin: 0 -10px; width: calc(100% + 20px); }
 .desk .coll-thead .d { margin-right: 38px; }
+.desk .artist .release-open .mono-dim { font-size: 12px; color: var(--ink2); }
+.desk .d-exp-cover { align-self: center; }
