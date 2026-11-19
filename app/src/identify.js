@@ -323,19 +323,77 @@ export async function reportPaid(origin, signature) {
  *  sent for that song, so naming it is what keeps the two from both being
  *  charged. */
 export async function reportPlayed(pair, origin, seconds, track = null) {
+  const body = track ? { seconds: Math.round(seconds), track: String(track) } : { seconds: Math.round(seconds) };
+  // A report that definitely didn't arrive is kept and sent again later
+  // (resendReports): the artist's server bills what this app reports, so a
+  // lost one is listening unpaid. Kept only after a definite failure, never
+  // before sending, so a report that did arrive is never sent twice.
+  if ((await sendReport(pair, origin, body)) === "lost") keepReport(origin, body);
+}
+
+/**
+ * One report: "sent" once the server has it; "lost" when it certainly didn't
+ * arrive (no pass to send it with, the server answered with a refusal or an
+ * error, or this device was offline), and only then is it worth sending
+ * again; "unknown" when it may have arrived (the connection dropped while it
+ * was out). An unknown one isn't sent again: twice would bill the listener
+ * twice, and once lost only leaves the artist a few seconds short.
+ */
+async function sendReport(pair, origin, body) {
   const token = await tokenFor(pair, origin).catch(() => null);
-  if (!token) return;
+  if (!token) return "lost";
   try {
     // The pass goes in the address, as for audio and /heard: an Authorization
     // header isn't one the artist's server lets other sites send, so the
     // browser would refuse the report before it left.
-    await fetch(audioUrl(`${origin}/listen/played`, token), {
+    const res = await fetch(audioUrl(`${origin}/listen/played`, token), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(track ? { seconds: Math.round(seconds), track: String(track) } : { seconds: Math.round(seconds) }),
+      body: JSON.stringify(body),
       keepalive: true,
     });
-  } catch { /* the artist's tally is not worth interrupting playback for */ }
+    if (res.ok) return "sent";
+    // A refusal or an error: the report wasn't written (the node writes it in
+    // one transaction, or not at all).
+    return res.status === 401 || res.status === 403 || res.status === 408 || res.status === 429 || res.status >= 500 ? "lost" : "unknown";
+  } catch {
+    return typeof navigator !== "undefined" && navigator.onLine === false ? "lost" : "unknown";
+  }
+}
+
+// ── play reports that didn't arrive ──────────────────────────────────────────
+
+const REPORTS = "amply.reports.v1";
+const REPORT_KEEP_MS = 3 * 86_400_000;   // the artist's server keeps what it sent three days
+const REPORT_MAX = 100;
+const readReports = () => { try { const a = JSON.parse(localStorage.getItem(REPORTS) || "[]"); return Array.isArray(a) ? a : []; } catch { return []; } };
+const writeReports = (a) => { try { localStorage.setItem(REPORTS, JSON.stringify(a.slice(-REPORT_MAX))); } catch { /* fine */ } };
+function keepReport(origin, body) {
+  writeReports([...readReports(), { origin, body, at: Date.now() }]);
+}
+/** Reports waiting to be sent again (tests). */
+export const keptReports = () => readReports();
+
+/**
+ * Send again the play reports that didn't arrive: when the app opens with a
+ * wallet, and when the network comes back. Each is taken off the list once
+ * its server has it; one older than the server keeps anything is dropped.
+ */
+let resending = false;
+export async function resendReports(pair, now = Date.now()) {
+  if (!pair || resending) return;
+  resending = true;
+  try {
+    const before = readReports();
+    const all = before.filter((r) => r && r.origin && now - (r.at || 0) < REPORT_KEEP_MS);
+    const left = [];
+    for (const r of all) if ((await sendReport(pair, r.origin, r.body)) === "lost") left.push(r);
+    // Anything kept meanwhile (a song that ended while these were sent) stays too.
+    const added = readReports().slice(before.length);
+    writeReports([...left, ...added]);
+  } finally {
+    resending = false;
+  }
 }
 
 /**

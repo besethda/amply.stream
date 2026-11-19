@@ -10,16 +10,17 @@
  * `served`), as seconds: bytes over the file's size, times the track's
  * duration.
  *
- * **Billing is a hybrid**, so an honest listener isn't charged twice or for
- * what they didn't hear. For each (wallet, track, day):
+ * **What's billed is what the app reports.** Bytes sent say little about
+ * what was heard: a browser reads ahead, so a song skipped ten seconds in may
+ * be mostly downloaded already. So a wallet whose app reports is billed what
+ * it reported, never what was sent (store.ts, billServed).
  *
- *     billable = max(reported, delivered - SLACK)
- *
- * and only the increase since last time is added to what's owed, at the
- * price now. A full listen the app reports as 240 s, with 240 s sent, bills
- * 240 s once (the report). A copy taken whole with nothing reported bills
- * about two thirds of it. A song replayed from the browser's cache isn't
- * sent again, and its report covers it.
+ * What was sent is billed only for a wallet that reported nothing at all that
+ * UTC day — not one song, not a 0 s skip — and only a day after it ended
+ * (store.ts, billUnreported), at what was sent less SLACK per track. That's
+ * the copier this exists for. An honest listener whose report for one song
+ * goes missing is never billed for what their browser read ahead, because
+ * their other reports show their app reports.
  *
  * **Writes are few.** The artist's database has a daily allowance shared
  * with everything else (limits.ts), and audio arrives in many ranged
@@ -31,20 +32,18 @@
  * Nothing here may fail a request: every error is swallowed and the listener
  * gets their audio. Nothing is logged.
  */
-import { addServed, billServed, inOneGo, servedDay, type ServedKey } from "./store";
+import { addServed, inOneGo, servedDay, type ServedKey } from "./store";
 
 /**
- * How much more than was heard a browser can be sent, in seconds of audio,
- * before the difference is billed: 60 seconds, or 35% of the track, whichever
- * is more.
+ * For a wallet that reported nothing at all (billUnreported): how much of
+ * each track sent isn't billed, in seconds of audio: 60 seconds, or 35% of
+ * the track, whichever is more.
  *
- * Browsers read ahead: a player buffers well past where it is playing, and a
- * track skipped after half a minute has often been mostly downloaded already.
- * Seeking around re-fetches. Without this allowance, an honest listener who
- * skips would pay for most of a song they barely heard. With it, someone
- * taking whole files without reporting still pays for about two thirds of
- * each, which makes not reporting no bargain, and an honest app's report is
- * almost always the larger number anyway.
+ * Only a wallet that has never reported a play is billed this way, so this
+ * is the copier's discount, not an honest listener's: someone taking whole
+ * files without reporting pays for about two thirds of each, which makes not
+ * reporting no bargain. It also covers what any player reads ahead, in case
+ * an app that does report is ever mistaken for one that doesn't.
  */
 export const SLACK = { seconds: 60, share: 0.35 } as const;
 export const slackFor = (trackSeconds: number) => Math.max(SLACK.seconds, SLACK.share * trackSeconds);
@@ -222,11 +221,14 @@ async function flush(t: Tally, deps: MeterDeps): Promise<void> {
   t.lastFlush = Date.now();
   t.written += seconds;
   try {
+    // Only counted here. Billing follows the app's report (billServed), or,
+    // for a wallet that never reports, comes later (billUnreported). Sent
+    // while it costs this wallet nothing (a subscriber, payments paused):
+    // not counted at all, so it can never be billed later at a price.
+    if (!((await deps.perMinute(t.key.pubkey).catch(() => 0)) > 0)) return;
     deps.onFlush?.();
-    const perMinute = await deps.perMinute(t.key.pubkey).catch(() => 0);
     await inOneGo(deps.db, [
       addServed(deps.db, t.key, { delivered: seconds, cap: DELIVERED_CAP * t.trackSeconds }),
-      ...billServed(deps.db, t.key, { slack: slackFor(t.trackSeconds), perMinute }),
     ]);
     if (deps.tidy && Math.random() < 0.02) await deps.tidy();
   } catch {

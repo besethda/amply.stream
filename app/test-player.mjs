@@ -176,5 +176,36 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   ok("  and listening carries on from there", Math.abs(heard - 13) < 0.01, heard);
 }
 
+// ── what's reported: every song fetched, even one skipped at 0 s ────────────
+{
+  const told = [];
+  const q = createPlayer(() => {}, () => {}, { onFinished: (t, seconds, o) => told.push([t.id, seconds, !!o?.partial]) });
+  q.play(tracks.slice(0, 3), 0);
+  await tick();
+  q.next();          // skipped before a second played
+  await tick();
+  ok("a song fetched and skipped at once is reported, as 0 s", told.length === 1 && told[0][0] === "a" && told[0][1] === 0 && !told[0][2], JSON.stringify(told));
+  const a = q.element();
+  a.paused = false;
+  a.currentTime = 1; a.handlers.timeupdate.forEach((f) => f());
+  a.currentTime = 2; a.handlers.timeupdate.forEach((f) => f());
+  q.checkpoint();    // the app closing mid-song
+  ok("closing mid-song reports what's been heard, marked partial", told.length === 2 && told[1][0] === "b" && told[1][1] > 0 && told[1][2], JSON.stringify(told));
+  q.checkpoint();
+  ok("  and not twice", told.length === 2, JSON.stringify(told));
+  q.next();
+  await tick();
+  ok("  if it plays on, the song's end still reports it (0 s more here)", told.length === 3 && told[2][0] === "b" && told[2][1] === 0 && !told[2][2], JSON.stringify(told));
+
+  // A song refused (no pass, no money) was never fetched: nothing to report.
+  const said = [];
+  const r = createPlayer(() => {}, () => {}, { resolve: async () => { const e = new Error("no"); e.kind = "nowallet"; throw e; }, onFinished: (t, s) => said.push([t.id, s]) });
+  r.play(tracks.slice(0, 2), 0);
+  await tick();
+  r.next();
+  await tick();
+  ok("a song refused before any audio was fetched isn't reported", said.length === 0, JSON.stringify(said));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

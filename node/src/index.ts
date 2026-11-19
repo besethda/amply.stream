@@ -27,7 +27,7 @@ import {
   setting, putSetting, listeners, listener, setBlocked, counted, MAX_REPORT_S, forget, remove, pruneStale, pruneHourly,
   subscribedUntil, pruneSubscriptions, heard, songTotals, playsToday,
   paidOf, recordPaid, paidSigKnown, mergePaid, MAX_PAID_WALLETS, autoBlockSetting, setAutoBlock, owedRowOf,
-  addServed, billServed, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
+  addServed, billServed, billUnreported, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
   type Listener,
 } from "./store";
 import { autoBlock, owedOf, unpaidOf } from "../../spec/standing.mjs";
@@ -731,7 +731,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   if (request.method === "GET" && path === "/listeners") {
     // Whenever the artist looks, anything past its keeping date goes first,
     // so what they see is what they are entitled to hold.
-    await pruneStale(env.DB);
+    await pruneStale(env.DB, Date.now(), () => billLate(env, undefined));
     await pruneSubscriptions(env.DB);
     const rows = await listeners(env.DB);
     return json(await withStanding(env, rows));
@@ -934,7 +934,7 @@ function meterAudio(
       pubkey: who, track: key, size, duration: tracksOf(view).byKey.get(key)?.duration ?? null,
     }, {
       db: env.DB, perMinute: (p) => perMinuteFor(env, ctx, p), later: laterOf(ctx),
-      onFlush: () => meterHooks.onFlush?.(), tidy: () => pruneHourly(env.DB),
+      onFlush: () => meterHooks.onFlush?.(), tidy: () => pruneHourly(env.DB, Date.now(), () => billLate(env, ctx)),
     });
     return new Response(body, { status: res.status, headers: res.headers });
   } catch {
@@ -1113,19 +1113,36 @@ async function reportServed(env: Env, who: string, trackId: string, seconds: num
     // Sent by this copy of the Worker and not yet written: written now, with this.
     const pending = found ? takePending(k) : null;
     const length = pending?.trackSeconds ?? (found ? lengthOf(0, found.duration) : 0);
-    // A report standing on its own has nothing sent to allow for. A song
-    // whose length can't be known here gets the least slack (60 s), and no
-    // cap, which only matters for what's sent: none is added without one.
-    const slack = found ? slackFor(length) : 0;
+    // A song whose length can't be known here gets no cap, which only
+    // matters for what's sent: none is added without one.
     await inOneGo(env.DB, [
-      addServed(env.DB, k, { delivered: pending?.seconds ?? 0, reported: seconds, cap: DELIVERED_CAP * length }),
-      ...billServed(env.DB, k, { slack, perMinute, plays: 1, now }),
+      addServed(env.DB, k, { delivered: pending?.seconds ?? 0, reported: seconds, cap: DELIVERED_CAP * length, report: true }),
+      ...billServed(env.DB, k, { perMinute, plays: 1, now }),
     ]);
     return true;
   } catch (e) {
     if (/no such table/i.test(String((e as Error)?.message ?? e))) return false;
     throw e;
   }
+}
+
+/**
+ * Bill what was sent to wallets whose app reported nothing at all
+ * (store.ts, billUnreported): every one that's due, or just `pubkey`. Each
+ * track's allowance is from the page as published; a track no longer on it
+ * isn't billed, since its length can't be known.
+ */
+async function billLate(env: Env, ctx: ExecutionContext | undefined, pubkey: string | null = null): Promise<number> {
+  // Without the page, a track's length can't be known: thrown, so a prune
+  // keeps the rows for next time rather than delete what wasn't looked at.
+  const text = await manifestText(env);
+  if (!text) throw new Error("no page to bill against");
+  const tracks = tracksOf(derive(text));
+  return billUnreported(env.DB, {
+    pubkey,
+    slackOf: (key) => { const t = tracks.byKey.get(key); return t ? slackFor(lengthOf(0, t.duration)) : Infinity; },
+    perMinute: (p) => perMinuteFor(env, ctx, p),
+  });
 }
 
 /** Everything a listener can do without being the artist. */
@@ -1148,9 +1165,14 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     // Auto-block asks first or not.
     let asked: Promise<number | null> | null = null;
     const untilOf = () => (asked ??= refresh(env.DB, address).catch(() => subscribedUntil(env.DB, address)));
+    // A wallet that has taken audio and reported none of it is billed for it
+    // here, once its grace is up, so Auto-block and `owes` see it. Only once
+    // the wallet has proved it's theirs (introduce calls this after).
+    let late = false;
+    const billedLate = () => { if (late) return Promise.resolve(); late = true; return billLate(env, ctx, address).catch(() => 0); };
     const result = await introduce(env.DB, host, body as never, Date.now(),
       () => allow(env as never, RULES.newListener, host),
-      (known) => owingFor(env, ctx, known, untilOf));
+      async (known) => { await billedLate(); return owingFor(env, ctx, known, untilOf); });
     if (!result.ok) {
       if (result.busy) return tooMany(withCors(new Headers()));
       // Auto-block: told what's owed, in micros, so their app can pay it and
@@ -1176,6 +1198,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     // subscriber, payments paused). The app pays it when it's past the
     // artist's payment point, even if its own ledger says less; below that,
     // the usual settling applies.
+    if (!subscribed) await billedLate();
     const owes = subscribed ? 0 : await owesNow(env, ctx, address).catch(() => 0);
     return json({ token: result.token, subscribedUntil: subscribed ? until : null, owes });
   }
@@ -1490,7 +1513,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     // Now and then, clear out wallets not heard from in a year. Here rather
     // than on a timer, so there is nothing for an artist to set up; and at
     // most hourly, since it reads the whole table (pruneHourly).
-    if (Math.random() < 0.02) await pruneHourly(env.DB).catch(() => {});
+    if (Math.random() < 0.02) await pruneHourly(env.DB, Date.now(), () => billLate(env, ctx)).catch(() => {});
     return new Response(null, { status: 204, headers: noStore() });
   }
 

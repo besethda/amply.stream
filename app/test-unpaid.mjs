@@ -430,5 +430,45 @@ same("nothing owed is nothing sent", o.pieces(0), []);
   same("a play is reported with the song's id", posts, [{ seconds: 241, track: "song-1" }]);
 }
 
+// ── play reports: kept when they certainly didn't arrive, never sent twice ──
+{
+  fresh();
+  let mode = "down";
+  const sentBodies = [];
+  globalThis.fetch = async (url, init) => {
+    const u = new URL(url);
+    if (u.pathname === "/listen/challenge") return new Response(JSON.stringify({ challenge: `amply:${u.host}:${Date.now()}:abc` }));
+    if (u.pathname === "/listen/token") return new Response(JSON.stringify({ token: "pass", owes: 0 }));
+    if (u.pathname === "/listen/played") {
+      if (mode === "down") return new Response("busy", { status: 503 });
+      if (mode === "dropped") throw new TypeError("connection reset");
+      sentBodies.push(JSON.parse(init.body));
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`unexpected ${url}`);
+  };
+  await id.reportPlayed(pair, ORIGIN_A, 61.6, "song-1");
+  same("a report the server refused (503) is kept to send again", id.keptReports().map((r) => r.body), [{ seconds: 62, track: "song-1" }]);
+  mode = "dropped";
+  await id.reportPlayed(pair, ORIGIN_A, 30, "song-2");
+  ok("  one whose connection dropped (it may have arrived) isn't: twice would bill twice", id.keptReports().length === 1, JSON.stringify(id.keptReports()));
+  mode = "up";
+  await id.resendReports(pair);
+  same("  sent again once the server answers", sentBodies, [{ seconds: 62, track: "song-1" }]);
+  ok("  and then forgotten, so never sent a third time", id.keptReports().length === 0);
+  await id.resendReports(pair);
+  ok("  a second resend sends nothing", sentBodies.length === 1);
+  await id.reportPlayed(pair, ORIGIN_A, 0, "song-3");
+  same("a 0 s report (a song fetched and skipped at once) is sent like any other", sentBodies[1], { seconds: 0, track: "song-3" });
+  mode = "down";
+  await id.reportPlayed(pair, ORIGIN_A, 10, "old");
+  const kept = JSON.parse(store.get("amply.reports.v1"));
+  kept[0].at = Date.now() - 4 * 86_400_000;
+  store.set("amply.reports.v1", JSON.stringify(kept));
+  mode = "up";
+  await id.resendReports(pair);
+  ok("  one older than the artist's server keeps anything is dropped, not sent", sentBodies.length === 2 && id.keptReports().length === 0, JSON.stringify(sentBodies));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

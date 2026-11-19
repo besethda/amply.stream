@@ -9,7 +9,7 @@ to listeners. Amply never runs this, never has access to it, and cannot change i
 |---|---|
 | `GET /` | The artist's page, rendered from the manifest. `/privacy` is their privacy notice. |
 | `GET /manifest.json` | The manifest, from D1. CORS open, cached 5 min. |
-| `GET /audio/<key>` | Audio from R2. Range requests supported (seeking). Paid tracks need a listener's pass, and what is sent of them is metered per wallet, track and day (`src/meter.ts`), so listening is charged even when an app doesn't report it. |
+| `GET /audio/<key>` | Audio from R2. Range requests supported (seeking). Paid tracks need a listener's pass, and what is sent of them is metered per wallet, track and day (`src/meter.ts`), so listening is charged even when an app doesn't report it. A wallet is billed what its app reports; what was sent is billed (less a margin) only for a wallet that has never reported a play, a day after. |
 | `GET /art/<key>` | Images from R2. |
 | `GET /version` | `{ version, spec }` — lets the editor spot a stale service. |
 | `/listen/…` | What a listener signs for with their wallet: a pass, play counts, subscriptions, purchases, and seeing or erasing their own record. A pass (`POST /listen/token`) answers `{ token, subscribedUntil, owes }`, `owes` being the micros the server says are still unpaid; a play report (`POST /listen/played`) is `{ seconds, track }`, `track` the song's id. |

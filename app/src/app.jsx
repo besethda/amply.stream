@@ -20,7 +20,7 @@ import {
 import { agreeRate } from "./spend.js";
 import { claimOf, noteClaim, claimDue, wakeClaims, claimFromPass, passOwesDue } from "./owes.js";
 import {
-  tokenFor, reportPlayed, reportHeard, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
+  tokenFor, reportPlayed, reportHeard, resendReports, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
   manageSubscription, claimSubscription, reportPaid, takePassOwes,
 } from "./identify.js";
 import { perMinute, subscriptionOnly, plans as plansOf } from "../../spec/pricing.mjs";
@@ -296,11 +296,12 @@ export function App() {
         }
         return audioUrl(track.url, token);
       },
-      onFinished(track, seconds) {
+      onFinished(track, seconds, { partial = false } = {}) {
         // The song's own count, for the artist's "most played": nothing about
         // who is kept, so free tracks count too. A paid one is counted only
-        // with this wallet's pass. Songs on this phone aren't anyone's.
-        if (track.id && /^https:/.test(track.url || "") && originOf(track.url) === originOf(track.from)) {
+        // with this wallet's pass. Songs on this phone aren't anyone's. Not
+        // for a skip before anything played, nor for the app closing mid-song.
+        if (!partial && seconds >= 1 && track.id && /^https:/.test(track.url || "") && originOf(track.url) === originOf(track.from)) {
           const origin = originOf(track.url);
           if (!track.needsWallet) reportHeard(origin, track.id, seconds);
           else if (holder.current) {
@@ -312,6 +313,9 @@ export function App() {
         // Listening that costs nothing isn't reported as listening owed for.
         const artist = library.current.find((e) => e.url === track.from);
         if (!isSubscribed(originOf(track.url)) && !(artist && rateOf(artist.manifest) && feesCovered(artist))) return;
+        // Every paid song fetched is reported, even at 0 s: its server bills
+        // what this app reports, and only bills what it sent to a wallet that
+        // never reports anything (node/src/meter.ts).
         reportPlayed(holder.current, originOf(track.url), seconds, track.id);
       },
     },
@@ -331,6 +335,24 @@ export function App() {
     return () => a.removeEventListener("play", wake);
   }, []);
   useKeys({ player, state, volume, onLike: () => { if (state.track) { toggleLike(state.track); bump((n) => n + 1); } } });
+
+  // Play reports that didn't arrive last time: sent again once there's a
+  // wallet, and when the network comes back.
+  useEffect(() => {
+    if (!pair) return;
+    resendReports(pair);
+    const online = () => resendReports(pair);
+    window.addEventListener("online", online);
+    return () => window.removeEventListener("online", online);
+  }, [pair]);
+
+  // Closing the app mid-song: what's been heard of it is reported now, not
+  // lost, so the artist's server has this app's word for it.
+  useEffect(() => {
+    const gone = () => player.checkpoint();
+    window.addEventListener("pagehide", gone);
+    return () => window.removeEventListener("pagehide", gone);
+  }, []);
 
   // ── listening, banked and paid for ────────────────────────────────────────
 

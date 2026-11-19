@@ -6,7 +6,7 @@
  * checks MANAGE_CSP.
  */
 
-export const VERSION = "3.26.0";
+export const VERSION = "3.26.1";
 export const SPEC_VERSION = 1;
 
 /** Where the node serves the editor's MP3 encoder (lame.ts). Named for the

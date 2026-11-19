@@ -76,6 +76,7 @@ export function createPlayer(onChange, onListened, {
   let lastAt = 0;           // and when, by the wall clock
   let advancing = false;
   let played = 0;           // seconds of this track actually heard
+  let fetched = false;      // its audio was asked for (a paid song's server counts what it sends)
   let loading = 0;          // guards against a slow resolve landing out of order
   let wanted = false;       // the listener means it to be playing
   let recovering = false;   // fetching the song again after losing signal
@@ -116,10 +117,17 @@ export function createPlayer(onChange, onListened, {
   };
 
   /** Tell whoever is counting that the track we were on is finished with. */
+  /**
+   * Tell whoever is counting that the track we were on is finished with —
+   * also when it was fetched and skipped before a second played, so a paid
+   * song's server hears "0 s" rather than nothing, and doesn't bill what the
+   * browser had already read ahead (node/src/meter.ts).
+   */
   function finish() {
     const track = now();
-    if (track && played > 0) onFinished(track, played);
+    if (track && (played > 0 || fetched)) onFinished(track, played, { partial: false });
     played = 0;
+    fetched = false;
   }
 
   async function load(p, autoplay = true) {
@@ -149,6 +157,7 @@ export function createPlayer(onChange, onListened, {
     }
     if (mine !== loading) return;   // a later track won the race
 
+    fetched = true;
     audio.src = url;
     if (autoplay) audio.play().catch(() => tell());
     tell();
@@ -392,6 +401,16 @@ export function createPlayer(onChange, onListened, {
       tell();
     },
     stop() { finish(); wanted = false; audio.pause(); audio.removeAttribute("src"); list = []; order = []; pos = -1; refused = null; tell(); },
+    /**
+     * The app is closing: report what's been heard of this song so far, as
+     * it is, without ending it. If it plays on (the page wasn't closed after
+     * all), the rest is reported when it ends.
+     */
+    checkpoint() {
+      const track = now();
+      if (track && played > 0) onFinished(track, played, { partial: true });
+      played = 0;
+    },
     /** The playing element — read by the waveform, never rerouted. */
     element: () => audio,
     current: now,
