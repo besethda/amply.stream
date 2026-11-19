@@ -10,6 +10,13 @@
  * skipped after ten seconds. Seeking is not listening either, so a jump in the
  * clock is ignored rather than counted.
  *
+ * **When a play counts.** Nothing is counted until 30 seconds of a play have
+ * been heard, or half of a song under a minute (spec/pricing.mjs
+ * countsAfter): a skip is free, as on every streaming service. What's heard
+ * before that is held, and counted all at once when the play gets there; a
+ * play that never does is let go. Dragging the progress bar doesn't help it
+ * along, since seeking isn't heard.
+ *
  * **Not ending.** In a home-screen web app on iOS, a track that *ends* while
  * the app is in the background does not start the next one, and the lock screen
  * controls stop responding until the app is reopened (WebKit bug 261858, open
@@ -31,6 +38,7 @@
  * back online.
  */
 import { gradientImage } from "./looks.js";
+import { countsAfter } from "../../spec/pricing.mjs";
 
 const LEAD = 0.35;          // seconds before the end to move on
 const MAX_STEP = 2;         // a bigger jump than this is a seek, not listening
@@ -75,7 +83,9 @@ export function createPlayer(onChange, onListened, {
   let last = 0;             // where the clock was when we last looked
   let lastAt = 0;           // and when, by the wall clock
   let advancing = false;
-  let played = 0;           // seconds of this track actually heard
+  let played = 0;           // seconds of this play counted (and not yet reported)
+  let heard = 0;            // seconds of this play heard, whether or not it counts yet
+  let held = 0;             // heard before the play counted: counted when it does
   let fetched = false;      // its audio was asked for (a paid song's server counts what it sends)
   let loading = 0;          // guards against a slow resolve landing out of order
   let wanted = false;       // the listener means it to be playing
@@ -85,6 +95,8 @@ export function createPlayer(onChange, onListened, {
   let waiting = false;      // shown as buffering
 
   const now = () => (pos >= 0 && pos < order.length ? list[order[pos]] : null);
+  /** The song's length: the file's own, else as published. */
+  const lengthNow = () => (Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : now()?.duration);
   const hasNext = () => pos < order.length - 1 || (repeat === REPEAT.ALL && order.length > 0);
 
   function report() {
@@ -127,6 +139,8 @@ export function createPlayer(onChange, onListened, {
     const track = now();
     if (track && (played > 0 || fetched)) onFinished(track, played, { partial: false });
     played = 0;
+    heard = 0;
+    held = 0;
     fetched = false;
   }
 
@@ -167,6 +181,9 @@ export function createPlayer(onChange, onListened, {
   function advance() {
     if (repeat === REPEAT.ONE) {
       finish();
+      // The same song again: a new play, counted afresh (a loop skipped at
+      // once is reported as 0 s, like any other).
+      fetched = true;
       last = 0;
       advancing = false;
       audio.currentTime = 0;
@@ -210,8 +227,16 @@ export function createPlayer(onChange, onListened, {
     const rate = audio.playbackRate || 1;
     const real = step > 0 && (step <= MAX_STEP || step <= since * rate + 0.5);
     if (real && !audio.paused) {
-      played += step;
-      onListened(now(), step);
+      heard += step;
+      if (heard >= countsAfter(lengthNow())) {
+        // Counts now: what was held is counted with this step, once.
+        const counted = held + step;
+        held = 0;
+        played += counted;
+        onListened(now(), counted);
+      } else {
+        held += step;
+      }
     }
 
     // Move on before the element can end, not after.

@@ -158,6 +158,12 @@ A debt is settled in the money it was earned in. An artist who switches `network
 somebody has listened is still owed for that listening; what changes is that nothing further
 accrues.
 
+**What counts.** A client charges only for audio actually played (seeking is not listening), and
+only for a play that reaches 30 seconds heard, or half of a track shorter than a minute; past that,
+every second heard counts, the first thirty included. A play that stops short of it is a skip and
+costs nothing. This is what streaming services count as a stream, and what the reference client does
+(`spec/pricing.mjs`, `countsAfter`).
+
 **Settling.** Nobody holds money between a listen and a payment: not Amply, not a payment
 company, not the artist's node. The listener's own client keeps a running tally of what it
 owes each artist, and when that tally reaches `settleAt` it transfers it from the listener's

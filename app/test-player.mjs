@@ -153,6 +153,7 @@ ok("paused on purpose: left alone", !s3.waiting && resolves === 3);
 ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") === "12345");
 
 // Listening in a pocket: the phone reports less often, in bigger steps.
+// (Past the first 30 s first, so the play counts and steps are counted as they come.)
 {
   let wall = 0, heard = 0;
   const p4 = createPlayer(() => {}, (_t, step) => { heard += step; }, { clock: () => wall });
@@ -162,18 +163,101 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   await tick();
   a.paused = false; on("play");
   const at = (t, ms) => { wall = ms; a.currentTime = t; on("timeupdate"); };
-  at(1, 1000); at(2, 2000);
-  at(12, 12000);
-  ok("ten seconds reported at once, ten seconds passed: counted", Math.abs(heard - 12) < 0.01, heard);
-  at(100, 12500);
-  ok("a jump further than the clock moved is a seek: not counted", Math.abs(heard - 12) < 0.01, heard);
+  for (let t = 1; t <= 31; t++) at(t, t * 1000);
+  const base = heard;
+  at(41, 41_000);
+  ok("ten seconds reported at once, ten seconds passed: counted", Math.abs(heard - base - 10) < 0.01, heard - base);
+  at(130, 41_500);
+  ok("a jump further than the clock moved is a seek: not counted", Math.abs(heard - base - 10) < 0.01, heard - base);
   a.paused = true; on("pause");
   wall = 600_000;
   a.paused = false; on("play");
-  at(150, 601_000);
-  ok("a long pause, then a jump: not taken for listening", Math.abs(heard - 12) < 0.01, heard);
-  on("seeked"); at(151, 602_000);
-  ok("  and listening carries on from there", Math.abs(heard - 13) < 0.01, heard);
+  at(180, 601_000);
+  ok("a long pause, then a jump: not taken for listening", Math.abs(heard - base - 10) < 0.01, heard - base);
+  on("seeked"); at(181, 602_000);
+  ok("  and listening carries on from there", Math.abs(heard - base - 11) < 0.01, heard - base);
+}
+
+// ── when a play counts: 30 s heard, or half a song under a minute ──────────
+{
+  let wall = 0;
+  const counted = [], told = [];
+  const pl = createPlayer(() => {}, (t, step) => counted.push([t.id, step]), {
+    clock: () => wall, onFinished: (t, seconds) => told.push([t.id, seconds]),
+  });
+  const a = pl.element();
+  const on = (e) => (a.handlers[e] || []).forEach((f) => f());
+  const sum = (id) => counted.filter(([x]) => x === id).reduce((n, [, s]) => n + s, 0);
+  const at = (t) => { wall += 1000; a.currentTime = t; on("timeupdate"); };
+  const start = async (list, i = 0) => { pl.play(list, i); await tick(); a.currentTime = 0; a.paused = false; on("play"); wall += 1; };
+
+  // A skip at 29 s: nothing counted, reported as 0.
+  await start(tracks.slice(0, 3));
+  for (let t = 1; t <= 29; t++) at(t);
+  ok("29 s heard: nothing counted yet", sum("a") === 0, sum("a"));
+  pl.next(); await tick();
+  ok("  skipped there: free, and reported as 0 s", sum("a") === 0 && told.at(-1)?.[0] === "a" && told.at(-1)?.[1] === 0, JSON.stringify(told));
+
+  // Reaching 30 s: all 30 counted at once, then each second as it comes.
+  await start(tracks.slice(0, 3));
+  for (let t = 1; t <= 30; t++) at(t);
+  ok("at 30 s the play counts: all 30 s at once", Math.abs(sum("a") - 30) < 0.01 && counted.filter(([x]) => x === "a").length === 1, JSON.stringify(counted));
+  at(31);
+  ok("  then each second as it's heard", Math.abs(sum("a") - 31) < 0.01, sum("a"));
+  pl.next(); await tick();
+  ok("  and the play is reported as 31 s", told.at(-1)?.[0] === "a" && Math.abs(told.at(-1)[1] - 31) < 0.01, JSON.stringify(told.at(-1)));
+
+  // Dragging the progress bar doesn't make a play count.
+  counted.length = 0;
+  await start(tracks.slice(0, 3));
+  for (let t = 1; t <= 10; t++) at(t);
+  pl.seek(150); a.currentTime = 150; on("seeked"); at(151);
+  ok("10 s heard, then dragged to 2:30: 11 s heard, nothing counted", sum("a") === 0, sum("a"));
+  pl.seek(195); a.currentTime = 195; on("seeked");
+  for (let t = 196; t <= 199; t++) at(t);
+  ok("  dragged near the end and played out: 15 s heard, still free", sum("a") === 0, JSON.stringify(counted));
+
+  // Heard in pieces: scrubbed back and played again, it all adds up.
+  counted.length = 0;
+  await start(tracks.slice(1, 3));
+  for (let t = 1; t <= 20; t++) at(t);
+  pl.seek(0); a.currentTime = 0; on("seeked");
+  for (let t = 1; t <= 10; t++) at(t);
+  ok("20 s, scrubbed back to the start, 10 s more: 30 s heard, so it counts (all 30)", Math.abs(sum("b") - 30) < 0.01, JSON.stringify(counted));
+  a.paused = true; on("pause"); wall += 3_600_000; a.paused = false; on("play");
+  at(11);
+  ok("  paused an hour and resumed: the same play, counted on", Math.abs(sum("b") - 31) < 0.01, sum("b"));
+
+  // A short song counts at half its length.
+  const short = [{ id: "s", title: "S", url: "https://x/s.mp3", duration: 40 }];
+  counted.length = 0;
+  const saved = a.duration; a.duration = 40;
+  await start(short);
+  for (let t = 1; t <= 19; t++) at(t);
+  ok("a 40 s song: 19 s heard, nothing counted", sum("s") === 0);
+  at(20);
+  ok("  at 20 s (half of it) it counts, all 20", Math.abs(sum("s") - 20) < 0.01, sum("s"));
+  // Its length unknown: 30 s.
+  a.duration = NaN;
+  const unknown = [{ id: "u", title: "U", url: "https://x/u.mp3" }];
+  await start(unknown);
+  for (let t = 1; t <= 29; t++) at(t);
+  ok("a song of unknown length counts at 30 s, not before", sum("u") === 0);
+  at(30);
+  ok("  and at 30 s it does", Math.abs(sum("u") - 30) < 0.01, sum("u"));
+  a.duration = saved;
+
+  // Repeat one: each loop is its own play.
+  counted.length = 0;
+  await start(tracks.slice(2, 3));
+  pl.cycleRepeat(); pl.cycleRepeat();
+  for (let t = 1; t <= 199; t += 1) at(t);
+  at(199.7);                                 // played through: it loops from the start
+  const first = sum("c");
+  ok("  (it looped: back at the start)", a.currentTime === 0, a.currentTime);
+  for (let t = 1; t <= 10; t++) at(t);
+  ok("repeat one: a second loop skipped at 10 s isn't counted", Math.abs(sum("c") - first) < 0.01 && first > 190, `${first} → ${sum("c")}`);
+  pl.cycleRepeat();
 }
 
 // ── what's reported: every song fetched, even one skipped at 0 s ────────────
@@ -187,8 +271,7 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   ok("a song fetched and skipped at once is reported, as 0 s", told.length === 1 && told[0][0] === "a" && told[0][1] === 0 && !told[0][2], JSON.stringify(told));
   const a = q.element();
   a.paused = false;
-  a.currentTime = 1; a.handlers.timeupdate.forEach((f) => f());
-  a.currentTime = 2; a.handlers.timeupdate.forEach((f) => f());
+  for (let t = 1; t <= 32; t++) { a.currentTime = t; a.handlers.timeupdate.forEach((f) => f()); }
   q.checkpoint();    // the app closing mid-song
   ok("closing mid-song reports what's been heard, marked partial", told.length === 2 && told[1][0] === "b" && told[1][1] > 0 && told[1][2], JSON.stringify(told));
   q.checkpoint();
