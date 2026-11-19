@@ -6,13 +6,9 @@
  * checks MANAGE_CSP.
  */
 
-export const VERSION = "3.26.0";
+export const VERSION = "3.33.0";
 export const SPEC_VERSION = 1;
 
-/** Where the node serves the editor's MP3 encoder (lame.ts). Named for the
- *  library's version, because it's cached as immutable: a new version is a
- *  new address. node/test-paused.mjs keeps it equal to the installed one. */
-export const LAME_PATH = "/studio/lame-1.2.7.js";
 
 /** Amply's relay, which holds Amply's Coinbase key (relay/src/index.ts). */
 export const RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
@@ -35,11 +31,12 @@ export const RELAY_ORIGIN = "https://amply-relay.sdarmistead.workers.dev";
  */
 export const MANAGE_CSP = [
   "default-src 'none'",
-  // 'self' for one file: the MP3 encoder, fetched only when a song is
-  // uploaded (LAME_PATH). Nothing else on this node can run as a script:
-  // every stored file is served as audio, an image or octet-stream, with
-  // nosniff, and a browser runs a script only if it's served as one.
-  "script-src 'self' 'unsafe-inline'",
+  // The editor is one inline module. blob: for one more thing: the MP3
+  // encoder, fetched when a song is uploaded and run only if its bytes match
+  // the hash the editor carries (manage/src/stream-copy.js), from a blob made
+  // of those bytes. Nothing on this node can run as a script: every stored
+  // file is served as audio, an image or octet-stream, with nosniff.
+  "script-src 'unsafe-inline' blob:",
   "style-src 'unsafe-inline'",
   "img-src 'self' data:",
   // blob: is load-bearing, not slack. Before an upload starts, the editor reads
@@ -65,7 +62,10 @@ export const MANAGE_CSP = [
   // The two DNS-over-HTTPS resolvers answer "has my domain been linked yet?"
   // — a public DNS question about a public record, asked of the same two
   // resolvers the listening app uses.
-  "connect-src 'self' https://solana-rpc.publicnode.com https://api.devnet.solana.com https://amply.stream https://1.1.1.1 https://cloudflare-dns.com https://dns.google",
+  //
+  // And the two public CDNs the encoder's published file comes from, only
+  // when a song is uploaded: a GET of a public file, checked before it's run.
+  "connect-src 'self' https://solana-rpc.publicnode.com https://api.devnet.solana.com https://amply.stream https://1.1.1.1 https://cloudflare-dns.com https://dns.google https://cdn.jsdelivr.net https://unpkg.com",
   // The manifest that makes the editor installable (studio.ts), from here.
   "manifest-src 'self'",
   "form-action 'none'",

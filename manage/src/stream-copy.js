@@ -7,7 +7,6 @@
  * included, with nothing to adjust while it plays (spec/loudness.mjs).
  */
 import { integratedLoudness, gainFor, normalize, needsStreamCopy } from "../../spec/loudness.mjs";
-import { LAME_PATH } from "../../node/src/constants.ts";
 
 export const STREAM_RATE = 44100;
 export const STREAM_KBPS = 256;
@@ -32,14 +31,42 @@ export async function decodeStereo(blob) {
 const breathe = () => new Promise((r) => setTimeout(r, 0));
 
 /**
- * The MP3 encoder (lamejs), about half the editor's size: fetched from this
- * node the first time a song needs a streaming copy, rather than carried in
- * the editor every time it opens. The node serves it (node/src/lame.ts) and
- * the browser keeps it.
+ * The MP3 encoder (lamejs, LGPL-3.0), fetched the first time a song needs a
+ * streaming copy: from the npm package as published, through either of two
+ * public CDNs, and run only if it's byte for byte the file this editor was
+ * built with (its SHA-256, pinned here). So the artist's node doesn't carry
+ * 250 KB it only needs while uploading, and no CDN has to be trusted: a file
+ * that differs isn't run. If neither answers with it, the song goes up as it
+ * is, without a streaming copy (ui.jsx).
  */
+export const LAMEJS = {
+  version: "1.2.7",
+  sha256: "1c5f944911ccf2f6e29ab36c2e568363210ab16f50c0d76077060f40ecf91d28",
+  sources: [
+    "https://cdn.jsdelivr.net/npm/@breezystack/lamejs@1.2.7/dist/lamejs.js",
+    "https://unpkg.com/@breezystack/lamejs@1.2.7/dist/lamejs.js",
+  ],
+};
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+/** The encoder's source, checked: from the first source that has the right bytes. */
+export async function fetchEncoder({ sources = LAMEJS.sources, sha256 = LAMEJS.sha256, get = fetch } = {}) {
+  for (const url of sources) {
+    try {
+      const res = await get(url, { cache: "force-cache" });
+      if (!res.ok) continue;
+      const bytes = await res.arrayBuffer();
+      if (hex(await crypto.subtle.digest("SHA-256", bytes)) === sha256) return bytes;
+    } catch { /* the next one */ }
+  }
+  throw new Error("The MP3 encoder couldn't be fetched.");
+}
 let encoder = null;
-export function loadEncoder(path = LAME_PATH) {
-  encoder ??= import(path).catch((e) => { encoder = null; throw e; });
+export function loadEncoder() {
+  encoder ??= fetchEncoder().then(async (bytes) => {
+    // Run from the checked bytes themselves, never from the network again.
+    const src = URL.createObjectURL(new Blob([bytes], { type: "text/javascript" }));
+    try { return await import(src); } finally { URL.revokeObjectURL(src); }
+  }).catch((e) => { encoder = null; throw e; });
   return encoder;
 }
 

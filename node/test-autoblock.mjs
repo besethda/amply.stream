@@ -351,7 +351,7 @@ const report = async (signature, ip = nextIp()) => {
   const before = gets;
   const r = await report(unconfirmedSig);
   ok("the app reports the unconfirmed payment once it lands: counted", r.status === 200 && r.body.recorded === true && r.body.wallet === w.address
-    && r.body.micros === 2_000_000 && r.body.paidMicros === 2_000_000, JSON.stringify(r));
+    && r.body.micros === 2_000_000 && !("paidMicros" in r.body) && (await paidOf(DB, r.body.wallet)) === 2_000_000, JSON.stringify(r));
   ok("  having asked the network exactly once", gets === before + 1, `${gets - before}`);
   ok("  and now they're served", (await passFor(w)).status === 200);
   const again = await report(unconfirmedSig);
@@ -433,15 +433,92 @@ const report = async (signature, ip = nextIp()) => {
   ok("a listener's own record shows what they've paid", mine.held?.paidMicros === 1_000_000, JSON.stringify(mine.held));
   ok("  an auto-blocked wallet can still see it", (await passFor(w)).status === 403 && mine.wallet === w.address);
   const erased = await listen("/forget", await signed(w));
-  ok("  and erase it", erased.status === 204 && (await listener(DB, w.address)) === null);
-  ok("  taking what it paid, and the payments' references, with it",
-    !sqlite.prepare("SELECT 1 FROM paid WHERE pubkey = ?").get(w.address) && !sqlite.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(w.address));
+  const left = await listener(DB, w.address);
+  ok("  and erase it: the listening goes", erased.status === 204 && left?.plays === 0 && left?.seconds === 0 && left?.first_seen === 0, JSON.stringify(left));
+  ok("  but owing $2, what it owes and what it paid stay, until it's settled",
+    sqlite.prepare("SELECT micros FROM owed WHERE pubkey = ?").get(w.address)?.micros === 3_000_000 && (await paidOf(DB, w.address)) === 1_000_000
+    && !!sqlite.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(w.address));
+  ok("  so erasing isn't a way not to pay: still auto-blocked, told what it owes", (await passFor(w)).status === 403);
+  await recordPaid(DB, w.address, 2_000_000, newSig());
+  const again = await listen("/forget", await signed(w));
+  ok("  paid up and erased again: the listening goes, and the payments' references lose the wallet", again.status === 204 && (await listener(DB, w.address)) === null
+    && !sqlite.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(w.address));
+  ok("  but the two money totals stay, so old payments can't be set against new listening",
+    (await paidOf(DB, w.address)) === 3_000_000 && sqlite.prepare("SELECT micros, seconds FROM owed WHERE pubkey = ?").get(w.address)?.micros === 3_000_000);
+  // The editor merges the chain's all-time total: back, listening $1, it's still owed.
+  known(w, { owed: 0 });
+  sqlite.prepare("UPDATE owed SET micros = 4_000_000 WHERE pubkey = ?").run(w.address);
+  await mergePaid(DB, { [w.address]: 3_000_000 });
+  ok("  back after erasing, with the chain's all-time total merged in: new listening is still owed ($1)",
+    sqlite.prepare("SELECT micros FROM owed WHERE pubkey = ?").get(w.address).micros - (await paidOf(DB, w.address)) === 1_000_000);
 
   const kept = await makeWallet();
   known(kept, { owed: 3_000_000, blocked: 1 });
-  await recordPaid(DB, kept.address, 1_000_000, newSig());
+  await recordPaid(DB, kept.address, 3_000_000, newSig());
   await forget(DB, kept.address);
-  ok("a blocked wallet erased keeps only its block: what it paid goes too", (await listener(DB, kept.address))?.blocked === 1 && (await paidOf(DB, kept.address)) === 0);
+  ok("a blocked wallet, paid up, erased keeps its block and its money totals, nothing else", (await listener(DB, kept.address))?.blocked === 1 && (await listener(DB, kept.address))?.seconds === 0 && (await paidOf(DB, kept.address)) === 3_000_000);
+
+  // One payment, counted by the server and by the editor's read of the chain:
+  // counted once, in whichever order.
+  {
+    const d = await makeWallet();
+    known(d, { owed: 5_000_000 });
+    const sig = newSig();
+    await mergePaid(DB, { [d.address]: 2_000_000 });          // the editor read it on the chain
+    await recordPaid(DB, d.address, 2_000_000, sig);           // then the app reported it
+    ok("a payment the editor merged, then reported: counted once ($2, not $4)", (await paidOf(DB, d.address)) === 2_000_000, String(await paidOf(DB, d.address)));
+    await recordPaid(DB, d.address, 1_000_000, newSig());      // a new one, reported first
+    ok("  a new payment reported adds to what the server counted ($3)", (await paidOf(DB, d.address)) === 3_000_000, String(await paidOf(DB, d.address)));
+    await mergePaid(DB, { [d.address]: 3_000_000 });          // the chain says the same
+    ok("  and the chain saying the same total doesn't add it again ($3)", (await paidOf(DB, d.address)) === 3_000_000);
+    const rows = await (await manage("/listeners")).json();
+    ok("  the editor's list says the same", rows.find((r) => r.pubkey === d.address)?.paid_micros === 3_000_000, JSON.stringify(rows.find((r) => r.pubkey === d.address)));
+  }
+
+  // Erased, keeping only the money totals: "see my data" still shows them.
+  {
+    const e = await makeWallet();
+    known(e, { owed: 1_000_000 });
+    await recordPaid(DB, e.address, 1_000_000, newSig());
+    await listen("/forget", await signed(e));
+    const mine = await (await listen("/mine", await signed(e))).json();
+    ok("erased, paid up: 'see my data' shows the totals still kept, not nothing", mine.held?.paidMicros === 1_000_000 && mine.held?.costMicros === 1_000_000, JSON.stringify(mine.held));
+  }
+
+  // A signed request, seen in passing, can't be sent again.
+  {
+    const r = await makeWallet();
+    known(r, { owed: 0 });
+    const body = await signed(r);
+    const first = await listen("/mine", body);
+    const again = await listen("/mine", body);
+    ok("a signed request to see a record works once, and not again if replayed", first.status === 200 && again.status === 403, `${first.status} ${again.status}`);
+  }
+
+  // A payment counted, the wallet erased (paid up), listening again: the same
+  // payment reported again isn't counted a second time.
+  const replay = await makeWallet();
+  known(replay, { owed: 1_000_000 });
+  const sig = newSig();
+  await recordPaid(DB, replay.address, 1_000_000, sig);
+  await forget(DB, replay.address);
+  ok("erased, paid up: the payment's reference stays, with no wallet or amount on it",
+    sqlite.prepare("SELECT pubkey, micros FROM paid_sigs WHERE sig = ?").get(sig)?.pubkey === "" && (await listener(DB, replay.address)) === null);
+  known(replay, { owed: 2_000_000 });
+  ok("  listening again, the same payment reported again isn't counted twice",
+    !(await recordPaid(DB, replay.address, 1_000_000, sig)) && (await paidOf(DB, replay.address)) === 1_000_000);
+  await pruneStale(DB, Date.now() + 9 * DAY);
+  ok("  and after a week and a day, the reference goes too", !sqlite.prepare("SELECT 1 FROM paid_sigs WHERE sig = ?").get(sig));
+
+  // Owing from before the server priced listening as heard: still owed.
+  const older = await makeWallet();
+  known(older, { owed: 0, seconds: 0, lastSeen: Date.now() - 3 * DAY });
+  sqlite.prepare("UPDATE listeners SET seconds = 3000 WHERE pubkey = ?").run(older.address);   // 50 minutes, unpriced
+  await forget(DB, older.address, 0.06);
+  ok("erasing a wallet whose bill is from before prices were kept: it's priced and kept ($3.00)",
+    sqlite.prepare("SELECT micros, seconds FROM owed WHERE pubkey = ?").get(older.address)?.micros === 3_000_000
+    && (await listener(DB, older.address))?.seconds === 0);
+  ok("  and when it was last here stays, so the bill still ages", Math.abs(lastSeenOf(older) - (Date.now() - 3 * DAY)) < 5_000, String(lastSeenOf(older)));
 
   const gone = await makeWallet();
   known(gone, { owed: 3_000_000 });
@@ -452,6 +529,7 @@ const report = async (signature, ip = nextIp()) => {
   const stale = await makeWallet();
   known(stale, { owed: 3_000_000, lastSeen: Date.now() - 400 * DAY });
   await recordPaid(DB, stale.address, 1_000_000, newSig());
+  sqlite.prepare("UPDATE paid SET last = ? WHERE pubkey = ?").run(Date.now() - 400 * DAY, stale.address);   // paid then too
   await pruneStale(DB);
   ok("a year unheard: what it paid is deleted with the rest", (await listener(DB, stale.address)) === null && (await paidOf(DB, stale.address)) === 0
     && !sqlite.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(stale.address));

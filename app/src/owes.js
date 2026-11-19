@@ -172,10 +172,13 @@ export function wakeClaims(kinds = null) {
 // A payment the artist's server sent but hadn't seen land (`confirmed: false`
 // from /listen/settle) isn't on its books until the app reports it at
 // /listen/paid, or the server finds it. Until then, its next refusal still
-// counts it as owed. Held here for an hour and taken off what the server says,
+// counts it as owed. Held here for a day and taken off what the server says,
 // so the app waits for the server to catch up rather than paying again.
 
-const CREDIT_MS = 60 * 60_000;
+// A day: told again every couple of minutes meanwhile (identify.js
+// resendPaid), so a server down for a while still hears of it before the app
+// would take its word that the money is owed.
+const CREDIT_MS = 24 * 60 * 60_000;
 export function noteCredit(url, signature, micros, now = Date.now()) {
   const all = read(CREDITS, []).filter((c) => now - c.at < CREDIT_MS && c.signature !== signature);
   all.push({ url, signature, micros, at: now });
@@ -187,6 +190,9 @@ export function dropCredit(signature) {
   const left = all.filter((c) => c.signature !== signature);
   if (left.length !== all.length) write(CREDITS, left);
 }
+/** Payments still waiting for the server to count them, with a signature to tell it by. */
+export const pendingCredits = (now = Date.now()) =>
+  read(CREDITS, []).filter((c) => now - c.at < CREDIT_MS && c.signature && !String(c.signature).startsWith("unsure:"));
 export const pendingCredit = (url, now = Date.now()) =>
   read(CREDITS, []).filter((c) => c.url === url && now - c.at < CREDIT_MS).reduce((n, c) => n + (c.micros || 0), 0);
 

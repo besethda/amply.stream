@@ -11,7 +11,7 @@
 import { machinery } from "./paying.js";
 import { NETWORKS, networkFor } from "./networks.js";
 import { FEES_READY_LAMPORTS } from "../../spec/pricing.mjs";
-import { unpaidRefusal, passOwes, reported, markReported, dropCredit } from "./owes.js";
+import { unpaidRefusal, passOwes, reported, markReported, dropCredit, pendingCredits } from "./owes.js";
 
 const TOKENS = "amply.tokens.v1";
 
@@ -289,14 +289,18 @@ export async function reportHeard(origin, track, seconds, token = null) {
 
 /**
  * Tell an artist's server about a payment that landed after it had stopped
- * waiting for it (`/listen/settle` answered `confirmed: false`). Until it
- * knows, it still counts that money as owed, and with Auto-block on it would
- * keep refusing this wallet. It checks the payment on the network itself, so
- * all it needs is the signature.
+ * waiting for it (`/listen/settle` answered `confirmed: false`), or whose
+ * answer was lost. Until it knows, it still counts that money as owed, and
+ * with Auto-block on it would keep refusing this wallet. It checks the
+ * payment on the network itself, so all it needs is the signature. (The
+ * artist's editor also reads payments from the chain, but only when the
+ * artist opens it: the app doesn't rely on that.)
  *
- * Once per signature, and only after this app has seen it land. Best effort:
- * nothing waits on it, and a failure costs nothing but a wait, since the
- * server finds payments for itself too. Returns whether it was taken.
+ * Done with once the server has counted it (or knew it already), or turned
+ * it down for good (4xx: asking again won't change that). Not when it's busy,
+ * failing, unreachable, or still waiting for the network (202): those are
+ * asked again (resendPaid), and the credit held for it meanwhile stays.
+ * Returns whether it was taken.
  */
 export async function reportPaid(origin, signature) {
   if (!origin || !signature || reported(signature)) return false;
@@ -309,20 +313,36 @@ export async function reportPaid(origin, signature) {
       signal: AbortSignal.timeout(15_000),
     });
   } catch {
-    return false;          // never reached it: may be told next time it lands
+    return false;          // never reached it: asked again (resendPaid)
   }
-  // An answer of any kind counts as telling it: a refusal won't change by
-  // asking again, and this is its own network lookup each time.
-  markReported(signature);
-  if (res.ok) { dropCredit(signature); return true; }
+  if (res.status === 200) { markReported(signature); dropCredit(signature); return true; }
+  // Turned down for good: a bad signature, a payment that isn't to them.
+  if (res.status >= 400 && res.status < 500 && res.status !== 429 && res.status !== 408) markReported(signature);
   return false;
 }
 
-/** Tell the node a track finished, so the artist can see how much was played,
- *  and which song (its id): the node bills the larger of this and what it
- *  sent for that song, so naming it is what keeps the two from both being
- *  charged. */
+const RESEND_MS = 2 * 60_000;
+const lastTried = new Map();
+/**
+ * Report again each payment the server hasn't counted yet (see reportPaid),
+ * each at most every two minutes, for as long as its credit is held.
+ */
+export async function resendPaid(now = Date.now()) {
+  for (const c of pendingCredits(now)) {
+    if (reported(c.signature) || now - (lastTried.get(c.signature) || 0) < RESEND_MS) continue;
+    lastTried.set(c.signature, now);
+    let origin;
+    try { origin = new URL(c.url).origin; } catch { continue; }
+    await reportPaid(origin, c.signature).catch(() => false);
+  }
+}
+
+/** Tell the node a track finished, and which song (its id): a play in the
+ *  artist's record of who listens. */
 export async function reportPlayed(pair, origin, seconds, track = null) {
+  // A play, for the artist's record of who listens. It decides nothing about
+  // money: their server bills what it sent (node/src/meter.ts), and this app
+  // pays what it counted itself (paying.js). So a report lost is lost.
   const token = await tokenFor(pair, origin).catch(() => null);
   if (!token) return;
   try {

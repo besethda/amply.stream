@@ -10,7 +10,8 @@
  * many times each song of it has been downloaded.
  *
  * **A ledger, not a log.** There is no row recording that a particular wallet
- * played a particular track at a particular time. Totals answer the question an
+ * played a particular track at a particular time. (Payments are recorded with
+ * their time, in `paid_sigs`, as the chain records them in public anyway.) Totals answer the question an
  * artist actually has — who is listening a lot and paying nothing — without
  * building a record of anybody's taste. What is not collected cannot leak, be
  * demanded, or be mishandled by someone who never wanted to be a data
@@ -24,6 +25,7 @@
  * D1 rather than KV because KV allows a thousand writes a day on the free plan
  * and a single enthusiastic listener would spend a tenth of that in an evening.
  */
+import { SETTLE_WITHIN_DAYS } from "../../spec/pricing.mjs";
 
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS settings (
@@ -123,12 +125,22 @@ export const SCHEMA = [
      at INTEGER NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS paid_sigs_by_pubkey ON paid_sigs (pubkey)`,
+  // What each wallet has paid by the chain's own count, all time, as the
+  // artist's editor last read it (mergePaid). Kept apart from `paid`, which
+  // adds up the payments this server counted one by one: the same payment is
+  // in both, so they're never added together. What a wallet has paid is the
+  // larger of the two (paidOf).
+  `CREATE TABLE IF NOT EXISTS paid_chain (
+     pubkey TEXT PRIMARY KEY,
+     micros INTEGER NOT NULL DEFAULT 0,
+     last INTEGER NOT NULL DEFAULT 0
+   )`,
   // How much of each paid track this server sent each wallet, per UTC day, in
   // seconds of audio (meter.ts): `delivered` worked out from the bytes it
   // served, `reported` what the listener's app said it played (/listen/played),
-  // and `billed` how much of the two has been added to `owed` already. So
-  // listening is paid for even by an app that never reports it. The one place
-  // a track is kept beside a wallet, and only for three days (pruneStale).
+  // and `billed` how much of what was sent has been added to `owed` already
+  // (only what was sent is billed, whatever an app says). The one place a
+  // track is kept beside a wallet, and only for three days (pruneStale).
   // Beside the other tables, so nothing existing changes; without it, metering
   // is simply off.
   `CREATE TABLE IF NOT EXISTS served (
@@ -139,6 +151,13 @@ export const SCHEMA = [
      reported REAL NOT NULL DEFAULT 0,
      billed REAL NOT NULL DEFAULT 0,
      PRIMARY KEY (pubkey, track, day)
+   ) WITHOUT ROWID`,
+  // Signed challenges already used to see or erase a wallet's record, so one
+  // seen in passing can't be sent again in the minutes it's valid for. The
+  // challenge text only (random, no wallet), for ten minutes (spendProof).
+  `CREATE TABLE IF NOT EXISTS used_proofs (
+     message TEXT PRIMARY KEY,
+     at INTEGER NOT NULL
    ) WITHOUT ROWID`,
 ];
 
@@ -247,33 +266,31 @@ export async function seen(db: D1Database, pubkey: string, now = Date.now()): Pr
  * per request: audio arrives in many ranged pieces, and counting those would
  * count a paused song a hundred times and spend the write budget doing it.
  *
- * A dishonest client could inflate or omit this. That is tolerable, because the
- * number is the artist's own view of their own listeners rather than anything
- * anyone is charged on: money moves on chain, where nobody has to be believed.
+ * A dishonest client could inflate or omit this. That is tolerable, because it
+ * is only a count of plays in the artist's record, never money: what's owed
+ * is this server's own count of what it sent (billSent), and money moves on
+ * chain, where nobody has to be believed.
  */
 export async function counted(
   db: D1Database,
   pubkey: string,
   seconds: number,
   now = Date.now(),
-  /** The price per minute while it was heard, in dollars: 0 when it was free. */
-  perMinute = 0,
 ): Promise<void> {
-  const clean = Math.max(0, Math.min(Math.round(seconds), MAX_REPORT_S));
-  await db.prepare(
-    `INSERT INTO listeners (pubkey, plays, seconds, first_seen, last_seen) VALUES (?, 1, ?, ?, ?)
-     ON CONFLICT(pubkey) DO UPDATE SET
-       plays = plays + 1,
-       seconds = seconds + excluded.seconds,
-       last_seen = excluded.last_seen`,
-  ).bind(pubkey, clean, now, now).run();
-  const micros = perMinute > 0 ? Math.round((clean / 60) * perMinute * 1_000_000) : 0;
-  // A database from before this table has no record of cost; the editor
-  // then estimates, as it always did. Nothing here is worth failing a play for.
-  await db.prepare(
-    `INSERT INTO owed (pubkey, micros, seconds) VALUES (?, ?, ?)
-     ON CONFLICT(pubkey) DO UPDATE SET micros = micros + excluded.micros, seconds = seconds + excluded.seconds`,
-  ).bind(pubkey, micros, clean).run().catch(() => {});
+  void seconds;
+  await aPlay(db, pubkey, now).run();
+}
+
+/**
+ * A play, as the listener's app says: for the artist's record of who listens,
+ * never for what anyone owes (billSent counts that, from what this server
+ * sent). Its seconds aren't taken either. A statement, to batch with others.
+ */
+export function aPlay(db: D1Database, pubkey: string, now = Date.now()): D1PreparedStatement {
+  return db.prepare(
+    `INSERT INTO listeners (pubkey, plays, seconds, first_seen, last_seen) VALUES (?, 1, 0, ?, ?)
+     ON CONFLICT(pubkey) DO UPDATE SET plays = plays + 1, last_seen = excluded.last_seen`,
+  ).bind(pubkey, now, now);
 }
 
 /** The longest one report of listening can be: a long mix, not a day. */
@@ -294,6 +311,19 @@ export type ListenerRow = Listener & {
 
 export async function listeners(db: D1Database, limit = 500): Promise<ListenerRow[]> {
   const n = Math.min(limit, 1000);
+  try {
+    const { results } = await db.prepare(
+      `SELECT l.*, s.until AS subscribed_until, o.micros AS owed_micros, o.seconds AS owed_seconds,
+              CASE WHEN p.pubkey IS NULL AND c.pubkey IS NULL THEN NULL
+                   ELSE MAX(COALESCE(p.micros, 0), COALESCE(c.micros, 0)) END AS paid_micros
+         FROM listeners l LEFT JOIN subscriptions s ON s.wallet = l.pubkey
+         LEFT JOIN owed o ON o.pubkey = l.pubkey
+         LEFT JOIN paid p ON p.pubkey = l.pubkey
+         LEFT JOIN paid_chain c ON c.pubkey = l.pubkey
+        ORDER BY l.seconds DESC LIMIT ?`,
+    ).bind(n).all<ListenerRow>();
+    return results ?? [];
+  } catch { /* no paid_chain table yet: as before it */ }
   try {
     const { results } = await db.prepare(
       `SELECT l.*, s.until AS subscribed_until, o.micros AS owed_micros, o.seconds AS owed_seconds,
@@ -341,55 +371,110 @@ export async function setBlocked(db: D1Database, pubkey: string, blocked: boolea
  * judgement call by a musician. It is a better erasure process than most
  * companies manage, and this is all of it.
  *
- * **One thing survives, and only for a wallet the artist has stopped serving:**
- * the address itself, with the block still on it, and every number wiped. A
- * plain delete would make the ban button useless — the banned party could lift
- * their own ban by asking to be forgotten, and again every time it was reapplied. So
- * what is kept is the minimum that enforces the artist's decision, holding
- * nothing about what anyone listened to. Erasure is not absolute where a
- * controller has grounds to refuse it, and "this person is barred" is the
- * textbook one. A wallet nobody has blocked is deleted outright.
+ * What goes: how much they listened, how often, and since when. Some things
+ * stay, each because without it erasing would be a way round something:
+ *
+ * - **A block the artist made.** The address, with the block on it and every
+ *   number wiped. Otherwise the banned party could lift their own ban by
+ *   asking to be forgotten, again every time it was reapplied. Erasure is not
+ *   absolute where a controller has grounds to refuse it, and "this person is
+ *   barred" is the textbook one.
+ * - **An unpaid bill.** What it owes, what it paid, those payments'
+ *   references, and when it was last here (so a bill a week old still reads
+ *   as overdue). That's the record any seller keeps; once it's paid, erasing
+ *   again takes it.
+ * - **The money totals of a wallet that has paid anything**: what its
+ *   listening cost and what it paid, two numbers, with no minutes or dates,
+ *   for a year after its last payment. The artist's editor reads what each
+ *   wallet has paid from the public chain, all time (mergePaid); wiped, a
+ *   returning wallet's new listening would be set against everything it
+ *   ever paid, and go unbilled up to that amount.
+ * - **Payment references, for a week, with no wallet on them.** The
+ *   transaction ids of payments already counted, so one can't be reported
+ *   again and counted twice. Swept after SETTLE_WITHIN_DAYS and a day, when
+ *   a report that old is refused anyway (pruneStale).
+ * - **What was sent in the last three days** (`served`), until it ages out
+ *   like everyone's. It's what this server bills from; wiped, a listener
+ *   could erase between plays to be billed afresh from nothing, every time.
+ *
+ * `perMinute`: the price now, for listening from before the server priced it
+ * as heard (see owedOf in spec/standing.mjs), so a bill that old counts too.
  */
-export async function forget(db: D1Database, pubkey: string): Promise<void> {
+export async function forget(db: D1Database, pubkey: string, perMinute = 0): Promise<void> {
+  const row = await db.prepare("SELECT seconds FROM listeners WHERE pubkey = ?").bind(pubkey).first<{ seconds: number }>();
+  const ledger = await moneyOf(db, pubkey);
+  // Listening from before `owed`, at today's price, as Auto-block counts it.
+  const older = Math.max(0, (Number(row?.seconds) || 0) - ledger.seconds);
+  const olderMicros = Math.round((older / 60) * (perMinute > 0 ? perMinute : 0) * 1_000_000);
+  const unpaid = ledger.owed + olderMicros - ledger.paid;
+  if (unpaid > 0 && ledger.tables) {
+    // The older listening becomes part of the bill, priced, and how long
+    // anyone listened goes: a bill needs the amount, not the minutes.
+    await db.prepare(
+      `INSERT INTO owed (pubkey, micros, seconds) VALUES (?, ?, 0)
+       ON CONFLICT(pubkey) DO UPDATE SET micros = micros + excluded.micros, seconds = 0`,
+    ).bind(pubkey, olderMicros).run();
+  }
+  const owing = unpaid > 0 && ledger.tables;
+  // last_seen stays as it was for a bill (overdue reads it); 0 for a block.
   await db.prepare(
-    `UPDATE listeners SET plays = 0, seconds = 0, first_seen = 0, last_seen = 0
-     WHERE pubkey = ? AND blocked = 1`,
-  ).bind(pubkey).run();
-  await db.prepare("DELETE FROM listeners WHERE pubkey = ? AND blocked = 0").bind(pubkey).run();
-  await forgetOwed(db, pubkey);
+    `UPDATE listeners SET plays = 0, seconds = 0, first_seen = 0,
+       last_seen = CASE WHEN ? THEN last_seen ELSE 0 END
+     WHERE pubkey = ? AND (blocked = 1 OR ?)`,
+  ).bind(owing ? 1 : 0, pubkey, owing ? 1 : 0).run();
+  await db.prepare("DELETE FROM listeners WHERE pubkey = ? AND blocked = 0 AND NOT ?").bind(pubkey, owing ? 1 : 0).run();
+  await forgetOwed(db, pubkey, owing ? "all" : ledger.paid > 0 ? "totals" : "none");
 }
 
+/** A wallet's money record here, in micros: 0s without the tables. */
+async function moneyOf(db: D1Database, pubkey: string): Promise<{ owed: number; seconds: number; paid: number; tables: boolean }> {
+  try {
+    const owed = await db.prepare("SELECT micros, seconds FROM owed WHERE pubkey = ?").bind(pubkey).first<{ micros: number; seconds: number }>();
+    const paid = await paidOf(db, pubkey);
+    if (paid === null) throw new Error("no paid table");
+    return { owed: Number(owed?.micros) || 0, seconds: Number(owed?.seconds) || 0, paid, tables: true };
+  } catch {
+    return { owed: 0, seconds: 0, paid: 0, tables: false };
+  }
+}
+
+/** How long a counted payment's reference outlives its wallet's record: as
+ *  long as a report of it is accepted (SETTLE_WITHIN_DAYS), and a day more. */
+export const PAID_SIGS_KEEP_MS = (SETTLE_WITHIN_DAYS + 1) * 86_400_000;
+
 /**
- * What a wallet's listening cost, and what it has paid, go with the rest of
- * what's held about it. The two go together: one without the other would
- * leave a wallet owing for listening nobody remembers, or credited for
- * payments against listening that's gone.
+ * What of a wallet's money record stays when its record goes (see forget):
+ * `all` (it owes: what it owes, what it paid, its payments' references),
+ * `totals` (it has paid: the two totals, no minutes), or `none`.
  *
- * Erasing does wipe what an auto-blocked wallet owes, and so lifts it. That
- * is deliberate: a wallet costs nothing to make, so anyone dodging payment
- * could start again with a new one just as easily, and the right to be
- * forgotten is not something to bargain over a few cents. A block the artist
- * made by hand survives (see forget).
+ * A payment's reference outlives the record by a week, with no wallet on it
+ * (and no amount), unless the bill keeps it: only so the same payment can't
+ * be reported again and counted twice. With no `pubkey`, this is the sweep
+ * (pruneStale): money records of wallets no longer held — totals a year
+ * after the last payment — and references past the week.
  */
-async function forgetOwed(db: D1Database, pubkey?: string): Promise<void> {
+async function forgetOwed(db: D1Database, pubkey?: string, keep: "all" | "totals" | "none" = "none", now = Date.now()): Promise<void> {
   // Each on its own: a database from before one of these tables still has
   // the others cleared.
-  for (const table of ["owed", "paid", "paid_sigs"]) {
-    try {
-      await (pubkey
-        ? db.prepare(`DELETE FROM ${table} WHERE pubkey = ?`).bind(pubkey)
-        : db.prepare(`DELETE FROM ${table} WHERE pubkey NOT IN (SELECT pubkey FROM listeners)`)
-      ).run();
-    } catch { /* no such table yet */ }
-  }
-  // What was sent to this wallet in the last three days goes too. Not swept
-  // with the others below: a wallet whose listening hasn't cost anything yet
-  // (still within the metering's slack) has rows here and no record in
-  // listeners, and those rows are what lets it be charged. They go by age
-  // instead (pruneStale).
+  const run = async (sql: string, ...args: unknown[]) => {
+    try { await db.prepare(sql).bind(...args).run(); } catch { /* no such table yet */ }
+  };
   if (pubkey) {
-    try { await db.prepare("DELETE FROM served WHERE pubkey = ?").bind(pubkey).run(); } catch { /* no such table yet */ }
+    if (keep === "all") return;
+    if (keep === "totals") await run("UPDATE owed SET seconds = 0 WHERE pubkey = ?", pubkey);
+    else {
+      await run("DELETE FROM owed WHERE pubkey = ?", pubkey);
+      await run("DELETE FROM paid WHERE pubkey = ?", pubkey);
+      await run("DELETE FROM paid_chain WHERE pubkey = ?", pubkey);
+    }
+    await run("UPDATE paid_sigs SET pubkey = '', micros = 0 WHERE pubkey = ?", pubkey);
+    return;
   }
+  await run("DELETE FROM paid WHERE pubkey NOT IN (SELECT pubkey FROM listeners) AND last < ?", now - KEEP_FOR);
+  await run("DELETE FROM paid_chain WHERE pubkey NOT IN (SELECT pubkey FROM listeners) AND last < ?", now - KEEP_FOR);
+  await run("DELETE FROM owed WHERE pubkey NOT IN (SELECT pubkey FROM listeners) AND pubkey NOT IN (SELECT pubkey FROM paid) AND pubkey NOT IN (SELECT pubkey FROM paid_chain)");
+  await run("UPDATE paid_sigs SET pubkey = '', micros = 0 WHERE pubkey <> '' AND pubkey NOT IN (SELECT pubkey FROM listeners)");
+  await run("DELETE FROM paid_sigs WHERE pubkey = '' AND at < ?", now - PAID_SIGS_KEEP_MS);
 }
 
 // ── what was sent, metered (meter.ts) ──────────────────────────────────────
@@ -406,22 +491,27 @@ export const servedDay = (now = Date.now()) => Math.floor(now / 86_400_000);
 export interface ServedKey { pubkey: string; track: string; day: number }
 
 /**
- * Bring a `served` row's billing up to date, as statements to run after the
- * one that changed it, in the same batch (one transaction).
+ * Bring a `served` row's billing up to date from what this server itself
+ * sent, as statements to run after the one that changed it, in the same batch
+ * (one transaction).
  *
- * What is billable is the larger of what the app reported and what was sent
- * less the slack (meter.ts, SLACK): whole seconds, never fewer than before.
- * Whatever of it hasn't been billed yet is added to `owed` exactly as a
- * reported play always was (counted(), below: the same upsert, priced at
- * `perMinute` now), and to the wallet's totals in `listeners`, which is what
- * makes a wallet that never reports known to Auto-block at all. `plays` is 1
- * for a report from the app (a play, as before) and 0 for metering. Then
- * `billed` catches up. Written so nothing is written when nothing is due.
+ * **The server's own count, never the app's word.** What the listener's app
+ * reports is not billed: the artist doesn't rely on the listener for what
+ * they owe, just as the listener's app pays only what it measured itself
+ * (app/src/paying.js). What's billable here is what was sent, less the slack
+ * (meter.ts): the audio this server let go, minus what a player reads ahead
+ * of what it plays. Paid audio is paced (meter.ts), so a song skipped early
+ * was only ever sent a little past where it stopped, inside the slack.
+ *
+ * Whatever of it hasn't been billed yet is added to `owed` at `perMinute` now
+ * and to the wallet's totals in `listeners` (seconds, not plays: a play is the
+ * app's to report, and counts nothing). Then `billed` catches up. Read inside
+ * the batch, so two at once bill it once.
  */
-export function billServed(
-  db: D1Database, k: ServedKey, { slack, perMinute, plays = 0, now = Date.now() }: { slack: number; perMinute: number; plays?: number; now?: number },
+export function billSent(
+  db: D1Database, k: ServedKey, { slack, perMinute, now = Date.now() }: { slack: number; perMinute: number; now?: number },
 ): D1PreparedStatement[] {
-  const B = "CAST(MAX(reported, delivered - ?4) AS INTEGER)";
+  const B = "CAST(MAX(0, delivered - ?4) AS INTEGER)";
   const row = "pubkey = ?1 AND track = ?2 AND day = ?3";
   const perSecond = perMinute > 0 ? (perMinute * 1_000_000) / 60 : 0;
   const slackS = Math.max(0, Number(slack) || 0);
@@ -434,11 +524,10 @@ export function billServed(
     ).bind(k.pubkey, k.track, k.day, slackS, perSecond),
     db.prepare(
       `INSERT INTO listeners (pubkey, plays, seconds, first_seen, last_seen)
-         SELECT pubkey, ?5, MAX(0, ${B} - billed), ?6, ?6 FROM served
-          WHERE ${row} AND (${B} > billed OR ?5 > 0)
-       ON CONFLICT(pubkey) DO UPDATE SET
-         plays = plays + excluded.plays, seconds = seconds + excluded.seconds, last_seen = excluded.last_seen`,
-    ).bind(k.pubkey, k.track, k.day, slackS, plays, now),
+         SELECT pubkey, 0, ${B} - billed, ?5, ?5 FROM served
+          WHERE ${row} AND ${B} > billed
+       ON CONFLICT(pubkey) DO UPDATE SET seconds = seconds + excluded.seconds, last_seen = excluded.last_seen`,
+    ).bind(k.pubkey, k.track, k.day, slackS, now),
     db.prepare(`UPDATE served SET billed = ${B} WHERE ${row} AND ${B} > billed`)
       .bind(k.pubkey, k.track, k.day, slackS),
   ];
@@ -447,7 +536,7 @@ export function billServed(
 /**
  * Add to a `served` row: seconds sent (`delivered`, never past `cap`, see
  * meter.ts) and seconds the app reported (`reported`). A statement, so it can
- * go in one batch with billServed's.
+ * go in one batch with billSent's.
  */
 export function addServed(
   db: D1Database, k: ServedKey, { delivered = 0, reported = 0, cap }: { delivered?: number; reported?: number; cap: number },
@@ -491,6 +580,24 @@ export async function unreportedServed(db: D1Database, pubkey: string, now = Dat
   return row ? { track: String(row.track), day: Number(row.day) } : null;
 }
 
+/** Whether this track has gone to this wallet already today (meter.ts PACE):
+ *  its row shows something sent, from the first piece (markSent). */
+export async function sentToday(db: D1Database, pubkey: string, track: string, now = Date.now()): Promise<boolean> {
+  const row = await db.prepare("SELECT delivered FROM served WHERE pubkey = ? AND track = ? AND day = ?")
+    .bind(pubkey, track, servedDay(now)).first<{ delivered: number }>();
+  return Number(row?.delivered) > 0;
+}
+/** A thousandth of a second: marks a row as sent to, and bills nothing (whole seconds). */
+const SENT_MARK = 0.001;
+
+/** The first piece of a track went to this wallet today: its row, now. */
+export function markSent(db: D1Database, pubkey: string, track: string, now = Date.now()): Promise<unknown> {
+  // A trace of delivery, so a row a report made (delivered 0) isn't taken for this.
+  return db.prepare(`INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?, ?, ?, ${SENT_MARK}, 0, 0)
+     ON CONFLICT(pubkey, track, day) DO UPDATE SET delivered = MAX(delivered, ${SENT_MARK})`)
+    .bind(pubkey, track, servedDay(now)).run();
+}
+
 /** How many tracks this wallet has rows for (/listen/mine): null without the table. */
 export async function servedCount(db: D1Database, pubkey: string): Promise<number | null> {
   try {
@@ -498,6 +605,31 @@ export async function servedCount(db: D1Database, pubkey: string): Promise<numbe
     return Number(row?.n) || 0;
   } catch {
     return null;
+  }
+}
+
+/** Everything `served` holds about a wallet, for its holder (/listen/mine). */
+export async function servedRowsOf(db: D1Database, pubkey: string): Promise<{ track: string; day: string; sentSeconds: number; reportedSeconds: number; billedSeconds: number }[]> {
+  try {
+    const { results } = await db.prepare("SELECT track, day, delivered, reported, billed FROM served WHERE pubkey = ? ORDER BY day, track")
+      .bind(pubkey).all<{ track: string; day: number; delivered: number; reported: number; billed: number }>();
+    return (results ?? []).map((r) => ({
+      track: r.track, day: new Date(r.day * 86_400_000).toISOString().slice(0, 10),
+      sentSeconds: Math.round(r.delivered), reportedSeconds: Math.round(r.reported), billedSeconds: Math.round(r.billed),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** The payments counted for a wallet, by their references (/listen/mine). */
+export async function paymentRefsOf(db: D1Database, pubkey: string): Promise<{ signature: string; micros: number; counted: string }[]> {
+  try {
+    const { results } = await db.prepare("SELECT sig, micros, at FROM paid_sigs WHERE pubkey = ? ORDER BY at")
+      .bind(pubkey).all<{ sig: string; micros: number; at: number }>();
+    return (results ?? []).map((r) => ({ signature: r.sig, micros: r.micros, counted: new Date(r.at).toISOString() }));
+  } catch {
+    return [];
   }
 }
 
@@ -517,7 +649,12 @@ export async function servedCount(db: D1Database, pubkey: string): Promise<numbe
 export async function paidOf(db: D1Database, pubkey: string): Promise<number | null> {
   try {
     const row = await db.prepare("SELECT micros FROM paid WHERE pubkey = ?").bind(pubkey).first<{ micros: number }>();
-    return Number(row?.micros) || 0;
+    const counted = Number(row?.micros) || 0;
+    // The chain's count, where the editor has read it: the larger of the two,
+    // never the sum (the same payments are in both).
+    const chain = await db.prepare("SELECT micros FROM paid_chain WHERE pubkey = ?").bind(pubkey).first<{ micros: number }>()
+      .then((r) => Number(r?.micros) || 0, () => 0);
+    return Math.max(counted, chain);
   } catch {
     return null;
   }
@@ -526,7 +663,9 @@ export async function paidOf(db: D1Database, pubkey: string): Promise<number | n
 /**
  * One payment, counted once: keyed by its transaction, so a payment reported
  * twice — the app asking again, two copies of the Worker at once, the same
- * signature sent by someone else — adds to the total only the first time.
+ * signature sent by someone else, or again after its wallet was erased (the
+ * reference outlives that by a week: forgetOwed) — adds to the total only the
+ * first time.
  * Returns whether it was new. A database without the tables records nothing.
  */
 export async function recordPaid(db: D1Database, pubkey: string, micros: number, sig: string, now = Date.now()): Promise<boolean> {
@@ -563,8 +702,9 @@ export async function paidSigKnown(db: D1Database, sig: string): Promise<{ pubke
 export const MAX_PAID_WALLETS = 1000;
 
 /**
- * Totals the artist's editor read from the chain, merged in: each wallet's
- * becomes the larger of the two, never smaller. The chain is the truth, so
+ * Totals the artist's editor read from the chain, merged in, in `paid_chain`
+ * (never `paid`: a payment this server also counted itself would then count
+ * twice). Each wallet's only ever grows. The chain is the truth, so
  * this heals anything the server missed (a payment made with another app, one
  * sent before this server counted payments); and a reading a little out of
  * date can't undo a payment the server has seen since. Only for wallets this
@@ -577,7 +717,7 @@ export async function mergePaid(db: D1Database, totals: Record<string, number>, 
     const amount = Math.floor(Number(micros));
     if (!Number.isSafeInteger(amount) || amount <= 0) continue;
     await db.prepare(
-      `INSERT INTO paid (pubkey, micros, last)
+      `INSERT INTO paid_chain (pubkey, micros, last)
          SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM listeners WHERE pubkey = ?)
        ON CONFLICT(pubkey) DO UPDATE SET micros = MAX(micros, excluded.micros), last = MAX(last, excluded.last)`,
     ).bind(pubkey, amount, now, pubkey).run();
@@ -637,7 +777,7 @@ const KEEP_FOR = 365 * 86400_000;
 export async function pruneStale(db: D1Database, now = Date.now()): Promise<void> {
   await db.prepare("DELETE FROM listeners WHERE blocked = 0 AND last_seen < ?")
     .bind(now - KEEP_FOR).run();
-  await forgetOwed(db);
+  await forgetOwed(db, undefined, "none", now);
   // What was sent, after three days (SERVED_KEEP_DAYS).
   try {
     await db.prepare("DELETE FROM served WHERE day <= ?").bind(servedDay(now) - SERVED_KEEP_DAYS).run();
@@ -685,7 +825,7 @@ export async function pruneHourly(db: D1Database, now = Date.now()): Promise<boo
 export async function remove(db: D1Database, pubkey: string): Promise<void> {
   await db.prepare("DELETE FROM listeners WHERE pubkey = ?").bind(pubkey).run();
   await db.prepare("DELETE FROM subscriptions WHERE wallet = ?").bind(pubkey).run();
-  await forgetOwed(db, pubkey);
+  await forgetOwed(db, pubkey, "none");
 }
 
 // ── subscriptions ───────────────────────────────────────────────────────────
@@ -781,5 +921,21 @@ export async function songTotals(db: D1Database): Promise<{ track: string; plays
     return r.results || [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Use up a signed challenge (see used_proofs): true the first time, false if
+ * it was used before. A database without the table lets it through, as
+ * before there was one: the challenge still expires in minutes.
+ */
+export async function spendProof(db: D1Database, message: string, now = Date.now()): Promise<boolean> {
+  try {
+    await db.prepare("DELETE FROM used_proofs WHERE at < ?").bind(now - 10 * 60_000).run();
+    const fresh = await db.prepare("INSERT INTO used_proofs (message, at) VALUES (?, ?) ON CONFLICT(message) DO NOTHING RETURNING message")
+      .bind(message, now).first<{ message: string }>();
+    return !!fresh;
+  } catch {
+    return true;
   }
 }

@@ -103,7 +103,7 @@ function magnitude(type, f0, gain, f, rate) {
 /** Headroom taken off when bands are raised, so a boost doesn't clip. */
 const preampFor = (gains) => -Math.max(0, ...gains) * 0.6;
 
-export function createEq(audio, { onTrouble = () => {} } = {}) {
+export function createEq(audio, { onTrouble = () => {}, resting = () => false } = {}) {
   let ctx = null, filters = null, pre = null, out = null, volume = 1;
   let state = loadEq();
 
@@ -118,7 +118,10 @@ export function createEq(audio, { onTrouble = () => {} } = {}) {
     try {
       // A song already loaded without CORS would come through silent: ask
       // for it again, with it, from where it was.
-      if (audio.crossOrigin !== "anonymous") {
+      // Paused with nothing loaded (player.js rest): it'll be fetched afresh,
+      // with CORS, when it plays; reloading now would download a paused song.
+      if (audio.crossOrigin !== "anonymous" && resting()) audio.crossOrigin = "anonymous";
+      else if (audio.crossOrigin !== "anonymous") {
         const at = audio.currentTime, was = !audio.paused, src = audio.currentSrc || audio.src;
         audio.crossOrigin = "anonymous";
         if (src && !src.startsWith("blob:")) {

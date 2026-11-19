@@ -20,7 +20,7 @@ import {
   claimOf, noteClaim, clearClaim, paidTowards, backOff, claimDue, noteCredit, pieces,
 } from "./owes.js";
 import { toUsd } from "./money.js";
-import { recordReceipt } from "./receipts.js";
+import { recordReceipt, receipts } from "./receipts.js";
 
 // ── payments that may have gone out ────────────────────────────────────────
 //
@@ -40,6 +40,18 @@ export function forgetUnsure(url) {
   writeUnsure(all);
 }
 export const unsureOf = (url) => readUnsure()[url] || null;
+
+/**
+ * Today's automatic spending, counting every payment that may have gone out
+ * and isn't settled yet (sent, or in flight) as spent. Until the network says,
+ * it might have, so it uses up the day's limit: otherwise artists' nodes
+ * answering with errors could each take a payment past the limit while
+ * they're looked into. Given back if it turns out not to have landed.
+ */
+export function spentOrMaybe(now = Date.now()) {
+  const maybe = Object.values(readUnsure()).reduce((n, u) => n + (Number(u?.micros) || 0), 0);
+  return spentToday(now) + maybe;
+}
 
 let modules = null;
 
@@ -196,7 +208,7 @@ export async function settle(pair, entry, ledger, { ending = false, report = noR
 
   // At most one payment's worth, and what's left of today's limit: a debt
   // bigger than that goes in pieces, rather than never.
-  const room = DAILY_LIMIT - spentToday();
+  const room = DAILY_LIMIT - spentOrMaybe();
   const micros = Math.min(owed.micros, MAX_PAYMENT, room);
   if (micros < LISTEN_MIN_MICROS) {
     return { ledger, paid: null, refused: { ok: false, why: "daily", limit: toUsd(DAILY_LIMIT), spent: toUsd(spentToday()) } };
@@ -254,17 +266,28 @@ async function lookAgain(pair, entry, recipients, pay, { report = noReport } = {
   if (!unsure) return { landed: 0 };
   if (Date.now() - (unsure.looked || 0) < 30_000) return { wait: true };
   noteUnsure(entry.url, { ...unsure, looked: Date.now() });
-  const landed = await pay.landedSince(pair, recipients, { since: unsure.at, signature: unsure.signature });
+  const known = new Set(receipts().map((r) => r.signature).filter(Boolean));
+  const found = [];
+  const landed = await pay.landedSince(pair, recipients, { since: unsure.at, signature: unsure.signature, upTo: unsure.micros, known, found });
   if (landed === null) return { wait: true };          // can't tell yet: wait
+  if (landed > 0) {
+    // Spent before it stops being "maybe": the day's limit never loses sight of it.
+    recordSpend(landed);
+    noteAutoPaid(entry.url, landed, Date.now());
+  }
   forgetUnsure(entry.url);
   if (landed > 0) {
-    recordReceipt({ micros: landed, signature: unsure.signature || null, origin: originOf(entry.url), artist: entry.manifest?.artist?.name, network: networkName() });
-    recordSpend(landed);
+    // Found by reading the wallet (no signature came back): by what it found.
+    const sig = unsure.signature || (found.length === 1 ? found[0].signature : null);
+    recordReceipt({ micros: landed, signature: sig, origin: originOf(entry.url), artist: entry.manifest?.artist?.name, network: networkName() });
     settled(loadLedger(), entry.url, landed);
     paidTowards(entry.url, landed);
-    // Its server may not know: that answer was what got lost.
-    noteCredit(entry.url, unsure.signature || `unsure:${unsure.at}`, landed);
-    if (unsure.signature) report(originOf(entry.url), unsure.signature).catch(() => {});
+    // Its server may not know: that answer was what got lost. Told by
+    // reference, every one found, so it counts them as it counts any other.
+    const sigs = unsure.signature ? [unsure.signature] : found.map((f) => f.signature);
+    if (sigs.length) for (const one of sigs) noteCredit(entry.url, one, unsure.signature ? landed : Math.min(landed, found.find((f) => f.signature === one).micros));
+    else noteCredit(entry.url, `unsure:${unsure.at}`, landed);
+    for (const one of sigs) report(originOf(entry.url), one).catch(() => {});
   }
   return { landed };
 }
@@ -316,14 +339,16 @@ const originOf = (url) => { try { return new URL(url).origin; } catch { return n
  * pass (owes.js). Unlike the ledger, there's no waiting for the artist's
  * amount or the week: the listener can't hear them until it's paid.
  *
- * The server's number, not the ledger's: the ledger may be empty (a new
- * device) or short of it. But it is a stranger's number, so:
+ * The server's number is a stranger's, and nothing is paid on it alone:
  *
- * - **Sent without asking** only to an artist the listener has agreed a price
- *   with on this device, and only within the daily limit. Otherwise it waits
- *   for the listener's tap (`explicit`), which is their agreement to exactly
- *   that amount, shown to them — the daily limit doesn't hold that back, as a
- *   debt over it could otherwise never be paid in one go.
+ * - **Sent without asking** only as far as this device's own ledger for that
+ *   artist goes (what it counted itself), to an artist the listener has
+ *   agreed a price with here, within the daily limit and a dollar a day per
+ *   artist. An empty ledger (a new device) pays nothing without asking.
+ * - **Anything more** waits for the listener's tap (`explicit`), which is
+ *   their agreement to at most the amount shown to them (`max`); the daily
+ *   limit doesn't hold that back, as a debt over it could otherwise never be
+ *   paid in one go.
  * - **In pieces** of no more than one payment's worth (the most an artist's
  *   server takes for listening, which is also the app's own per-payment
  *   limit), at least a cent, and never more than the wallet holds: what the
@@ -355,26 +380,31 @@ export async function settleClaim(pair, entry, { explicit = false, max = null, b
   let left = claimOf(url)?.remaining ?? 0;
   if (left <= 0) return { state: paid.length ? "paid" : "counting", paid };
 
-  // The server's number is a stranger's. Without a tap, only as much of it
-  // is paid as this device's own listening backs up — what the ledger says is
-  // owed to them, and a little for rounding — and no more than a dollar a day
-  // to any one artist. Anything beyond that is put to the listener, with both
+  // The server's number is a stranger's, and this app relies on nothing an
+  // artist's server says about what's owed. Without a tap, only as much of it
+  // is paid as this device itself counted — what its ledger says is owed to
+  // them, which every payment takes down — and no more than the daily limit
+  // ($10) to any one artist. Anything beyond that is the listener's call, shown both
   // figures. With a tap, never more than the amount the tap was for, however
   // the server's number has changed since.
   let more = false;
   if (explicit && max != null) {
     if (left > max) { left = Math.max(0, max); more = true; }
   } else if (!explicit) {
-    const vouched = (loadLedger()[url]?.micros || 0) + CLAIM_SLACK_MICROS;
+    const vouched = loadLedger()[url]?.micros || 0;
     const room = Math.min(vouched, UNATTENDED_DAY_MICROS - autoPaidToday(url, now));
     if (room < LISTEN_MIN_MICROS) return { state: "ask", why: "claim", paid };
     if (left > room) { left = room; more = true; }
   }
 
+  // Less than a cent can't be sent on its own (pieces() would round it up to
+  // one): it waits, rather than pay more than was counted or shown.
+  if (left < LISTEN_MIN_MICROS) return { state: "ask", why: "claim", paid };
+
   let wallet = balanceMicros;
   for (const piece of pieces(left)) {
     let micros = piece;
-    if (!explicit && micros > DAILY_LIMIT - spentToday()) return { state: "ask", why: "daily", paid };
+    if (!explicit && micros > DAILY_LIMIT - spentOrMaybe()) return { state: "ask", why: "daily", paid };
     if (wallet != null && wallet < micros) {
       // What the wallet holds goes now, if it's enough to send; the rest
       // when money is added.
@@ -397,10 +427,10 @@ export async function settleClaim(pair, entry, { explicit = false, max = null, b
   return more ? { state: "ask", why: "claim", paid } : { state: "paid", paid };
 }
 
-/** A little over the device's own figure, for rounding between the two books. */
-export const CLAIM_SLACK_MICROS = 250_000;
-/** The most a server's claim draws from one artist in a day without a tap. */
-export const UNATTENDED_DAY_MICROS = 1_000_000;
+/** The most a server's claim draws from one artist in a day without a tap:
+ *  the same as the daily limit on all automatic payments (spend.js), so a
+ *  heavy listener isn't asked every day. Never past what this device counted. */
+export const UNATTENDED_DAY_MICROS = DAILY_LIMIT;
 const AUTO = "amply.claimauto.v1";
 const dayOf = (now) => new Date(now).toISOString().slice(0, 10);
 function autoPaidToday(url, now) {

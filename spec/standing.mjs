@@ -56,8 +56,9 @@ export function behind(owedMicros, paidMicros, settleAt) {
  *
  * Unpaid means more than rounding: a cent (less is never sent on its own), or
  * a tenth of what they owe, whichever is larger. A wallet never heard from at
- * all (last seen 0: a record whose listening was erased) is not overdue: when
- * it was here is exactly what isn't known.
+ * all (last seen 0: a barred wallet's record, emptied when it was erased) is
+ * not overdue: when it was here is exactly what isn't known. An erased wallet
+ * that still owes keeps its last seen (store.ts forget), so its bill still ages.
  */
 export function overdue(owedMicros, paidMicros, lastSeen, now = Date.now()) {
   const unpaid = owedMicros - paidMicros;

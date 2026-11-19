@@ -23,6 +23,25 @@
 export const SETTLE_WITHIN_DAYS = 7;
 
 /**
+ * When a play counts, and so costs anything: once 30 seconds of it have been
+ * heard — what Spotify, Apple Music, TIDAL and Deezer all count as a stream —
+ * or half of a song shorter than a minute. Below that it's a skip, and free.
+ * Past it, every second heard is paid for, the first thirty included.
+ *
+ * Heard means played: seeking isn't listening, so dragging the progress bar
+ * to the end doesn't make a play count, and a play heard in pieces (paused,
+ * scrubbed back, resumed) counts all its pieces together. Each play is
+ * counted afresh: the next time the song starts, or loops on repeat.
+ */
+export const COUNTS_AFTER_S = 30;
+export const COUNTS_AFTER_SHARE = 0.5;
+/** Seconds of a song of `duration` seconds (or unknown) to be heard before it counts. */
+export function countsAfter(duration) {
+  const d = Number(duration);
+  return d > 0 && Number.isFinite(d) ? Math.min(COUNTS_AFTER_S, COUNTS_AFTER_SHARE * d) : COUNTS_AFTER_S;
+}
+
+/**
  * Fans never pay a network fee: the artist's own fees account pays it. Until
  * that account holds this much SOL (in lamports), the artist's server marks
  * their USDC payment `paused` in the manifest it serves, and their music

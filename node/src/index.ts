@@ -27,11 +27,11 @@ import {
   setting, putSetting, listeners, listener, setBlocked, counted, MAX_REPORT_S, forget, remove, pruneStale, pruneHourly,
   subscribedUntil, pruneSubscriptions, heard, songTotals, playsToday,
   paidOf, recordPaid, paidSigKnown, mergePaid, MAX_PAID_WALLETS, autoBlockSetting, setAutoBlock, owedRowOf,
-  addServed, billServed, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
+  addServed, aPlay, sentToday, markSent, spendProof, servedRowsOf, paymentRefsOf, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
   type Listener,
 } from "./store";
 import { autoBlock, owedOf, unpaidOf } from "../../spec/standing.mjs";
-import { metered, slackFor, lengthOf, takePending, forgetTallies, DELIVERED_CAP } from "./meter";
+import { metered, lengthOf, forgetTallies, flushTallies } from "./meter";
 import { fromBase58 } from "./identity";
 import { readListeningPayment } from "./payment-check";
 import { introduce, readToken, guardedKeys, masterKeys, proveOwnership } from "./listen";
@@ -49,8 +49,7 @@ import { DOWNLOADS_PER_PURCHASE, subscriptionOnly, walletOf, paused, needsWallet
 import { allow, ruleFor, tooMany, RULES, type Limiter } from "./limits";
 import { ICONS, MANIFEST_PATH, studioManifest, FAVICON, FAVICON_PATH } from "./studio";
 
-import { VERSION, SPEC_VERSION, MANAGE_CSP, RELAY_ORIGIN, LAME_PATH } from "./constants";
-import { LAME_JS } from "./lame";
+import { VERSION, SPEC_VERSION, MANAGE_CSP, RELAY_ORIGIN } from "./constants";
 import { media, maxObject, MediaTooLarge, type MediaObject, type MediaObjectBody } from "./media";
 import { quotaFailure, FREE_STREAMS_A_DAY, FREE_STORAGE } from "./quota";
 
@@ -111,14 +110,12 @@ function storedType(prefix: string, key: string): string {
 
 /** Audio and art are immutable once published; the manifest changes. */
 const CACHE_AUDIO = "public, max-age=31536000, immutable";
-/** Paid audio: the listener's own browser may keep it, but a shared cache
- *  (a CDN, an office proxy) mustn't hand it to someone without a pass.
- *  Metering (meter.ts) counts what's sent, so a replay from the browser's own
- *  cache isn't counted again there; it doesn't need to be, because the app
- *  reports every play, replays included, and the larger of the two is what's
- *  billed. Making the browser ask again would only spend the listener's data
- *  and the artist's requests to learn what the report already says. */
-const CACHE_AUDIO_PAID = "private, max-age=31536000, immutable";
+/** Paid audio: kept by nobody, the listener's own browser included. A shared
+ *  cache (a CDN, an office proxy) mustn't hand it to someone without a pass;
+ *  and this server bills only what it sends (meter.ts), never what the app
+ *  reports, so a replay from the browser's cache would go unbilled. Each play
+ *  is fetched, as from any streaming service. */
+const CACHE_AUDIO_PAID = "private, no-store";
 const CACHE_ART = "public, max-age=86400";
 const CACHE_MANIFEST = "public, max-age=300, must-revalidate";
 
@@ -892,13 +889,18 @@ async function whoIsAsking(request: Request, env: Env): Promise<string | null> {
 /**
  * What a minute of listening costs this wallet right now, in dollars: the
  * artist's USDC price, or nothing while it's free to them (a subscriber, who
- * pays by card; or payments paused, when nobody can pay). Priced as it's
- * heard: a later change of price doesn't reprice it.
+ * pays by card; or payments paused, when nobody can pay). Audio is priced
+ * with this when it's sent (meter.ts), so a later change doesn't reprice it.
  */
 async function perMinuteFor(env: Env, ctx: ExecutionContext | undefined, who: string): Promise<number> {
   if (!(await takingPayments(env, ctx))) return 0;
   const until = await subscribedUntil(env.DB, who).catch(() => null);
   if (until !== null && until > Date.now()) return 0;
+  return listedPerMinute(env);
+}
+
+/** The artist's USDC price a minute, as listed, whoever is asking. */
+async function listedPerMinute(env: Env): Promise<number> {
   const priced = (await manifestNowOf(env)) as { payment?: { type?: string; ratePerMinute?: unknown }[] } | null;
   const wallet = (priced?.payment || []).find((p) => p?.type === "solana-usdc");
   return Math.max(0, Number(wallet?.ratePerMinute) || 0);
@@ -910,6 +912,12 @@ const laterOf = (ctx?: ExecutionContext) => (p: Promise<unknown>) => {
   const quiet = p.catch(() => {});
   if (ctx) ctx.waitUntil(quiet);
 };
+
+/** What metering writes with (meter.ts). */
+const meterDeps = (env: Env, ctx?: ExecutionContext) => ({
+  db: env.DB, perMinute: (p: string) => perMinuteFor(env, ctx, p), later: laterOf(ctx),
+  onFlush: () => meterHooks.onFlush?.(), tidy: () => pruneHourly(env.DB),
+});
 
 /** For tests: told of each metering write. */
 export const meterHooks: { onFlush?: () => void } = {};
@@ -930,12 +938,13 @@ function meterAudio(
       ? Number(/\/(\d+)$/.exec(res.headers.get("Content-Range") || "")?.[1])
       : length;
     if (!(size > 0)) return res;
+    // Where the body starts in the file: bytes counted already aren't again (meter.ts).
+    const start = res.status === 206 ? Number(/bytes\s+(\d+)-/.exec(res.headers.get("Content-Range") || "")?.[1]) : 0;
     const body = metered(res.body, Number.isFinite(length) ? length : null, {
-      pubkey: who, track: key, size, duration: tracksOf(view).byKey.get(key)?.duration ?? null,
-    }, {
-      db: env.DB, perMinute: (p) => perMinuteFor(env, ctx, p), later: laterOf(ctx),
-      onFlush: () => meterHooks.onFlush?.(), tidy: () => pruneHourly(env.DB),
-    });
+      pubkey: who, track: key, size, duration: tracksOf(view).byKey.get(key)?.duration ?? null, start,
+      sentToday: () => sentToday(env.DB, who, key),
+      markSent: () => markSent(env.DB, who, key),
+    }, meterDeps(env, ctx));
     return new Response(body, { status: res.status, headers: res.headers });
   } catch {
     return res;
@@ -1083,43 +1092,34 @@ const REPORT_WITHIN_MS = SETTLE_WITHIN_DAYS * 86_400_000;
 const stripeTrouble = () => fail(502, "Couldn't confirm that with Stripe; try again");
 
 /**
- * The app's report of a play (/listen/played), added to what the node sent
- * for that track today (meter.ts) and billed once between them: the larger
- * of the two, less what's been billed already.
+ * The app's report of a play (/listen/played): a play in the artist's record
+ * of who listens, and the song's row in `served` (what its app says it heard,
+ * beside what this server sent). Never money: what's owed is this server's
+ * own count of what it sent (meter.ts, store.ts billSent), so the artist
+ * relies on nothing the listener's app says.
  *
- * Which track: the app says, by the song's id (`track`). An app from before
- * it did sends only seconds, and the report then goes with the track sent to
- * this wallet in the last day that is furthest ahead of what's been reported
- * for it — almost always the one that just ended — or, with none, stands on
- * its own (a track of "" for the day), billed as reported, as it always was.
- * A report for a track sent yesterday and not today (a play that ran past
- * midnight) goes with yesterday's.
- *
- * False when there's no table to meter with: the caller bills it as before.
+ * Which track: the app says, by the song's id (`track`); an older app's
+ * report goes with the track sent furthest ahead of what's been reported.
+ * What was sent is written on its own schedule (meter.ts FLUSH), not with
+ * this. False when there's no table: the caller records the play alone.
  */
-async function reportServed(env: Env, who: string, trackId: string, seconds: number, perMinute: number): Promise<boolean> {
+async function reportServed(env: Env, who: string, trackId: string, seconds: number): Promise<boolean> {
   const text = await manifestText(env).catch(() => null);
   const tracks = text ? tracksOf(derive(text)) : null;
   const now = Date.now();
-  let found = trackId ? tracks?.byId.get(trackId) ?? null : null;
+  const found = trackId ? tracks?.byId.get(trackId) ?? null : null;
   let k;
   try {
     if (found) k = { pubkey: who, track: found.key, day: await servedDayFor(env.DB, who, found.key, now) };
     else {
       const guess = await unreportedServed(env.DB, who, now);
-      found = guess ? tracks?.byKey.get(guess.track) ?? null : null;
-      k = guess && found ? { pubkey: who, ...guess } : { pubkey: who, track: "", day: servedDay(now) };
+      k = guess && tracks?.byKey.get(guess.track) ? { pubkey: who, ...guess } : { pubkey: who, track: "", day: servedDay(now) };
     }
-    // Sent by this copy of the Worker and not yet written: written now, with this.
-    const pending = found ? takePending(k) : null;
-    const length = pending?.trackSeconds ?? (found ? lengthOf(0, found.duration) : 0);
-    // A report standing on its own has nothing sent to allow for. A song
-    // whose length can't be known here gets the least slack (60 s), and no
-    // cap, which only matters for what's sent: none is added without one.
-    const slack = found ? slackFor(length) : 0;
+    // Only what the app says, beside what was sent, and a play in the record.
+    // Nothing here touches what this server counted or bills (meter.ts).
     await inOneGo(env.DB, [
-      addServed(env.DB, k, { delivered: pending?.seconds ?? 0, reported: seconds, cap: DELIVERED_CAP * length }),
-      ...billServed(env.DB, k, { slack, perMinute, plays: 1, now }),
+      addServed(env.DB, k, { reported: seconds, cap: 0 }),
+      aPlay(env.DB, who, now),
     ]);
     return true;
   } catch (e) {
@@ -1158,6 +1158,9 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
       if (result.unpaid !== undefined) return json({ error: result.why, code: "unpaid", owes: result.unpaid }, 403);
       return fail(403, result.why || "refused");
     }
+    // What's past keeping (three days of `served`, a year of totals) goes
+    // as passes are given, not only as music is metered: at most hourly.
+    laterOf(ctx)(pruneHourly(env.DB));
 
     // A subscriber's app knows not to charge them by the minute as well. And
     // where a subscription is the only way this artist is paid, it is
@@ -1173,9 +1176,9 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     // its listening cost (owed, which includes what the server metered
     // itself, meter.ts) less what it has paid — the same number Auto-block
     // refuses with, and 0 when nothing (or nothing it could pay: a
-    // subscriber, payments paused). The app pays it when it's past the
-    // artist's payment point, even if its own ledger says less; below that,
-    // the usual settling applies.
+    // subscriber, payments paused). The app pays it without asking only as
+    // far as its own count of the listening goes (app/src/paying.js); any
+    // more is its listener's call.
     const owes = subscribed ? 0 : await owesNow(env, ctx, address).catch(() => 0);
     return json({ token: result.token, subscribedUntil: subscribed ? until : null, owes });
   }
@@ -1245,7 +1248,11 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (!(await allow(env as never, RULES.wallet, `${host}|paid|${from}`))) return tooMany(withCors(new Headers()));
     const already = await paidSigKnown(env.DB, signature);
     if (already) {
-      return json({ recorded: false, wallet: already.pubkey, micros: already.micros, paidMicros: await paidOf(env.DB, already.pubkey) });
+      // Counted for a wallet since erased: only the reference is left.
+      if (!already.pubkey) return json({ recorded: false });
+      // What this one payment was, which the chain shows anyone; never the
+      // wallet's total, which only its holder may see (/mine).
+      return json({ recorded: false, wallet: already.pubkey, micros: already.micros });
     }
     const pay = walletOf(await manifestNowOf(env));
     const chain = pay && CHAINS[pay.network];
@@ -1268,7 +1275,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (!verdict.ok) return verdict.retry ? json({ pending: true, error: verdict.why }, 202) : fail(422, verdict.why);
     if (!(await listener(env.DB, verdict.payer))) return fail(403, "that payment is from a wallet that hasn't listened here");
     const recorded = await recordPaid(env.DB, verdict.payer, verdict.micros, signature);
-    return json({ recorded, wallet: verdict.payer, micros: verdict.micros, paidMicros: await paidOf(env.DB, verdict.payer) });
+    return json({ recorded, wallet: verdict.payer, micros: verdict.micros });
   }
 
   // A listener sending their own money out, with no SOL for the fee: this
@@ -1474,18 +1481,22 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (!(await listener(env.DB, who)) && !(await allow(env as never, RULES.newListener, host))) {
       return new Response(null, { status: 204, headers: noStore() });
     }
-    // While fans can't pay (the fees account is empty), listening is free,
-    // so it isn't counted as listening anyone owes for.
-    if (!(await takingPayments(env, ctx))) return new Response(null, { status: 204, headers: noStore() });
     const body = await jsonBody(request);
-    // Priced now, as it's heard: a later change of price doesn't reprice it.
-    // A subscriber pays by card, so their listening costs nothing here.
-    const perMinute = await perMinuteFor(env, ctx, who);
     const seconds = Math.max(0, Math.min(Math.round(Number(body?.seconds) || 0), MAX_REPORT_S));
-    // Beside what the node itself sent (meter.ts), so the two are billed once
-    // between them; on a database without that table, as it always was.
-    if (!(await reportServed(env, who, String(body?.track ?? ""), seconds, perMinute))) {
-      await counted(env.DB, who, seconds, Date.now(), perMinute);
+    // Only paid tracks are kept beside a wallet: a free one, played by
+    // anyone without one, leaves nothing (as the privacy notice says), however
+    // an app reports it. (An app from before says no track: counted as before.)
+    if (body?.track !== undefined) {
+      let manifest: unknown = null;
+      try { manifest = JSON.parse((await listenerText(env)) || "null"); } catch { /* unknown: below */ }
+      type Track = { id?: string; free?: boolean; needsWallet?: boolean };
+      const track = ((manifest as { releases?: { tracks?: Track[] }[] } | null)?.releases || [])
+        .flatMap((r) => r.tracks || []).find((t) => t?.id === String(body.track));
+      if (!track || !needsWallet(manifest, track)) return new Response(null, { status: 204, headers: noStore() });
+    }
+    // A play for the record, never money (reportServed).
+    if (!(await reportServed(env, who, String(body?.track ?? ""), seconds))) {
+      await counted(env.DB, who, seconds, Date.now());
     }
     // Now and then, clear out wallets not heard from in a year. Here rather
     // than on a timer, so there is nothing for an artist to set up; and at
@@ -1532,54 +1543,66 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
   // A listener holds their key, so they can prove a row is theirs and have it
   // deleted. No documents, no mailbox, no judgement call by a musician. A
   // blocked wallet may still erase itself: being refused the music is not a
-  // reason to be refused a right. (What survives for a blocked wallet is the
-  // bar alone — see forget() in store.ts.)
+  // reason to be refused a right. (What survives — a block, an unpaid bill,
+  // a week of payment references, three days of `served` — and why: see
+  // forget() in store.ts.)
   if (path === "/forget" && request.method === "POST") {
     const body = await jsonBody(request);
     if (!body) return fail(400, "bad request");
     const proof = await proveOwnership(host, body as never);
     if (!proof.ok) return fail(403, proof.why);
-    forgetTallies(proof.address);
-    await forget(env.DB, proof.address);
+    // Once only: a signed request seen in passing can't be sent again.
+    if (!(await spendProof(env.DB, String((body as { message?: string }).message)))) return fail(403, "that signature has been used already; sign again");
+    await flushTallies(proof.address, meterDeps(env, ctx)).catch(() => {});
+    // The listed price: what an unpaid bill from before prices were kept is
+    // worth (forget keeps a bill). The listed one, not what this wallet pays
+    // now: subscribing, or payments being paused, doesn't wipe an old debt.
+    const perMinute = await listedPerMinute(env).catch(() => 0);
+    await forget(env.DB, proof.address, perMinute);
     return new Response(null, { status: 204, headers: noStore() });
   }
 
   // And see it first. The right of access, answered the same way: sign for
-  // your wallet, get back everything this artist's server holds about it,
-  // which is one row of totals and nothing else.
+  // your wallet, get back everything this artist's server holds about it:
+  // its totals, three days of what was sent, and the payments counted.
   if (path === "/mine" && request.method === "POST") {
     const body = await jsonBody(request);
     if (!body) return fail(400, "bad request");
     const proof = await proveOwnership(host, body as never);
     if (!proof.ok) return fail(403, proof.why);
+    // Once only: a signed request seen in passing can't be sent again.
+    if (!(await spendProof(env.DB, String((body as { message?: string }).message)))) return fail(403, "that signature has been used already; sign again");
     const row = await listener(env.DB, proof.address);
-    // What was sent to this wallet in the last three days (meter.ts), counted.
-    const servedTracks = await servedCount(env.DB, proof.address);
+    // Everything, not a summary: what was sent in the last three days, track
+    // by track (meter.ts), and each payment counted, by its reference.
+    const sent = await servedRowsOf(env.DB, proof.address);
+    const payments = await paymentRefsOf(env.DB, proof.address);
+    const costMicros = await env.DB.prepare("SELECT micros FROM owed WHERE pubkey = ?").bind(proof.address)
+      .first<{ micros: number }>().then((o) => o?.micros ?? null).catch(() => null);
+    const paidMicros = await paidOf(env.DB, proof.address);
+    const anything = !!row || sent.length > 0 || payments.length > 0 || costMicros !== null || (paidMicros ?? 0) > 0;
     return json({
       controller: host,
       wallet: proof.address,
-      held: row || servedTracks
+      held: anything
         ? {
             plays: row?.plays ?? 0,
             seconds: row?.seconds ?? 0,
-            costMicros: await env.DB.prepare("SELECT micros FROM owed WHERE pubkey = ?").bind(proof.address)
-              .first<{ micros: number }>().then((o) => o?.micros ?? null).catch(() => null),
-            paidMicros: await env.DB.prepare("SELECT micros FROM paid WHERE pubkey = ?").bind(proof.address)
-              .first<{ micros: number }>().then((o) => o?.micros ?? null).catch(() => null),
+            costMicros,
+            paidMicros,
             firstSeen: row?.first_seen ? new Date(row.first_seen).toISOString() : null,
             lastSeen: row?.last_seen ? new Date(row.last_seen).toISOString() : null,
             servingStopped: !!row?.blocked,
-            // How many (track, day) rows of seconds sent, reported and
-            // billed are held for the last three days: one per paid track
-            // sent to this wallet each day. Erasing deletes them.
-            servedTracks: servedTracks ?? 0,
+            servedTracks: sent.length,
+            sent,
+            payments,
           }
         : null,
       subscribedUntil: await subscribedUntil(env.DB, proof.address).then((u) => (u ? new Date(u).toISOString() : null)),
       purchases: await purchasesOf(env.DB, proof.address).then(({ owned, gifts }) =>
         [...owned, ...gifts].map((s) => ({ item: s.item, paidWith: s.via, when: new Date(s.created).toISOString(), gift: !s.owner }))).catch(() => []),
       notHeld: "A history of what you played, or when. For the last three days only, this server keeps how many seconds of each paid track it sent you each day, to charge for listening fairly; then it deletes them.",
-      keptFor: "Totals: a year after you were last here. What was sent: three days. Then deleted automatically.",
+      keptFor: "Totals: a year after you were last here (what you paid, a year after your last payment). What was sent: three days. Payment references: as long as the totals, or a week after erasing, without your wallet. Then deleted automatically.",
       exported: new Date().toISOString(),
     }, 200, 2);
   }
@@ -1708,12 +1731,6 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
       status: 200, headers: withCors(new Headers({ "Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=604800" })),
     });
   }
-  // The editor's MP3 encoder (lame.ts), fetched when a song is uploaded.
-  if (pathname === LAME_PATH) {
-    return new Response(LAME_JS, {
-      status: 200, headers: withCors(new Headers({ "Content-Type": "text/javascript; charset=utf-8", "Cache-Control": CACHE_AUDIO })),
-    });
-  }
   if (ICONS[pathname]) {
     return new Response(ICONS[pathname], {
       status: 200, headers: withCors(new Headers({ "Content-Type": "image/png", "Cache-Control": "public, max-age=604800" })),
@@ -1747,8 +1764,8 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
       }
       // Kept privately by the listener's browser for a year, and replayed
       // from there without asking: that's fine for metering (meter.ts), since
-      // what's replayed was counted when it was sent, and the app's report
-      // of the replay is what bills it. A shared cache still can't keep it.
+      // what's billed is what was sent, and a replay from the cache wasn't
+      // sent again. A shared cache still can't keep it.
       const served = await serveObject(env, request, key, CACHE_AUDIO_PAID, "audio/mpeg");
       return meterAudio(request, env, ctx, served, who, key.slice("audio/".length), view);
     }

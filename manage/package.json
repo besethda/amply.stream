@@ -8,7 +8,7 @@
     "build:node": "esbuild src/main-node.jsx --bundle --format=esm --target=es2022 --jsx=automatic --jsx-import-source=preact --minify --outfile=../.build/node-manage.js",
     "build": "npm run build:node && node bundle-node-editor.mjs",
     "build:preview": "esbuild src/main-preview.jsx --bundle --format=esm --target=es2022 --jsx=automatic --jsx-import-source=preact --outfile=../.build/preview.js && node bundle-preview.mjs",
-    "test": "esbuild test-changes.mjs test-render.mjs test-price.mjs test-publish.mjs --bundle --format=esm --platform=node --target=es2022 --jsx=automatic --jsx-import-source=preact --outdir=../.build/test && node ../.build/test/test-changes.js && node ../.build/test/test-price.js && node ../.build/test/test-publish.js && node ../.build/test/test-render.js && node test-images.mjs"
+    "test": "esbuild test-changes.mjs test-render.mjs test-price.mjs test-publish.mjs --bundle --format=esm --platform=node --target=es2022 --jsx=automatic --jsx-import-source=preact --outdir=../.build/test && node ../.build/test/test-changes.js && node ../.build/test/test-price.js && node ../.build/test/test-publish.js && node ../.build/test/test-render.js && node test-images.mjs && node --experimental-strip-types --no-warnings test-encoder.mjs"
   },
   "dependencies": {
     "@breezystack/lamejs": "1.2.7",

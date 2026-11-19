@@ -21,11 +21,11 @@ import { agreeRate } from "./spend.js";
 import { claimOf, noteClaim, claimDue, wakeClaims, claimFromPass, passOwesDue } from "./owes.js";
 import {
   tokenFor, reportPlayed, reportHeard, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
-  manageSubscription, claimSubscription, reportPaid, takePassOwes,
+  manageSubscription, claimSubscription, reportPaid, resendPaid, takePassOwes,
 } from "./identify.js";
 import { perMinute, subscriptionOnly, plans as plansOf } from "../../spec/pricing.mjs";
 import { Icon } from "./icons.jsx";
-import { money } from "./wallet-ui.jsx";
+import { money, asShown } from "./wallet-ui.jsx";
 import { recent, played, forgetRecent, theme, setTheme, waveStyle, setWaveStyle, WAVE_STYLES } from "./looks.js";
 import { MiniPlayer, NowPlaying, Tips } from "./playing.jsx";
 import { Sheet, Toast, refusalSheet, unpaidSheet, registerAsk, ask } from "./sheets.jsx";
@@ -210,8 +210,6 @@ export function App() {
       // artist's songs are free, and they must be charged for once they aren't.
       if (track?.from) heardFrom.current.add(track.from);
       if (!track?.from || !track.needsWallet) return;
-      // Muted isn't listening: nothing is charged while the volume is off.
-      if (silent.current) return;
       // A subscriber has paid by card; charging by the minute too would be twice.
       if (isSubscribed(originOf(track.url))) return;
       pending.current[track.from] = (pending.current[track.from] || 0) + seconds;
@@ -300,7 +298,7 @@ export function App() {
         // The song's own count, for the artist's "most played": nothing about
         // who is kept, so free tracks count too. A paid one is counted only
         // with this wallet's pass. Songs on this phone aren't anyone's.
-        if (track.id && /^https:/.test(track.url || "") && originOf(track.url) === originOf(track.from)) {
+        if (seconds >= 1 && track.id && /^https:/.test(track.url || "") && originOf(track.url) === originOf(track.from)) {
           const origin = originOf(track.url);
           if (!track.needsWallet) reportHeard(origin, track.id, seconds);
           else if (holder.current) {
@@ -312,6 +310,7 @@ export function App() {
         // Listening that costs nothing isn't reported as listening owed for.
         const artist = library.current.find((e) => e.url === track.from);
         if (!isSubscribed(originOf(track.url)) && !(artist && rateOf(artist.manifest) && feesCovered(artist))) return;
+        if (!(seconds > 0)) return;
         reportPlayed(holder.current, originOf(track.url), seconds, track.id);
       },
     },
@@ -321,10 +320,9 @@ export function App() {
   // The equaliser: nothing routed through it until it's first switched on.
   const eq = useMemo(() => (typeof window !== "undefined" ? createEq(player.element(), {
     onTrouble: () => flash({ bad: true, text: "This song can't play through the EQ. Reload to hear it without." }),
+    resting: () => player.resting(),
   }) : null), []);
   const volume = useVolume(player, eq);
-  const silent = useRef(false);
-  silent.current = volume.muted || volume.vol === 0;
   useEffect(() => {
     const a = player.element(), wake = () => eq?.wake();
     a.addEventListener("play", wake);
@@ -570,6 +568,8 @@ export function App() {
     if (!pair) return;
     const tick = () => {
       const now = Date.now();
+      // Payments its server hasn't counted yet: told again (identify.js).
+      resendPaid(now).catch(() => {});
       const due = library.current.some((e) => claimDue(claimOf(e.url), now))
         || (now >= retryAt.current && library.current.some((e) => owing(e, loadLedger())?.due));
       if (due) settleRef.current?.();
@@ -603,14 +603,18 @@ export function App() {
     view.state = state;
     // What the Pay button pays is what this shows, and no more (payOwes).
     view.owes = claim ? Math.max(claim.remaining, 0) : view.owes;
+    // And this device's own figure, as shown: what "Pay mine" pays, at most.
+    const mineShown = loadLedger()[url]?.micros || 0;
     setSheet({ ...unpaidSheet({
       name: entry ? nameOf(entry) : view.name, art: view.art,
-      owes: view.owes, mine: loadLedger()[url]?.micros || 0,
+      owes: view.owes, mine: mineShown,
       state, ...extra,
     }, {
       money,
       go: {
         pay: () => payOwes(url),
+        // This device's own count, when it's less than their server's.
+        payMine: () => payOwes(url, mineShown),
         topUp: () => { owesView.current = null; goYou("topup"); },
         you: () => { owesView.current = null; goYou(); },
       },
@@ -637,16 +641,19 @@ export function App() {
     showOwes(entry.url, f.kind === "paused" ? "paused" : f.kind === "unconfirmed" ? "unsure" : f.kind === "funds" ? "funds" : "error", { message: f.message });
   }
   /** The Pay button: the listener's own yes to this amount. */
-  async function payOwes(url) {
+  async function payOwes(url, upTo = null) {
     const entry = library.current.find((e) => e.url === url);
     if (!pair || !entry) return;
+    // At most what the sheet showed, read before anything redraws it: a
+    // server (or another tab) can't raise it between reading and tapping.
+    const shown = owesView.current?.url === url ? owesView.current.owes : claimOf(url)?.remaining;
+    // And no more than it reads: money() shows cents from a dollar up, so
+    // $1.234 reads "$1.23" and pays $1.23. The fraction left is paid later.
+    const max = asShown(Math.min(shown ?? 0, upTo ?? Infinity));
     showOwes(url, "paying");
     let r;
     try {
-      // At most what the sheet showed: a server can't raise it between the
-      // listener reading the amount and tapping Pay.
-      const shown = owesView.current?.url === url ? owesView.current.owes : claimOf(url)?.remaining;
-      r = await payWith(() => payClaim(pair, entry, { ...claimOptions(), explicit: true, max: shown ?? 0 }));
+      r = await payWith(() => payClaim(pair, entry, { ...claimOptions(), explicit: true, max }));
     } catch (e) {
       setLedger(loadLedger());
       if (e.kind === "paused") noteFees([url], [false]);

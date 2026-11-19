@@ -33,7 +33,8 @@ const present = (name, why) =>
 // What the editor needs to function.
 needs("default-src", "'none'", "everything is denied unless named below");
 needs("script-src", "'unsafe-inline'", "the whole editor is one inline module");
-needs("script-src", "'self'", "the MP3 encoder, fetched from this node when a song is uploaded");
+needs("script-src", "blob:", "the MP3 encoder, run from its checked bytes when a song is uploaded");
+forbids("script-src", "'self'", "nothing on this node is a script any more");
 needs("style-src", "'unsafe-inline'", "the stylesheet is inlined into the page");
 needs("img-src", "'self'", "cover art and avatars are served from this node");
 needs("img-src", "data:", "small inline glyphs");
@@ -46,26 +47,29 @@ needs("connect-src", "https://amply.stream", "reading the latest version, so an 
 needs("connect-src", "https://1.1.1.1", "checking an artist's domain record, on networks that block resolver names");
 needs("connect-src", "https://cloudflare-dns.com", "checking an artist's domain record has appeared");
 needs("connect-src", "https://dns.google", "the same, through the second resolver");
+needs("connect-src", "https://cdn.jsdelivr.net", "fetching the MP3 encoder's published file, checked before it's run");
+needs("connect-src", "https://unpkg.com", "the same, from the second CDN");
 
 // What it must never be able to do. These are the reason the editor being
 // self-contained is a rule and not just a habit.
 forbids("script-src", "'unsafe-eval'", "no dynamic code execution, ever");
 forbids("script-src", "https:", "no code from anywhere but this page and this node");
 checks.push([
-  "script-src names only this page's inline script and this node",
-  "any other source is code from somewhere an artist doesn't control",
-  () => (directives.get("script-src") || []).every((v) => ["'self'", "'unsafe-inline'"].includes(v)),
+  "script-src names only this page's inline script, and blobs it made",
+  "any other source is code from somewhere an artist doesn't control; a blob is code this page fetched and checked against a hash it carries",
+  () => (directives.get("script-src") || []).every((v) => ["'unsafe-inline'", "blob:"].includes(v)),
 ]);
 forbids("connect-src", "*", "an artist's work must not be able to leave this node");
 forbids("connect-src", "https:", "same");
 // And nothing beyond the three named above may ever creep in: an allowance
 // here is the one way an artist's work could leave their node.
 checks.push([
-  "connect-src names only this node, Solana's RPCs, amply.stream and two DNS resolvers",
+  "connect-src names only this node, Solana's RPCs, amply.stream, two DNS resolvers and two package CDNs",
   "every other destination is a way out for an artist's work",
   () => (directives.get("connect-src") || []).every((v) => [
     "'self'", "https://solana-rpc.publicnode.com", "https://api.devnet.solana.com",
     "https://amply.stream", "https://1.1.1.1", "https://cloudflare-dns.com", "https://dns.google",
+    "https://cdn.jsdelivr.net", "https://unpkg.com",
   ].includes(v)),
 ]);
 // The networks the editor reads (spec/chains.mjs, shared with the server and
