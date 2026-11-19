@@ -63,6 +63,7 @@ export const Icon = {
   </S>,
   hills: (p) => <S fill="currentColor" {...p}><path d="M2 19c2.5-6 4.5-9 7-9 2 0 3 3 4.5 3S16 8 18.5 8 21 13 22 19z" opacity=".9" /></S>,
   help: (p) => <S sw={1.9} {...p}><circle cx="12" cy="12" r="9" /><path d="M9.5 9.5a2.5 2.5 0 015 .5c0 1.8-2.5 2-2.5 4M12 17h.01" /></S>,
+  sliders: (p) => <S sw={1.9} {...p}><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></S>,
 };
 
 /** Amply's mark: two notes and a waveform. */

@@ -6,7 +6,7 @@ import { Icon } from "./icons.jsx";
 import { artStyle } from "./looks.js";
 import { money, TopUp, SendBack, SaveBackup } from "./wallet-ui.jsx";
 import { backupSaved, machinery, passkeyWallet } from "./paying.js";
-import { NETWORKS, networkName, useNetwork } from "./networks.js";
+import { NETWORKS, networkName } from "./networks.js";
 import { isSubscribed, subscriptionUntil, originOf } from "./identify.js";
 import { nameOf } from "./screens.jsx";
 import { charges } from "../../spec/pricing.mjs";
@@ -64,8 +64,6 @@ function History({ entries, onOpenArtist }) {
   );
 }
 
-const TABS = [["wallet", "Wallet"], ["general", "General"]];
-const TAB_KEY = "amply.you.tab";
 
 function Row({ icon, label, meta, onClick, tone }) {
   return (
@@ -91,10 +89,7 @@ function Sub({ title, onBack, children }) {
 }
 
 export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenArtist, view, setView, themeName, onTheme, purchases, onSetUp, eq }) {
-  const [tab, pickTab] = useState(() => { try { return localStorage.getItem(TAB_KEY) === "general" ? "general" : "wallet"; } catch { return "wallet"; } });
-  const setTab = (t) => { pickTab(t); try { localStorage.setItem(TAB_KEY, t); } catch { /* fine */ } };
-  const [where, setWhere] = useState(networkName);
-  const network = NETWORKS[where];
+  const network = NETWORKS[networkName()];
   const saved = pair && backupSaved(pair.publicKey.toBase58());
   const subs = entries.filter((e) => isSubscribed(originOf(e.url)));
   const back = () => setView(null);
@@ -135,48 +130,31 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
   }
   if (view === "history") return <Sub title="Payments" onBack={back}><History entries={entries || []} onOpenArtist={onOpenArtist} /></Sub>;
   if (view === "purchases") return <Sub title="Purchases" onBack={back}>{purchases}</Sub>;
-  if (view === "network") {
+  // Settings that aren't money: how it looks and sounds, and the wallet's
+  // housekeeping (its key, how paying works, removing it).
+  if (view === "general") {
     return (
-      <Sub title="Network" onBack={back}>
-        <div class="segs">
-          {["mainnet", "devnet"].map((n) => (
-            <button key={n} class={`seg${where === n ? " on" : ""}`} onClick={() => { useNetwork(n); setWhere(n); onRefresh?.(); }}>
-              {n === "mainnet" ? "Real money" : "Test"}
-            </button>
-          ))}
-        </div>
-        <p class="dim small">Same key on both. Artists are only paid on the network they ask for.</p>
-      </Sub>
-    );
-  }
-
-  const tabs = (
-    <div class="segs you-tabs" role="tablist">
-      {TABS.map(([id, name]) => (
-        <button key={id} role="tab" aria-selected={tab === id} class={`seg${tab === id ? " on" : ""}`} onClick={() => setTab(id)}>{name}</button>
-      ))}
-    </div>
-  );
-
-  if (tab === "general") {
-    return (
-      <div class="screen you">
-        <div class="head"><h1>You</h1></div>
-        {tabs}
-        <div class="pad general">
+      <Sub title="General" onBack={back}>
+        <div class="general">
           <span class="label">APPEARANCE</span>
           <Appearance themeName={themeName} onTheme={onTheme} />
           <span class="label">SOUND</span>
           {eq && <Equalizer eq={eq} />}
         </div>
-      </div>
+        <div class="you-list in-sub">
+          {pair && <Row icon={<Icon.key size={18} />} label="Backup key" meta={saved ? "saved" : "not saved"} tone={saved ? "" : "warn-ink"} onClick={() => setView("backup")} />}
+          <a class="you-row" href="/paying" target="_blank" rel="noopener">
+            <span class="you-icon"><Icon.help size={18} /></span><span class="t">How paying works</span><Icon.external size={14} />
+          </a>
+          {pair && <Row icon={<Icon.trash size={18} />} label="Remove wallet" tone="warn-ink" onClick={forget} />}
+        </div>
+      </Sub>
     );
   }
 
   return (
     <div class="screen you">
       <div class="head"><h1>You</h1></div>
-      {tabs}
       <div class="pad stack">
         {!pair ? (
           <div class="id-card">
@@ -193,18 +171,18 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
             </button>
           )}
           <div class="balance-card">
-            <button class="bal-open" onClick={() => setView("history")} aria-label="Payments">
+            <div class="bal-top">
               <span class="label">TO SPEND{!network.real ? " · TEST" : ""}</span>
               <span class="bal">
                 <b>{balance ? money(Math.max(0, balance.usdc - owed)) : "…"}</b>
                 {owed > 0 && <span class="mono-dim">{money(owed)} owed</span>}
-                <span class="bal-more">Payments <Icon.chevron size={14} /></span>
               </span>
-            </button>
+            </div>
             <button class="icon-btn dim bal-refresh" onClick={onRefresh} aria-label="Refresh"><Icon.refresh size={16} /></button>
             <div class="row">
               <button class="btn-primary sm" onClick={() => setView("topup")}><Icon.plus size={15} /> Top up</button>
               <button class="pill" onClick={() => setView("send")}><Icon.send size={15} /> Send back</button>
+              <button class="icon-btn bal-history" onClick={() => setView("history")} aria-label="Payment history"><Icon.chevron size={18} /></button>
             </div>
           </div>
         </>}
@@ -213,12 +191,7 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
       <div class="you-list">
         <Row icon={<Icon.card size={18} />} label="Subscriptions" meta={subs.length ? String(subs.length) : ""} onClick={() => setView("subs")} />
         <Row icon={<Icon.folder size={18} />} label="Purchases" onClick={() => setView("purchases")} />
-        {pair && <Row icon={<Icon.key size={18} />} label="Backup key" meta={saved ? "saved" : "not saved"} tone={saved ? "" : "warn-ink"} onClick={() => setView("backup")} />}
-        {pair && <Row icon={<Icon.globe size={18} />} label="Network" meta={network.real ? "Solana" : "Test"} onClick={() => setView("network")} />}
-        <a class="you-row" href="/paying" target="_blank" rel="noopener">
-          <span class="you-icon"><Icon.help size={18} /></span><span class="t">How paying works</span><Icon.external size={14} />
-        </a>
-        {pair && <Row icon={<Icon.trash size={18} />} label="Remove wallet" tone="warn-ink" onClick={forget} />}
+        <Row icon={<Icon.sliders size={18} />} label="General" onClick={() => setView("general")} />
       </div>
       <p class="mono-dim pad foot-note">Everything here lives on this device.</p>
     </div>
