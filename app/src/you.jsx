@@ -136,8 +136,11 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
     return (
       <Sub title="General" onBack={back}>
         <div class="general">
-          <span class="label">APPEARANCE</span>
-          <Appearance themeName={themeName} onTheme={onTheme} />
+          {/* On desktop the top bar has its own light/dark switch. */}
+          <div class="appearance-set">
+            <span class="label">APPEARANCE</span>
+            <Appearance themeName={themeName} onTheme={onTheme} />
+          </div>
           <span class="label">SOUND</span>
           {eq && <Equalizer eq={eq} />}
         </div>
