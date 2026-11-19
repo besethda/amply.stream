@@ -417,13 +417,13 @@ export function PlayerBar({
   const level = muted ? 0 : vol;
   return (
     <footer class={`d-bar${t ? "" : " idle"}${expanded ? " under" : ""}`} style={accentVars(t?.colors?.accent)} aria-label="Player">
-      {/* The music, moving softly behind everything; and the song's progress
-          along the top edge. In Now playing, its own waves and the song's
-          shape take over both. */}
+      {/* The music, moving softly behind everything (in Now playing, its
+          own larger waves take over); and the song's progress along the top
+          edge, the one place it's shown, always. */}
       {t && !expanded && <div class="d-bar-waves" aria-hidden="true">
         <Waveform viz={viz} playing={state.playing && !state.waiting} accent={t.colors?.accent} style={wave} inset={0} wide bare />
       </div>}
-      {t && !expanded && <BarLine state={state} player={player} />}
+      {t && <BarLine state={state} player={player} />}
       <div class="d-bar-song">
         {t ? <>
           <button class="d-bar-art" onClick={onExpand} aria-label="Open now playing" title="Open now playing">
@@ -617,13 +617,20 @@ export function Expanded({ state, player, viz, cost, wave, onWave, onClose, onAr
   return (
     <div class="d-expanded" role="dialog" aria-label="Now playing" style={accentVars(c?.accent)}>
       <div class="d-exp-glow" style={c?.accent ? `--a:${c.accent};--d:${c.deep || c.accent}` : ""} />
+      {/* The music, large, behind everything; where the song is, and where
+          to go in it, is the line along the top of the player bar below. */}
+      <div class="d-exp-wave" aria-hidden="true">
+        <Waveform viz={viz} playing={state.playing && !state.waiting} accent={c?.accent} style={wave} inset={0} wide bare />
+      </div>
+      {/* How the music is drawn: changed where it's drawn. */}
+      <button class="d-wave-pick" onClick={onWave} title="Change how the music is drawn">
+        {wave === "boxes" ? <Icon.boxes size={17} /> : wave === "hills" ? <Icon.hills size={18} /> : <Icon.ribbons size={18} />}
+        {WAVE_NAMES[wave] || "Ribbons"}
+      </button>
+
       <div class="d-exp-top">
         <button class="d-round" onClick={onClose} aria-label="Close" title="Close (Esc)"><Icon.down size={18} /></button>
         <span class="d-exp-from">{state.from ? <>Playing from <b>{state.from}</b></> : "Now playing"}</span>
-        <button class="d-wave-pick" onClick={onWave} title="Change how the music is drawn">
-          {wave === "boxes" ? <Icon.boxes size={17} /> : wave === "hills" ? <Icon.hills size={18} /> : <Icon.ribbons size={18} />}
-          {WAVE_NAMES[wave] || "Ribbons"}
-        </button>
       </div>
       <div class="d-exp-main">
         <div class="d-exp-cover"><Cover class="art-layer" track={t} /></div>
@@ -657,14 +664,6 @@ export function Expanded({ state, player, viz, cost, wave, onWave, onClose, onAr
           ))}
           {!state.upNext?.length && <p class="dim small">Nothing queued.</p>}
         </div>
-      </div>
-      {/* Two waveforms: the music as it plays, across the window; and under
-          it the whole song's shape, which is where it's at and where to go. */}
-      <div class="d-exp-wave" aria-hidden="true">
-        <Waveform viz={viz} playing={state.playing && !state.waiting} accent={c?.accent} style={wave} inset={40} wide bare />
-      </div>
-      <div class="d-exp-shape">
-        <SongShape viz={viz} state={state} player={player} accent={c?.accent} trackKey={`${t.from}#${t.id}`} big />
       </div>
     </div>
   );

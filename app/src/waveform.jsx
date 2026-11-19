@@ -85,10 +85,10 @@ const BOX_PX = 11;        // css px per column, box and gap
 const BOX_FILL = 0.76;    // of each cell, the box; the rest is gap
 const BOX_ROWS = 4;       // boxes a column can light above the line
 const REFLECT_ROWS = 3;   // and below it, as its reflection
-const REFLECTION = 0.5;   // how strong the reflection is
+const REFLECTION = 0.3;   // how strong the reflection is
 const BOX_FLOOR = 0.08;   // a column never quite empties: a hint of its first box
-const HUE_UP = 50;        // degrees the hue turns from a column's foot to its top
-const HUE_ACROSS = 28;    // and from the bass end to the treble end
+const HUE_UP = 20;        // degrees the hue turns from a column's foot to its top
+const HUE_ACROSS = 12;    // and from the bass end to the treble end
 // Peaks, from the same eight bands and nothing invented: each column shows the
 // band it falls in (no blending between bands, which smoothed them into hills),
 // its middle column now and those either side a moment earlier, so a beat is a
@@ -341,7 +341,7 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
           sum += (now[b] ?? bands[b]) * wgt; weights += wgt;
         }
         // Between two bands the bell dips a little, so each band reads as its own peak.
-        const dip = 1 - EDGE_DROP * 0.5 * Math.sin(Math.PI * away) ** 2;
+        const dip = 1 - 0.5 * Math.sin(Math.PI * away) ** 2;
         return Math.max(0, (sum / weights) * dip);
       });
     };
@@ -398,7 +398,10 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
           v = live.current.playing ? 0.3 + 0.18 * Math.sin(t * 1.3 + c * 0.35) : 0;
         }
         // How many boxes it lights, the last one partly.
-        const lit = (BOX_FLOOR + (1 - BOX_FLOOR) * Math.max(0, Math.min(1, v))) * B.rows;
+        // Without a line through them (bare), a quiet column is simply empty,
+        // rather than a row of first boxes reading as a line.
+        const floor = live.current.bare ? 0 : BOX_FLOOR;
+        const lit = (floor + (1 - floor) * Math.max(0, Math.min(1, v))) * B.rows;
         const left = B.x0 + c * B.cell;
         const reflect = B.rows > BOX_ROWS ? REFLECT_ROWS + 1 : REFLECT_ROWS;
         for (let r = 0; r < B.rows; r++) {
