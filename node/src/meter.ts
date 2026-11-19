@@ -41,7 +41,7 @@
 import { addServed, billSent, inOneGo, servedDay, type ServedKey } from "./store";
 
 /**
- * What of each track sent isn't billed, in seconds of audio: 60 seconds, or
+ * What of each track sent isn't billed, in seconds of audio: 70 seconds, or
  * 35% of the track, whichever is more (70 s: the 30 s burst and 1.25 x 30 s
  * more, so a skip before a play counts in the app is never billed here). With
  * the pacing below, a listener who
@@ -78,7 +78,9 @@ export const DELIVERED_CAP = 3;
  * the song again, a seek, a request landing on another copy of the Worker —
  * gets only `restart` seconds up front, so the one SLACK a day covers one
  * burst, not one per start. Whether it was sent already today is read from
- * the database (store.ts `served`), not this copy's memory.
+ * the database (store.ts `served`), not this copy's memory, and the row is
+ * made before a burst is given; two copies starting the same song in the
+ * same instant can still both give one.
  *
  * The listener's app does its part for its own sake: it stops downloading
  * while paused (app/src/player.js), since a browser left to itself would go
@@ -198,11 +200,10 @@ export const lengthOf = (size: number, duration: number | null) =>
   duration && duration > 0 ? duration : size / FALLBACK_BYTES_PER_SECOND;
 
 /**
- * Count a response's body as it is sent: bytes are added to this wallet's
- * tally as the listener's connection takes them, so a request the browser
- * abandons after a few seconds counts a few seconds, not the whole range it
- * asked for. When the body ends (or is abandoned), the tally is written if
- * it's due. Returns the body to send instead.
+ * Count a response's body as it is sent: each piece is added to this
+ * wallet's tally as the listener's connection takes it, at the price then,
+ * so a request the browser abandons after a few seconds counts a few
+ * seconds, not the whole range it asked for. Returns the body to send instead.
  */
 export function metered(
   body: ReadableStream<Uint8Array>,
@@ -225,37 +226,42 @@ export function metered(
   const isFresh = () => (fresh ??= tallies.has(idOf(key)) || buckets.has(pace)
     ? Promise.resolve(false)
     : (t.sentToday ? t.sentToday().then((sent) => !sent, () => false) : Promise.resolve(true)));
-  let bytes = 0, ended = false;
-  const end = () => {
-    if (ended) return;
-    ended = true;
-    const seconds = secondsOf(bytes, t.size, t.duration);
-    if (!(seconds > 0)) return;
-    // Priced as it was sent. Free to this wallet then (a subscriber, payments
-    // paused): not counted at all. Price unknown: counted, priced when written.
-    deps.later(deps.perMinute(t.pubkey).then((p) => p, () => null).then((perMinute) => {
-      if (perMinute === 0) return;
-      try { add(key, seconds, trackSeconds, deps, Date.now(), perMinute); } catch { /* never the listener's problem */ }
-    }));
+  let ended = false;
+  // The price for this wallet, read on the first piece and again every
+  // FLUSH.gapMs: each piece is counted at the price when it was sent, and a
+  // piece sent while it was free (a subscriber, payments paused) isn't
+  // counted at all. Unknown (couldn't be read): counted, priced when written.
+  let price: number | null = null, priceAt = -Infinity;
+  const priceNow = async () => {
+    const now = paceHooks.now();
+    if (now - priceAt >= FLUSH.gapMs) {
+      price = await deps.perMinute(t.pubkey).then((p) => p, () => null);
+      priceAt = now;
+    }
+    return price;
   };
+  let first = true;
+  const end = () => { ended = true; };
   const reader = body.getReader();
   const counting = new ReadableStream<Uint8Array>({
     async pull(c) {
       try {
         const { done, value } = await reader.read();
         if (done) { c.close(); end(); return; }
+        const perMinute = await priceNow();
+        const freshNow = await isFresh();
+        // The first piece of a fresh start, where it costs something: its row
+        // is made before the burst is given, so another copy of the Worker
+        // asked for the same song sees it was sent today.
+        if (first && freshNow && perMinute !== 0 && t.markSent) await t.markSent().catch(() => {});
+        first = false;
         // Not sent until it may be (PACE): what's sent follows what's heard.
-        const first = bytes === 0, freshNow = await isFresh();
-        // The first piece of a fresh start: the row is made now, so another
-        // copy of the Worker asked for the same song sees it was sent today.
-        if (first && freshNow && t.markSent) {
-          const mark = t.markSent;
-          // Only where it costs something: what's free to a wallet isn't recorded at all.
-          deps.later(deps.perMinute(t.pubkey).then((p) => (p > 0 ? mark() : null)).catch(() => {}));
-        }
-        await paced(pace, secondsOf(value.byteLength, t.size, t.duration), freshNow);
-        bytes += value.byteLength;
+        const seconds = secondsOf(value.byteLength, t.size, t.duration);
+        await paced(pace, seconds, freshNow);
         c.enqueue(value);
+        if (perMinute !== 0) {
+          try { add(key, seconds, trackSeconds, deps, Date.now(), perMinute); } catch { /* never the listener's problem */ }
+        }
       } catch (e) {
         end();
         c.error(e);

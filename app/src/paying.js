@@ -316,14 +316,16 @@ const originOf = (url) => { try { return new URL(url).origin; } catch { return n
  * pass (owes.js). Unlike the ledger, there's no waiting for the artist's
  * amount or the week: the listener can't hear them until it's paid.
  *
- * The server's number, not the ledger's: the ledger may be empty (a new
- * device) or short of it. But it is a stranger's number, so:
+ * The server's number is a stranger's, and nothing is paid on it alone:
  *
- * - **Sent without asking** only to an artist the listener has agreed a price
- *   with on this device, and only within the daily limit. Otherwise it waits
- *   for the listener's tap (`explicit`), which is their agreement to exactly
- *   that amount, shown to them — the daily limit doesn't hold that back, as a
- *   debt over it could otherwise never be paid in one go.
+ * - **Sent without asking** only as far as this device's own ledger for that
+ *   artist goes (what it counted itself), to an artist the listener has
+ *   agreed a price with here, within the daily limit and a dollar a day per
+ *   artist. An empty ledger (a new device) pays nothing without asking.
+ * - **Anything more** waits for the listener's tap (`explicit`), which is
+ *   their agreement to at most the amount shown to them (`max`); the daily
+ *   limit doesn't hold that back, as a debt over it could otherwise never be
+ *   paid in one go.
  * - **In pieces** of no more than one payment's worth (the most an artist's
  *   server takes for listening, which is also the app's own per-payment
  *   limit), at least a cent, and never more than the wallet holds: what the

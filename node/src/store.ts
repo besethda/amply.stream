@@ -126,8 +126,9 @@ export const SCHEMA = [
   // How much of each paid track this server sent each wallet, per UTC day, in
   // seconds of audio (meter.ts): `delivered` worked out from the bytes it
   // served, `reported` what the listener's app said it played (/listen/played),
-  // and `billed` how much of the two has been added to `owed` already. So
-  // listening is paid for even by an app that never reports it. The one place
+  // and `billed` how much of what was sent has been added to `owed` already
+  // (only what was sent is billed). So listening is paid for whatever an app
+  // says. The one place
   // a track is kept beside a wallet, and only for three days (pruneStale).
   // Beside the other tables, so nothing existing changes; without it, metering
   // is simply off.
@@ -494,16 +495,20 @@ export async function unreportedServed(db: D1Database, pubkey: string, now = Dat
 }
 
 /** Whether this track has gone to this wallet already today (meter.ts PACE):
- *  its row exists, made when the first piece went (markSent). */
+ *  its row shows something sent, from the first piece (markSent). */
 export async function sentToday(db: D1Database, pubkey: string, track: string, now = Date.now()): Promise<boolean> {
-  const row = await db.prepare("SELECT 1 AS yes FROM served WHERE pubkey = ? AND track = ? AND day = ?")
-    .bind(pubkey, track, servedDay(now)).first<{ yes: number }>();
-  return !!row;
+  const row = await db.prepare("SELECT delivered FROM served WHERE pubkey = ? AND track = ? AND day = ?")
+    .bind(pubkey, track, servedDay(now)).first<{ delivered: number }>();
+  return Number(row?.delivered) > 0;
 }
+/** A thousandth of a second: marks a row as sent to, and bills nothing (whole seconds). */
+const SENT_MARK = 0.001;
 
 /** The first piece of a track went to this wallet today: its row, now. */
 export function markSent(db: D1Database, pubkey: string, track: string, now = Date.now()): Promise<unknown> {
-  return db.prepare("INSERT OR IGNORE INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?, ?, ?, 0, 0, 0)")
+  // A trace of delivery, so a row a report made (delivered 0) isn't taken for this.
+  return db.prepare(`INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?, ?, ?, ${SENT_MARK}, 0, 0)
+     ON CONFLICT(pubkey, track, day) DO UPDATE SET delivered = MAX(delivered, ${SENT_MARK})`)
     .bind(pubkey, track, servedDay(now)).run();
 }
 
@@ -654,8 +659,7 @@ export async function pruneStale(db: D1Database, now = Date.now()): Promise<void
   await db.prepare("DELETE FROM listeners WHERE blocked = 0 AND last_seen < ?")
     .bind(now - KEEP_FOR).run();
   await forgetOwed(db);
-  // What was sent, after three days (SERVED_KEEP_DAYS). Billed as it was
-  // sent (billSent), so nothing waits on these rows.
+  // What was sent, after three days (SERVED_KEEP_DAYS).
   try {
     await db.prepare("DELETE FROM served WHERE day <= ?").bind(servedDay(now) - SERVED_KEEP_DAYS).run();
   } catch { /* no such table yet */ }

@@ -93,6 +93,7 @@ export function createPlayer(onChange, onListened, {
   let restTimer = 0;
   let loadingNow = false;   // a song being fetched: a pause now is ours, not the listener's
   let waking = 0;           // a wake under way (its number), which a tap can call off
+  let wakingFrom = null;    // and where it was resting, put back if it's called off
   let wakes = 0;
   let seekTo = null;        // where to go once the next source has loaded (wake, recover)
   let loading = 0;          // guards against a slow resolve landing out of order
@@ -325,7 +326,8 @@ export function createPlayer(onChange, onListened, {
     if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
     const src = audio.currentSrc || audio.src || "";
     if (!src || src.startsWith("blob:")) return;
-    resting = { at: audio.currentTime || 0, duration: audio.duration };
+    // Where it is: a seek still waiting for the source to load counts.
+    resting = { at: seekTo ?? (audio.currentTime || 0), duration: audio.duration };
     audio.removeAttribute("src");
     audio.load?.();
     tell();
@@ -337,6 +339,7 @@ export function createPlayer(onChange, onListened, {
     resting = null;
     refused = null;
     const track = now(), mine = loading, me = (waking = ++wakes);
+    wakingFrom = r;
     wanted = true;
     tell();
     let url;
@@ -344,23 +347,30 @@ export function createPlayer(onChange, onListened, {
       url = await resolve(track);
     } catch (e) {
       if (mine !== loading) return;
-      if (waking === me) waking = 0;
+      if (waking !== me) return;    // called off meanwhile: already resting again
+      waking = 0;
+      wakingFrom = null;
       resting = r;
       refused = { kind: e.kind || "refused", message: e.message, ...(e.data || {}) };
       tell();
       return;
     }
     if (mine !== loading) return;
-    // Called off meanwhile (a second tap): stays where it was, resting.
-    if (waking !== me) { if (!resting) resting = r; tell(); return; }
+    // Called off meanwhile (a tap): it went back to resting then.
+    if (waking !== me) return;
     waking = 0;
+    wakingFrom = null;
     seekTo = r.at;
     audio.src = url;
     audio.play().catch(() => tell());
   }
   /** A tap while waking: don't start after all. */
   function stayPaused() {
+    // Resting again at once, where it was (and where the bar was dragged to
+    // meanwhile): the next tap wakes it properly, the late fetch is ignored.
+    resting = wakingFrom;
     waking = 0;
+    wakingFrom = null;
     wanted = false;
     tell();
   }
@@ -466,6 +476,7 @@ export function createPlayer(onChange, onListened, {
     },
     seek(seconds) {
       if (resting) { resting.at = seconds; tell(); return; }
+      if (waking && wakingFrom) { wakingFrom.at = seconds; seekTo = seconds; tell(); return; }
       last = seconds; audio.currentTime = seconds;
     },
     /** Try the current song again — after agreeing a price, topping up… */

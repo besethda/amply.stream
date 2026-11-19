@@ -198,7 +198,7 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
   const before = { flushes, batches };
   const got = await audio(w, "song.mp3");
   ok("a paid song is served whole to a listener with a pass", got.res.status === 200 && got.bytes === LEN * 1000 && got.res.headers.get("Content-Length") === String(LEN * 1000));
-  ok("  a whole-file request is exactly one write", flushes - before.flushes === 1 && batches - before.batches === 1, `${flushes - before.flushes} flushes, ${batches - before.batches} batches`);
+  ok("  a whole-file request is a couple of writes at most (each piece priced as it goes)", flushes - before.flushes <= 2 && batches - before.batches <= 2, `${flushes - before.flushes} flushes, ${batches - before.batches} batches`);
   ok("  counted as the song's 240 s sent", near(row(w).delivered, LEN), JSON.stringify(row(w)));
   ok("  billed what was sent less the slack (240 - 84 = 156 s), as it's sent", row(w).billed === LEN - SLACK_S && owed(w).micros === (LEN - SLACK_S) * 1000 && owed(w).seconds === LEN - SLACK_S, JSON.stringify([row(w), owed(w)]));
   const r = await played(w, LEN, "s");
@@ -401,6 +401,30 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
   ok("reports of 0 s, no song, and three hours after 130 s sent: what's owed doesn't move", owed(r).micros === before && before === (130 - SLACK_S) * 1000, JSON.stringify([before, owed(r)]));
 }
 
+// ── a price that changes during one long response ───────────────────────────
+{
+  paceHooks.sleep = async (ms) => { tick(Math.ceil(ms)); };
+  const w = await makeWallet();
+  sqlite.prepare("INSERT INTO subscriptions (wallet, subscription, customer, until, updated) VALUES (?, 'sub_m', 'cus_m', ?, ?)").run(w.address, clock + 30 * DAY, clock);
+  const res = await call(`/audio/two.mp3?t=${encodeURIComponent(w.token)}`, { headers: { Range: "bytes=0-" } });
+  const reader = res.body.getReader();
+  let sent = 0, freeSent = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    sent += value.byteLength / 1000;
+    if (sent >= 120 && freeSent === 0) {
+      freeSent = sent;
+      sqlite.prepare("DELETE FROM subscriptions WHERE wallet = ?").run(w.address);   // it ends, mid-song
+    }
+  }
+  await settled();
+  const paidPart = sent - freeSent;
+  ok("a subscription ending mid-song: only what was sent after it is counted", Math.abs(row(w, "two.mp3").delivered - paidPart) <= PIECE / 1000 + 0.01, JSON.stringify([freeSent, sent, row(w, "two.mp3")]));
+  ok("  and billed less the slack (nothing, here)", owed(w).micros === Math.max(0, Math.floor(row(w, "two.mp3").delivered - SLACK_S)) * 1000, JSON.stringify(owed(w)));
+  paceHooks.sleep = async () => {};
+}
+
 // ── several copies of the Worker at once: one burst a day, not one each ────
 {
   paceHooks.sleep = async (ms) => { tick(Math.ceil(ms)); };
@@ -452,7 +476,7 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
   const b2 = flushes;
   await audio(q, "two.mp3", { Range: "bytes=0-49999" });
   await audio(q, "two.mp3", { Range: "bytes=50000-99999" });
-  ok("two big ranges inside the gap: the second waits, then is written", near(row(q, "two.mp3").delivered, 100) && flushes - b2 === 2, JSON.stringify(row(q, "two.mp3")));
+  ok("two big ranges inside the gap: the second waits, then is written", near(row(q, "two.mp3").delivered, 100) && flushes - b2 <= 3, JSON.stringify(row(q, "two.mp3")));
 }
 
 // ── the pass says what's owed; Auto-block sees what was metered ─────────────

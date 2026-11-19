@@ -642,13 +642,13 @@ export function App() {
   async function payOwes(url, upTo = null) {
     const entry = library.current.find((e) => e.url === url);
     if (!pair || !entry) return;
+    // At most what the sheet showed, read before anything redraws it: a
+    // server (or another tab) can't raise it between reading and tapping.
+    const shown = owesView.current?.url === url ? owesView.current.owes : claimOf(url)?.remaining;
+    const max = Math.min(shown ?? 0, upTo ?? Infinity);
     showOwes(url, "paying");
     let r;
     try {
-      // At most what the sheet showed: a server can't raise it between the
-      // listener reading the amount and tapping Pay.
-      const shown = owesView.current?.url === url ? owesView.current.owes : claimOf(url)?.remaining;
-      const max = Math.min(shown ?? 0, upTo ?? Infinity);
       r = await payWith(() => payClaim(pair, entry, { ...claimOptions(), explicit: true, max }));
     } catch (e) {
       setLedger(loadLedger());

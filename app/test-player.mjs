@@ -366,5 +366,41 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   ok("(woken)", !pr.resting());
 }
 
+// ── play, pause, play during a slow wake ────────────────────────────────────
+{
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let st = {}, slow = 0;
+  const pt = createPlayer((x) => { st = x; }, () => {}, { restAfter: 5, resolve: async (t) => { if (slow) await wait(slow); return `${t.url}?p${Math.random()}`; } });
+  const a = pt.element();
+  const on = (e) => (a.handlers[e] || []).forEach((f) => f());
+  pt.play(tracks.slice(0, 2), 0);
+  await tick();
+  a.currentSrc = a.src; a.paused = false; on("play"); a.currentTime = 70;
+  pt.toggle(); on("pause");
+  await wait(20);
+  slow = 40;
+  pt.toggle();               // play: waking
+  pt.toggle();               // pause: called off, resting again
+  ok("tapped off while waking: resting again at once, at 1:10", pt.resting() && st.at === 70, JSON.stringify({ r: pt.resting(), at: st.at }));
+  pt.seek(90);
+  pt.toggle();               // play again: a proper wake, from 1:30
+  await wait(100);
+  on("loadedmetadata");
+  ok("  a third tap wakes it properly, from where the bar was dragged (1:30)", !pt.resting() && a.currentTime === 90 && a.src !== "", JSON.stringify({ r: pt.resting(), t: a.currentTime, src: a.src }));
+  ok("  and the first, late fetch didn't take over", (a.src.match(/\?p/g) || []).length === 1);
+  a.paused = false; on("play");
+  pt.toggle(); on("pause");
+  ok("  a tap now pauses it, as it should", a.paused === true && !pt.resting());
+  // A seek while it's waking is kept.
+  await wait(20);
+  slow = 30;
+  pt.toggle();
+  pt.seek(120);
+  await wait(60);
+  on("loadedmetadata");
+  ok("a seek made while waking is where it plays from", a.currentTime === 120, a.currentTime);
+  slow = 0;
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
