@@ -46,8 +46,10 @@ const STUCK_S = 2;          // clock still this long while playing: buffering
 const RECOVER_S = 5;        // this long: fetch the song again from where it was
 const RETRY_MAX_S = 10;     // and again, at most this far apart: a signal that comes back is not announced
 const REST_AFTER_MS = 1_500; // paused this long: stop downloading (see `rest`)
-/** In the background (the lock screen), longer: see `rest`. */
-const REST_HIDDEN_MS = 30_000;
+/** In the background (the lock screen), longer: see `rest`. Short enough
+ *  that what a browser reads ahead meanwhile (1.25 s a second, node/src/meter.ts)
+ *  stays inside what the artist's server doesn't bill. */
+const REST_HIDDEN_MS = 10_000;
 
 export const REPEAT = { OFF: 0, ALL: 1, ONE: 2 };
 

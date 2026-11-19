@@ -20,7 +20,7 @@ import {
   claimOf, noteClaim, clearClaim, paidTowards, backOff, claimDue, noteCredit, pieces,
 } from "./owes.js";
 import { toUsd } from "./money.js";
-import { recordReceipt } from "./receipts.js";
+import { recordReceipt, receipts } from "./receipts.js";
 
 // ── payments that may have gone out ────────────────────────────────────────
 //
@@ -254,7 +254,8 @@ async function lookAgain(pair, entry, recipients, pay, { report = noReport } = {
   if (!unsure) return { landed: 0 };
   if (Date.now() - (unsure.looked || 0) < 30_000) return { wait: true };
   noteUnsure(entry.url, { ...unsure, looked: Date.now() });
-  const landed = await pay.landedSince(pair, recipients, { since: unsure.at, signature: unsure.signature, upTo: unsure.micros });
+  const known = new Set(receipts().map((r) => r.signature).filter(Boolean));
+  const landed = await pay.landedSince(pair, recipients, { since: unsure.at, signature: unsure.signature, upTo: unsure.micros, known });
   if (landed === null) return { wait: true };          // can't tell yet: wait
   forgetUnsure(entry.url);
   if (landed > 0) {

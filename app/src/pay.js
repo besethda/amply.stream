@@ -304,7 +304,7 @@ export async function payArtist(pair, recipients, micros, { artistName = "This a
  * on never will: its blockhash has expired. Returns the micros that landed
  * (0 when nothing did), or null when it can't tell yet: then nothing is sent.
  */
-export async function landedSince(pair, recipients, { since, signature, upTo = 0, now = Date.now() } = {}) {
+export async function landedSince(pair, recipients, { since, signature, upTo = 0, known = new Set(), now = Date.now() } = {}) {
   const conn = rpc();
   try {
     if (signature) {
@@ -323,6 +323,9 @@ export async function landedSince(pair, recipients, { since, signature, upTo = 0
     let micros = 0;
     for (const s of sigs) {
       if (s.err || !s.blockTime || s.blockTime * 1000 < since - 60_000) continue;
+      // A payment this device already booked (its receipt) isn't this one,
+      // however close in time: the piece before it, say.
+      if (known.has(s.signature)) continue;
       const tx = await conn.getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
       micros += await paidIn(tx, pair, recipients);
     }

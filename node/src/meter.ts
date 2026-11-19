@@ -52,14 +52,16 @@ import { addServed, billSent, inOneGo, servedDay, type ServedKey } from "./store
  * seconds, below zero from 160 s; under 160 s the 70 s floor covers it).
  * Bytes this copy has already counted aren't counted again (newBytes), so
  * picking a paused song up again — the app asks afresh from where it was —
- * adds only what's new. A player that keeps downloading while paused is
- * still paced (1.25 s of audio a second, never past the song's end; browsers
- * stop reading ahead of their own accord after a while): this server can't
- * tell that from listening and doesn't try. The listener's app stops downloading 1.5 s into a pause, for
- * its own sake (app/src/player.js); nothing here relies on it. A listener
- * who restarts one song many times a day, or whose requests land on several
- * copies of the Worker, can still be counted a little over (each start's 3 s
- * up front), which the slack covers for a handful of starts.
+ * adds only what's new, and so does starting it again from the top and
+ * skipping it before it counts (REPLAY_AFTER_S).
+ *
+ * Where it can still bill a little more than was heard, and doesn't try to
+ * tell: a player that keeps downloading while paused is paced like one
+ * playing (1.25 s of audio a second, never past the song's end). The
+ * listener's app stops downloading 1.5 s into a pause, 10 s on the lock
+ * screen (app/src/player.js), which the slack covers; another app or browser
+ * may not. And requests that land on different copies of the Worker are
+ * each counted, which the slack covers for a handful of starts.
  */
 export const SLACK = { seconds: 70, share: 0.35 } as const;
 export const slackFor = (trackSeconds: number) => Math.max(SLACK.seconds, SLACK.share * trackSeconds);
@@ -204,8 +206,16 @@ const idOf = (k: ServedKey) => `${k.pubkey}|${k.track}|${k.day}`;
 const covered = new Map<string, number[][]>();
 const MAX_SPANS = 64;
 
-/** How far a request from a file's start reads before it's a new play. */
-export const REPLAY_AFTER_S = 10;
+/**
+ * How far a request from a file's start reads before it's a new play: 45 s
+ * of audio. Past the 30 s a play needs to count (spec/pricing.mjs), with what
+ * the pacing lets a player read ahead by then (PACE.restart + 1.25 x 30 s is
+ * 40.5 s). So the song played again and skipped before it counts is never
+ * billed again; played on, it's billed again in full. And a player picking a
+ * paused song back up, which reads the start for its headers before it jumps
+ * to where it was, isn't taken for a replay.
+ */
+export const REPLAY_AFTER_S = 45;
 
 /** A new play of this file from its start: nothing of it counted yet. */
 function startOver(id: string): void { covered.delete(id); }

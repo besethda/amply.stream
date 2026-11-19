@@ -125,22 +125,24 @@ export const SCHEMA = [
      at INTEGER NOT NULL
    )`,
   `CREATE INDEX IF NOT EXISTS paid_sigs_by_pubkey ON paid_sigs (pubkey)`,
+  // What each wallet has paid by the chain's own count, all time, as the
+  // artist's editor last read it (mergePaid). Kept apart from `paid`, which
+  // adds up the payments this server counted one by one: the same payment is
+  // in both, so they're never added together. What a wallet has paid is the
+  // larger of the two (paidOf).
+  `CREATE TABLE IF NOT EXISTS paid_chain (
+     pubkey TEXT PRIMARY KEY,
+     micros INTEGER NOT NULL DEFAULT 0,
+     last INTEGER NOT NULL DEFAULT 0
+   )`,
   // How much of each paid track this server sent each wallet, per UTC day, in
   // seconds of audio (meter.ts): `delivered` worked out from the bytes it
   // served, `reported` what the listener's app said it played (/listen/played),
   // and `billed` how much of what was sent has been added to `owed` already
-  // (only what was sent is billed). So listening is paid for whatever an app
-  // says. The one place
-  // a track is kept beside a wallet, and only for three days (pruneStale).
+  // (only what was sent is billed, whatever an app says). The one place a
+  // track is kept beside a wallet, and only for three days (pruneStale).
   // Beside the other tables, so nothing existing changes; without it, metering
   // is simply off.
-  // Signed challenges already used to see or erase a wallet's record, so one
-  // seen in passing can't be sent again in the minutes it's valid for. The
-  // challenge text only (random, no wallet), for ten minutes (spendProof).
-  `CREATE TABLE IF NOT EXISTS used_proofs (
-     message TEXT PRIMARY KEY,
-     at INTEGER NOT NULL
-   ) WITHOUT ROWID`,
   `CREATE TABLE IF NOT EXISTS served (
      pubkey TEXT NOT NULL,
      track TEXT NOT NULL,
@@ -149,6 +151,13 @@ export const SCHEMA = [
      reported REAL NOT NULL DEFAULT 0,
      billed REAL NOT NULL DEFAULT 0,
      PRIMARY KEY (pubkey, track, day)
+   ) WITHOUT ROWID`,
+  // Signed challenges already used to see or erase a wallet's record, so one
+  // seen in passing can't be sent again in the minutes it's valid for. The
+  // challenge text only (random, no wallet), for ten minutes (spendProof).
+  `CREATE TABLE IF NOT EXISTS used_proofs (
+     message TEXT PRIMARY KEY,
+     at INTEGER NOT NULL
    ) WITHOUT ROWID`,
 ];
 
@@ -305,6 +314,19 @@ export async function listeners(db: D1Database, limit = 500): Promise<ListenerRo
   try {
     const { results } = await db.prepare(
       `SELECT l.*, s.until AS subscribed_until, o.micros AS owed_micros, o.seconds AS owed_seconds,
+              CASE WHEN p.pubkey IS NULL AND c.pubkey IS NULL THEN NULL
+                   ELSE MAX(COALESCE(p.micros, 0), COALESCE(c.micros, 0)) END AS paid_micros
+         FROM listeners l LEFT JOIN subscriptions s ON s.wallet = l.pubkey
+         LEFT JOIN owed o ON o.pubkey = l.pubkey
+         LEFT JOIN paid p ON p.pubkey = l.pubkey
+         LEFT JOIN paid_chain c ON c.pubkey = l.pubkey
+        ORDER BY l.seconds DESC LIMIT ?`,
+    ).bind(n).all<ListenerRow>();
+    return results ?? [];
+  } catch { /* no paid_chain table yet: as before it */ }
+  try {
+    const { results } = await db.prepare(
+      `SELECT l.*, s.until AS subscribed_until, o.micros AS owed_micros, o.seconds AS owed_seconds,
               p.micros AS paid_micros
          FROM listeners l LEFT JOIN subscriptions s ON s.wallet = l.pubkey
          LEFT JOIN owed o ON o.pubkey = l.pubkey
@@ -408,8 +430,9 @@ export async function forget(db: D1Database, pubkey: string, perMinute = 0): Pro
 async function moneyOf(db: D1Database, pubkey: string): Promise<{ owed: number; seconds: number; paid: number; tables: boolean }> {
   try {
     const owed = await db.prepare("SELECT micros, seconds FROM owed WHERE pubkey = ?").bind(pubkey).first<{ micros: number; seconds: number }>();
-    const paid = await db.prepare("SELECT micros FROM paid WHERE pubkey = ?").bind(pubkey).first<{ micros: number }>();
-    return { owed: Number(owed?.micros) || 0, seconds: Number(owed?.seconds) || 0, paid: Number(paid?.micros) || 0, tables: true };
+    const paid = await paidOf(db, pubkey);
+    if (paid === null) throw new Error("no paid table");
+    return { owed: Number(owed?.micros) || 0, seconds: Number(owed?.seconds) || 0, paid, tables: true };
   } catch {
     return { owed: 0, seconds: 0, paid: 0, tables: false };
   }
@@ -442,12 +465,14 @@ async function forgetOwed(db: D1Database, pubkey?: string, keep: "all" | "totals
     else {
       await run("DELETE FROM owed WHERE pubkey = ?", pubkey);
       await run("DELETE FROM paid WHERE pubkey = ?", pubkey);
+      await run("DELETE FROM paid_chain WHERE pubkey = ?", pubkey);
     }
     await run("UPDATE paid_sigs SET pubkey = '', micros = 0 WHERE pubkey = ?", pubkey);
     return;
   }
   await run("DELETE FROM paid WHERE pubkey NOT IN (SELECT pubkey FROM listeners) AND last < ?", now - KEEP_FOR);
-  await run("DELETE FROM owed WHERE pubkey NOT IN (SELECT pubkey FROM listeners) AND pubkey NOT IN (SELECT pubkey FROM paid)");
+  await run("DELETE FROM paid_chain WHERE pubkey NOT IN (SELECT pubkey FROM listeners) AND last < ?", now - KEEP_FOR);
+  await run("DELETE FROM owed WHERE pubkey NOT IN (SELECT pubkey FROM listeners) AND pubkey NOT IN (SELECT pubkey FROM paid) AND pubkey NOT IN (SELECT pubkey FROM paid_chain)");
   await run("UPDATE paid_sigs SET pubkey = '', micros = 0 WHERE pubkey <> '' AND pubkey NOT IN (SELECT pubkey FROM listeners)");
   await run("DELETE FROM paid_sigs WHERE pubkey = '' AND at < ?", now - PAID_SIGS_KEEP_MS);
 }
@@ -583,6 +608,31 @@ export async function servedCount(db: D1Database, pubkey: string): Promise<numbe
   }
 }
 
+/** Everything `served` holds about a wallet, for its holder (/listen/mine). */
+export async function servedRowsOf(db: D1Database, pubkey: string): Promise<{ track: string; day: string; sentSeconds: number; reportedSeconds: number; billedSeconds: number }[]> {
+  try {
+    const { results } = await db.prepare("SELECT track, day, delivered, reported, billed FROM served WHERE pubkey = ? ORDER BY day, track")
+      .bind(pubkey).all<{ track: string; day: number; delivered: number; reported: number; billed: number }>();
+    return (results ?? []).map((r) => ({
+      track: r.track, day: new Date(r.day * 86_400_000).toISOString().slice(0, 10),
+      sentSeconds: Math.round(r.delivered), reportedSeconds: Math.round(r.reported), billedSeconds: Math.round(r.billed),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** The payments counted for a wallet, by their references (/listen/mine). */
+export async function paymentRefsOf(db: D1Database, pubkey: string): Promise<{ signature: string; micros: number; counted: string }[]> {
+  try {
+    const { results } = await db.prepare("SELECT sig, micros, at FROM paid_sigs WHERE pubkey = ? ORDER BY at")
+      .bind(pubkey).all<{ sig: string; micros: number; at: number }>();
+    return (results ?? []).map((r) => ({ signature: r.sig, micros: r.micros, counted: new Date(r.at).toISOString() }));
+  } catch {
+    return [];
+  }
+}
+
 // ── what a wallet has paid, and Auto-block ─────────────────────────────────
 //
 // The editor reads the chain to see who has paid; the server mostly can't
@@ -599,7 +649,12 @@ export async function servedCount(db: D1Database, pubkey: string): Promise<numbe
 export async function paidOf(db: D1Database, pubkey: string): Promise<number | null> {
   try {
     const row = await db.prepare("SELECT micros FROM paid WHERE pubkey = ?").bind(pubkey).first<{ micros: number }>();
-    return Number(row?.micros) || 0;
+    const counted = Number(row?.micros) || 0;
+    // The chain's count, where the editor has read it: the larger of the two,
+    // never the sum (the same payments are in both).
+    const chain = await db.prepare("SELECT micros FROM paid_chain WHERE pubkey = ?").bind(pubkey).first<{ micros: number }>()
+      .then((r) => Number(r?.micros) || 0, () => 0);
+    return Math.max(counted, chain);
   } catch {
     return null;
   }
@@ -647,8 +702,9 @@ export async function paidSigKnown(db: D1Database, sig: string): Promise<{ pubke
 export const MAX_PAID_WALLETS = 1000;
 
 /**
- * Totals the artist's editor read from the chain, merged in: each wallet's
- * becomes the larger of the two, never smaller. The chain is the truth, so
+ * Totals the artist's editor read from the chain, merged in, in `paid_chain`
+ * (never `paid`: a payment this server also counted itself would then count
+ * twice). Each wallet's only ever grows. The chain is the truth, so
  * this heals anything the server missed (a payment made with another app, one
  * sent before this server counted payments); and a reading a little out of
  * date can't undo a payment the server has seen since. Only for wallets this
@@ -661,7 +717,7 @@ export async function mergePaid(db: D1Database, totals: Record<string, number>, 
     const amount = Math.floor(Number(micros));
     if (!Number.isSafeInteger(amount) || amount <= 0) continue;
     await db.prepare(
-      `INSERT INTO paid (pubkey, micros, last)
+      `INSERT INTO paid_chain (pubkey, micros, last)
          SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM listeners WHERE pubkey = ?)
        ON CONFLICT(pubkey) DO UPDATE SET micros = MAX(micros, excluded.micros), last = MAX(last, excluded.last)`,
     ).bind(pubkey, amount, now, pubkey).run();

@@ -351,7 +351,7 @@ const report = async (signature, ip = nextIp()) => {
   const before = gets;
   const r = await report(unconfirmedSig);
   ok("the app reports the unconfirmed payment once it lands: counted", r.status === 200 && r.body.recorded === true && r.body.wallet === w.address
-    && r.body.micros === 2_000_000 && r.body.paidMicros === 2_000_000, JSON.stringify(r));
+    && r.body.micros === 2_000_000 && !("paidMicros" in r.body) && (await paidOf(DB, r.body.wallet)) === 2_000_000, JSON.stringify(r));
   ok("  having asked the network exactly once", gets === before + 1, `${gets - before}`);
   ok("  and now they're served", (await passFor(w)).status === 200);
   const again = await report(unconfirmedSig);
@@ -457,6 +457,33 @@ const report = async (signature, ip = nextIp()) => {
   await recordPaid(DB, kept.address, 3_000_000, newSig());
   await forget(DB, kept.address);
   ok("a blocked wallet, paid up, erased keeps its block and its money totals, nothing else", (await listener(DB, kept.address))?.blocked === 1 && (await listener(DB, kept.address))?.seconds === 0 && (await paidOf(DB, kept.address)) === 3_000_000);
+
+  // One payment, counted by the server and by the editor's read of the chain:
+  // counted once, in whichever order.
+  {
+    const d = await makeWallet();
+    known(d, { owed: 5_000_000 });
+    const sig = newSig();
+    await mergePaid(DB, { [d.address]: 2_000_000 });          // the editor read it on the chain
+    await recordPaid(DB, d.address, 2_000_000, sig);           // then the app reported it
+    ok("a payment the editor merged, then reported: counted once ($2, not $4)", (await paidOf(DB, d.address)) === 2_000_000, String(await paidOf(DB, d.address)));
+    await recordPaid(DB, d.address, 1_000_000, newSig());      // a new one, reported first
+    ok("  a new payment reported adds to what the server counted ($3)", (await paidOf(DB, d.address)) === 3_000_000, String(await paidOf(DB, d.address)));
+    await mergePaid(DB, { [d.address]: 3_000_000 });          // the chain says the same
+    ok("  and the chain saying the same total doesn't add it again ($3)", (await paidOf(DB, d.address)) === 3_000_000);
+    const rows = await (await manage("/listeners")).json();
+    ok("  the editor's list says the same", rows.find((r) => r.pubkey === d.address)?.paid_micros === 3_000_000, JSON.stringify(rows.find((r) => r.pubkey === d.address)));
+  }
+
+  // Erased, keeping only the money totals: "see my data" still shows them.
+  {
+    const e = await makeWallet();
+    known(e, { owed: 1_000_000 });
+    await recordPaid(DB, e.address, 1_000_000, newSig());
+    await listen("/forget", await signed(e));
+    const mine = await (await listen("/mine", await signed(e))).json();
+    ok("erased, paid up: 'see my data' shows the totals still kept, not nothing", mine.held?.paidMicros === 1_000_000 && mine.held?.costMicros === 1_000_000, JSON.stringify(mine.held));
+  }
 
   // A signed request, seen in passing, can't be sent again.
   {

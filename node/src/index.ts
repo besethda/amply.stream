@@ -27,7 +27,7 @@ import {
   setting, putSetting, listeners, listener, setBlocked, counted, MAX_REPORT_S, forget, remove, pruneStale, pruneHourly,
   subscribedUntil, pruneSubscriptions, heard, songTotals, playsToday,
   paidOf, recordPaid, paidSigKnown, mergePaid, MAX_PAID_WALLETS, autoBlockSetting, setAutoBlock, owedRowOf,
-  addServed, aPlay, sentToday, markSent, spendProof, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
+  addServed, aPlay, sentToday, markSent, spendProof, servedRowsOf, paymentRefsOf, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
   type Listener,
 } from "./store";
 import { autoBlock, owedOf, unpaidOf } from "../../spec/standing.mjs";
@@ -1250,7 +1250,9 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (already) {
       // Counted for a wallet since erased: only the reference is left.
       if (!already.pubkey) return json({ recorded: false });
-      return json({ recorded: false, wallet: already.pubkey, micros: already.micros, paidMicros: await paidOf(env.DB, already.pubkey) });
+      // What this one payment was, which the chain shows anyone; never the
+      // wallet's total, which only its holder may see (/mine).
+      return json({ recorded: false, wallet: already.pubkey, micros: already.micros });
     }
     const pay = walletOf(await manifestNowOf(env));
     const chain = pay && CHAINS[pay.network];
@@ -1273,7 +1275,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (!verdict.ok) return verdict.retry ? json({ pending: true, error: verdict.why }, 202) : fail(422, verdict.why);
     if (!(await listener(env.DB, verdict.payer))) return fail(403, "that payment is from a wallet that hasn't listened here");
     const recorded = await recordPaid(env.DB, verdict.payer, verdict.micros, signature);
-    return json({ recorded, wallet: verdict.payer, micros: verdict.micros, paidMicros: await paidOf(env.DB, verdict.payer) });
+    return json({ recorded, wallet: verdict.payer, micros: verdict.micros });
   }
 
   // A listener sending their own money out, with no SOL for the fee: this
@@ -1550,8 +1552,8 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
   }
 
   // And see it first. The right of access, answered the same way: sign for
-  // your wallet, get back everything this artist's server holds about it,
-  // which is one row of totals and nothing else.
+  // your wallet, get back everything this artist's server holds about it:
+  // its totals, three days of what was sent, and the payments counted.
   if (path === "/mine" && request.method === "POST") {
     const body = await jsonBody(request);
     if (!body) return fail(400, "bad request");
@@ -1560,34 +1562,36 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     // Once only: a signed request seen in passing can't be sent again.
     if (!(await spendProof(env.DB, String((body as { message?: string }).message)))) return fail(403, "that signature has been used already; sign again");
     const row = await listener(env.DB, proof.address);
-    // What was sent to this wallet in the last three days (meter.ts), counted.
-    const servedTracks = await servedCount(env.DB, proof.address);
+    // Everything, not a summary: what was sent in the last three days, track
+    // by track (meter.ts), and each payment counted, by its reference.
+    const sent = await servedRowsOf(env.DB, proof.address);
+    const payments = await paymentRefsOf(env.DB, proof.address);
+    const costMicros = await env.DB.prepare("SELECT micros FROM owed WHERE pubkey = ?").bind(proof.address)
+      .first<{ micros: number }>().then((o) => o?.micros ?? null).catch(() => null);
+    const paidMicros = await paidOf(env.DB, proof.address);
+    const anything = !!row || sent.length > 0 || payments.length > 0 || costMicros !== null || (paidMicros ?? 0) > 0;
     return json({
       controller: host,
       wallet: proof.address,
-      held: row || servedTracks
+      held: anything
         ? {
             plays: row?.plays ?? 0,
             seconds: row?.seconds ?? 0,
-            costMicros: await env.DB.prepare("SELECT micros FROM owed WHERE pubkey = ?").bind(proof.address)
-              .first<{ micros: number }>().then((o) => o?.micros ?? null).catch(() => null),
-            paidMicros: await env.DB.prepare("SELECT micros FROM paid WHERE pubkey = ?").bind(proof.address)
-              .first<{ micros: number }>().then((o) => o?.micros ?? null).catch(() => null),
+            costMicros,
+            paidMicros,
             firstSeen: row?.first_seen ? new Date(row.first_seen).toISOString() : null,
             lastSeen: row?.last_seen ? new Date(row.last_seen).toISOString() : null,
             servingStopped: !!row?.blocked,
-            // How many (track, day) rows of seconds sent, reported and
-            // billed are held for the last three days: one per paid track
-            // sent to this wallet each day. Erasing keeps them until they age
-            // out like everyone's (store.ts forget).
-            servedTracks: servedTracks ?? 0,
+            servedTracks: sent.length,
+            sent,
+            payments,
           }
         : null,
       subscribedUntil: await subscribedUntil(env.DB, proof.address).then((u) => (u ? new Date(u).toISOString() : null)),
       purchases: await purchasesOf(env.DB, proof.address).then(({ owned, gifts }) =>
         [...owned, ...gifts].map((s) => ({ item: s.item, paidWith: s.via, when: new Date(s.created).toISOString(), gift: !s.owner }))).catch(() => []),
       notHeld: "A history of what you played, or when. For the last three days only, this server keeps how many seconds of each paid track it sent you each day, to charge for listening fairly; then it deletes them.",
-      keptFor: "Totals: a year after you were last here. What was sent: three days. Then deleted automatically.",
+      keptFor: "Totals: a year after you were last here (what you paid, a year after your last payment). What was sent: three days. Payment references: as long as the totals, or a week after erasing, without your wallet. Then deleted automatically.",
       exported: new Date().toISOString(),
     }, 200, 2);
   }

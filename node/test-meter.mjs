@@ -557,6 +557,21 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
   tick(6_000);
 }
 
+// ── a song started again and skipped before it counts: never billed again ───
+{
+  const w = await makeWallet();
+  await audio(w, "three.mp3");          // played through once: 240 s sent, 156 billed
+  const once = row(w, "three.mp3").billed;
+  for (let i = 0; i < 5; i++) {
+    tick(FLUSH.gapMs);
+    await audio(w, "three.mp3", { Range: "bytes=0-39999" });   // 40 s: skipped at about 29 s
+  }
+  ok("started again five times and skipped before it counts: billed nothing more", near(row(w, "three.mp3").billed, once), JSON.stringify(row(w, "three.mp3")));
+  tick(FLUSH.gapMs);
+  await audio(w, "three.mp3", { Range: "bytes=0-99999" });     // played on past 45 s: a replay
+  ok("  played again past the start: billed again", row(w, "three.mp3").billed > once + 90, JSON.stringify(row(w, "three.mp3")));
+}
+
 // ── a report that doesn't say which song (an app from before) ───────────────
 {
   const w = await makeWallet();
@@ -575,6 +590,8 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
   await audio(w, "two.mp3");
   const mine = await (await listen("/mine", await signed(w))).json();
   ok("/listen/mine counts the songs sent in the last three days", mine.held?.servedTracks === 2, JSON.stringify(mine.held));
+  ok("  and lists them, track by track, by the day: what was sent, reported and billed",
+    mine.held?.sent?.length === 2 && mine.held.sent.every((r) => r.track && /^\d{4}-\d\d-\d\d$/.test(r.day) && r.sentSeconds >= 0 && "billedSeconds" in r), JSON.stringify(mine.held?.sent));
   ok("  and says what's kept, and for how long", /three days/.test(mine.notHeld) && /three days/.test(mine.keptFor), `${mine.notHeld} | ${mine.keptFor}`);
   const quiet = await makeWallet();
   await audio(quiet, "song.mp3", { Range: "bytes=0-29999" });
