@@ -150,7 +150,11 @@ same("nothing owed is nothing sent", o.pieces(0), []);
   ok("  however often, over days", sent.length === 0, JSON.stringify(sent));
   store.set("amply.owed.v2", JSON.stringify({ [URL_A]: { micros: 5_000_000, seconds: 1, since: Date.now(), network: "mainnet" } }));
   for (let i = 0; i < 5; i++) await p.settleClaim(pair, A);
-  ok("  even with real listening owed: a dollar a day per artist, then a tap", sent.reduce((n, m) => n + m, 0) <= p.UNATTENDED_DAY_MICROS);
+  ok("  with real listening owed ($5): that much is paid, no more, without a tap", sent.reduce((n, m) => n + m, 0) === 5_000_000, JSON.stringify(sent));
+  sent.length = 0;
+  store.set("amply.owed.v2", JSON.stringify({ [URL_A]: { micros: 15_000_000, seconds: 1, since: Date.now() + 86_400_000, network: "mainnet" } }));
+  for (let i = 0; i < 10; i++) await p.settleClaim(pair, A, { now: Date.now() + 86_400_000 });
+  ok("  and with more owed than that ($15): $10 a day per artist, then a tap", sent.reduce((n, m) => n + m, 0) <= 10_000_000 && sent.length > 0, JSON.stringify(sent));
 }
 
 {

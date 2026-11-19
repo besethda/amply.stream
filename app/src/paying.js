@@ -361,8 +361,8 @@ export async function settleClaim(pair, entry, { explicit = false, max = null, b
   // The server's number is a stranger's, and this app relies on nothing an
   // artist's server says about what's owed. Without a tap, only as much of it
   // is paid as this device itself counted — what its ledger says is owed to
-  // them, which every payment takes down — and no more than a dollar a day to
-  // any one artist. Anything beyond that is the listener's call, shown both
+  // them, which every payment takes down — and no more than the daily limit
+  // ($10) to any one artist. Anything beyond that is the listener's call, shown both
   // figures. With a tap, never more than the amount the tap was for, however
   // the server's number has changed since.
   let more = false;
@@ -405,8 +405,10 @@ export async function settleClaim(pair, entry, { explicit = false, max = null, b
   return more ? { state: "ask", why: "claim", paid } : { state: "paid", paid };
 }
 
-/** The most a server's claim draws from one artist in a day without a tap. */
-export const UNATTENDED_DAY_MICROS = 1_000_000;
+/** The most a server's claim draws from one artist in a day without a tap:
+ *  the same as the daily limit on all automatic payments (spend.js), so a
+ *  heavy listener isn't asked every day. Never past what this device counted. */
+export const UNATTENDED_DAY_MICROS = DAILY_LIMIT;
 const AUTO = "amply.claimauto.v1";
 const dayOf = (now) => new Date(now).toISOString().slice(0, 10);
 function autoPaidToday(url, now) {
