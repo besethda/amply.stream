@@ -137,7 +137,9 @@ export function settled(ledger, url, micros) {
   const left = Math.max(0, had.micros - micros);
   const next = { ...ledger };
   if (left === 0) delete next[url];
-  else next[url] = { ...had, micros: left, seconds: 0, since: Date.now() };
+  // What's left is as old as it was: paying part of a debt doesn't put off
+  // when the rest is due.
+  else next[url] = { ...had, micros: left, seconds: 0 };
   write(LEDGER, next);
   return next;
 }

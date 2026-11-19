@@ -212,8 +212,10 @@ const MAX_SPANS = 64;
  * the pacing lets a player read ahead by then (PACE.restart + 1.25 x 30 s is
  * 40.5 s). So the song played again and skipped before it counts is never
  * billed again; played on, it's billed again in full. And a player picking a
- * paused song back up, which reads the start for its headers before it jumps
- * to where it was, isn't taken for a replay.
+ * paused song back up isn't taken for a replay: it reads the start for its
+ * headers before it jumps to where it was, or, paused in the song's first
+ * seconds, reads on from the start (Chromium does both), soon reaching audio
+ * not sent before. A replay is one that re-reads only what was sent already.
  */
 export const REPLAY_AFTER_S = 45;
 
@@ -348,12 +350,15 @@ export function metered(
             let fresh = newBytes(idOf(key), from, at);
             // From the file's first byte: perhaps a new play (the song again).
             // Perhaps not: a player picking a paused song back up reads the
-            // start for its headers, then jumps to where it was. So it counts
-            // as a new play only once it has read REPLAY_AFTER_S on from the
-            // start without stopping; then what it had sent of it counts too.
+            // start for its headers, then jumps to where it was; or, paused
+            // in its first seconds, just reads on from the start. So it's a
+            // new play only once it has read REPLAY_AFTER_S on from the start
+            // and every byte of that had been sent already (a resume soon
+            // reaches what hadn't); then what it had sent of it counts too.
             if (fromStart) {
               skipped += (at - from) - fresh;
-              if (at >= replayAt) {
+              if (fresh > 0) fromStart = false;   // new audio: carrying on, not again
+              else if (at >= replayAt) {
                 fromStart = false;
                 startOver(idOf(key));
                 newBytes(idOf(key), 0, at);
@@ -451,7 +456,9 @@ async function flush(t: Tally, deps: MeterDeps): Promise<void> {
     if (deps.tidy && Math.random() < 0.02) await deps.tidy();
   } catch {
     // No `served` table (metering is off there), or the database is busy:
-    // these seconds are lost, which errs the listener's way.
+    // these seconds are lost, which errs the listener's way. Not taken off
+    // what may still be counted today, though: they were never written.
+    t.written -= seconds;
   }
 }
 

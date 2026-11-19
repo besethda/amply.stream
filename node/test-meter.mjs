@@ -557,6 +557,26 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
   tick(6_000);
 }
 
+// ── a free song reported as played: nothing kept about the wallet ───────────
+{
+  const w = await makeWallet();
+  await played(w, 200, "f");
+  ok("a free song reported as played leaves no record of the wallet",
+    !sqlite.prepare("SELECT 1 FROM listeners WHERE pubkey = ?").get(w.address) && !rows(w).length);
+  await played(w, 200, "made-up");
+  ok("  nor does a made-up track", !sqlite.prepare("SELECT 1 FROM listeners WHERE pubkey = ?").get(w.address));
+}
+
+// ── paused in the first seconds, picked up again: Chromium reads on from 0 ──
+{
+  const w = await makeWallet();
+  await audio(w, "two.mp3", { Range: "bytes=0-36999" });     // paused 5 s in: 37 s had gone
+  tick(FLUSH.gapMs);
+  await audio(w, "two.mp3", { Range: "bytes=0-99999" });     // picked up: read on from the start
+  ok("paused in its first seconds and picked up from the start: not taken for a replay (100 s, not 137)",
+    near(row(w, "two.mp3").delivered, 100), JSON.stringify(row(w, "two.mp3")));
+}
+
 // ── a song started again and skipped before it counts: never billed again ───
 {
   const w = await makeWallet();

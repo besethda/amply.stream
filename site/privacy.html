@@ -33,7 +33,9 @@ you pay, and the payment network. Here is exactly what.</p>
 <p><strong>The short version</strong></p>
 <ul>
   <li><strong>Amply stores nothing about you.</strong> No account, no analytics, no cookies.</li>
-  <li><strong>The app keeps your library and listening on your phone.</strong> It never leaves it.</li>
+  <li><strong>The app keeps your library and listening history on your phone.</strong> Amply never
+  sees it. When a song finishes, the app tells that song's artist that it was played, and for how
+  long, so they can count plays.</li>
   <li><strong>An artist you pay sees a total for your wallet:</strong> how much you've listened and when
   you were last there. To bill fairly it also keeps, for three days only, how much of each song it
   sent you. You can erase it from the app at any time.</li>
@@ -88,12 +90,14 @@ touched your account on Amply's behalf since.</p>
 
 <details>
 <summary>The listener app</summary>
-<p>Everything stays on the device:</p>
+<p>Almost everything stays on the device:</p>
 
 <ul>
   <li><strong>Which artists you follow</strong>, stored locally, never transmitted to us.</li>
   <li><strong>What you listen to, and for how long</strong>, measured on your device so that
-  artists can be paid. It never leaves it.</li>
+  artists can be paid. Your history stays there. The one thing that leaves it: when a song
+  finishes, the app tells that artist's own server it was played and for how long, and nobody
+  else. For paid songs, that goes with your wallet address (see <em>Music you pay for</em>).</li>
   <li><strong>Your wallet key</strong>, made on your device and kept in the app's storage
   there. We never see it, cannot recover it, and could not spend from it. If you made the wallet
   with a passkey, the passkey can make the key again; if you chose a backup code, the code can.</li>

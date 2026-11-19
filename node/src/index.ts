@@ -1483,6 +1483,17 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     }
     const body = await jsonBody(request);
     const seconds = Math.max(0, Math.min(Math.round(Number(body?.seconds) || 0), MAX_REPORT_S));
+    // Only paid tracks are kept beside a wallet: a free one, played by
+    // anyone without one, leaves nothing (as the privacy notice says), however
+    // an app reports it. (An app from before says no track: counted as before.)
+    if (body?.track !== undefined) {
+      let manifest: unknown = null;
+      try { manifest = JSON.parse((await listenerText(env)) || "null"); } catch { /* unknown: below */ }
+      type Track = { id?: string; free?: boolean; needsWallet?: boolean };
+      const track = ((manifest as { releases?: { tracks?: Track[] }[] } | null)?.releases || [])
+        .flatMap((r) => r.tracks || []).find((t) => t?.id === String(body.track));
+      if (!track || !needsWallet(manifest, track)) return new Response(null, { status: 204, headers: noStore() });
+    }
     // A play for the record, never money (reportServed).
     if (!(await reportServed(env, who, String(body?.track ?? ""), seconds))) {
       await counted(env.DB, who, seconds, Date.now());

@@ -524,7 +524,10 @@ export function createPlayer(onChange, onListened, {
     },
     /** Back to the start of the song, or to the one before if we're near it. */
     prev() {
-      if (position() > 3 || pos <= 0) { api.seek(0); tell(); return; }
+      // The song again, from the top: a new play, as a replay is everywhere,
+      // so it counts once 30 s of it are heard, like any other (finish()
+      // closes the last one). Dragging the bar back stays the same play.
+      if (position() > 3 || pos <= 0) { finish(); api.seek(0); tell(); return; }
       load(pos - 1);
     },
     /** Straight to a song in Up next, by its place there; those before it are skipped. */

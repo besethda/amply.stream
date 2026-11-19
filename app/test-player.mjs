@@ -229,6 +229,16 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   at(11);
   ok("  paused an hour and resumed: the same play, counted on", Math.abs(sum("b") - 31) < 0.01, sum("b"));
 
+  // Previous, past the first seconds: the song again, a new play. Skipped
+  // before it counts, that start isn't counted.
+  counted.length = 0;
+  await start(tracks.slice(1, 3));
+  for (let t = 1; t <= 120; t++) at(t);
+  pl.prev(); a.currentTime = 0; on("seeked");
+  for (let t = 1; t <= 10; t++) at(t);
+  pl.next(); await tick();
+  ok("120 s, then Previous, 10 s, Next: 120 s counted, not 130", Math.abs(sum("b") - 120) < 0.01, JSON.stringify(counted));
+
   // A short song counts at half its length.
   const short = [{ id: "s", title: "S", url: "https://x/s.mp3", duration: 40 }];
   counted.length = 0;
