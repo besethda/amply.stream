@@ -21,7 +21,7 @@ import { agreeRate } from "./spend.js";
 import { claimOf, noteClaim, claimDue, wakeClaims, claimFromPass, passOwesDue } from "./owes.js";
 import {
   tokenFor, reportPlayed, reportHeard, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
-  manageSubscription, claimSubscription, reportPaid, takePassOwes,
+  manageSubscription, claimSubscription, reportPaid, resendPaid, takePassOwes,
 } from "./identify.js";
 import { perMinute, subscriptionOnly, plans as plansOf } from "../../spec/pricing.mjs";
 import { Icon } from "./icons.jsx";
@@ -568,6 +568,8 @@ export function App() {
     if (!pair) return;
     const tick = () => {
       const now = Date.now();
+      // Payments its server hasn't counted yet: told again (identify.js).
+      resendPaid(now).catch(() => {});
       const due = library.current.some((e) => claimDue(claimOf(e.url), now))
         || (now >= retryAt.current && library.current.some((e) => owing(e, loadLedger())?.due));
       if (due) settleRef.current?.();

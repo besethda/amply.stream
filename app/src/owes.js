@@ -187,6 +187,9 @@ export function dropCredit(signature) {
   const left = all.filter((c) => c.signature !== signature);
   if (left.length !== all.length) write(CREDITS, left);
 }
+/** Payments still waiting for the server to count them, with a signature to tell it by. */
+export const pendingCredits = (now = Date.now()) =>
+  read(CREDITS, []).filter((c) => now - c.at < CREDIT_MS && c.signature && !String(c.signature).startsWith("unsure:"));
 export const pendingCredit = (url, now = Date.now()) =>
   read(CREDITS, []).filter((c) => c.url === url && now - c.at < CREDIT_MS).reduce((n, c) => n + (c.micros || 0), 0);
 

@@ -263,8 +263,6 @@ export async function payArtist(pair, recipients, micros, { artistName = "This a
     const tx = await build(offer.feePayer);
     tx.feePayer = offer.feePayer;
     const answer = await sendThroughNode(conn, node, tx, pair);
-    // The node didn't send it, and said so: nothing went out.
-    if (!answer) throw paused();
     const sent = answer.signature;
     try {
       await confirmed(conn, sent);
@@ -306,7 +304,7 @@ export async function payArtist(pair, recipients, micros, { artistName = "This a
  * on never will: its blockhash has expired. Returns the micros that landed
  * (0 when nothing did), or null when it can't tell yet: then nothing is sent.
  */
-export async function landedSince(pair, recipients, { since, signature, now = Date.now() } = {}) {
+export async function landedSince(pair, recipients, { since, signature, upTo = 0, now = Date.now() } = {}) {
   const conn = rpc();
   try {
     if (signature) {
@@ -319,6 +317,8 @@ export async function landedSince(pair, recipients, { since, signature, now = Da
       return now - since > EXPIRED_MS ? 0 : null;
     }
     if (now - since <= EXPIRED_MS) return null;
+    // At most what that payment was (`upTo`): another device or tab paying
+    // the same artist meanwhile isn't this one landing.
     const sigs = await conn.getSignaturesForAddress(pair.publicKey, { limit: 25 }, "confirmed");
     let micros = 0;
     for (const s of sigs) {
@@ -326,7 +326,7 @@ export async function landedSince(pair, recipients, { since, signature, now = Da
       const tx = await conn.getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
       micros += await paidIn(tx, pair, recipients);
     }
-    return micros;
+    return upTo > 0 ? Math.min(micros, upTo) : micros;
   } catch {
     return null;
   }
@@ -402,10 +402,8 @@ export async function feeOffer(origin, { micros, owners = [], pair, item, tip = 
  * this payment, so a confirmed signature means this payment landed.
  *
  * Returns `{ signature, confirmed }` (whether the node saw it land before
- * answering), or null when the node said it isn't paying fees just
- * now (409): then nothing went out. Any other refusal throws, with the node's
- * reason; so does anything where the payment may have gone out, so the same
- * debt is never paid twice.
+ * answering). Anything else throws "unconfirmed": the node held a signed
+ * payment, so whatever it answers, it may have sent it (see below).
  */
 /** What an artist's node charges to pay the fee on a withdrawal, or null. */
 async function withdrawOffer(origin) {
@@ -457,22 +455,18 @@ async function sendThroughNode(conn, node, tx, pair) {
     if (!tx.verifySignatures()) throw new PaymentError("unconfirmed", "The artist's server gave an answer that doesn't match this payment. Nothing more will be sent for now.");
     return { signature, confirmed: body?.confirmed === true };
   }
-  // Only the node's own refusals are safe to work around. Each is a JSON
-  // error, and each comes before anything is sent, or after a payment failed
-  // on the network having taken nothing (see node/src/settle.ts). Anything
-  // else (a crash page, a bare 5xx) may have come after sending, so it's
-  // treated as "may have gone": paying again could pay twice.
-  const refused = typeof body?.error === "string" && res.status >= 400 && res.status < 600 && res.status !== 500;
-  if (!refused) {
-    throw new PaymentError("unconfirmed",
-      "The artist's server had a problem part-way through. The payment may still go through, so it won't be sent again for now.");
-  }
-  if (res.status === 422 && /enough in your wallet/.test(body.error)) {
-    throw new PaymentError("funds", "There isn't enough in your wallet to pay this. Nothing was sent.");
-  }
-  // Only this means their fees account can't pay: the node isn't offering.
-  if (res.status === 409) return null;
-  // Anything else the node turned away (busy, a limit, the network) is said
-  // as it is. Nothing was sent, and what's owed is tried again later.
-  throw new PaymentError("refused", `The artist's server didn't take this payment: ${String(body.error).slice(0, 200)}. Nothing was sent.`);
+  // Once the node holds the signed payment, nothing it says is proof it
+  // wasn't sent: it could send it and answer "busy", again and again, and
+  // be paid the same debt each time. So every answer but a signature is
+  // "unconfirmed": nothing more goes out until the payment's blockhash has
+  // expired and the wallet's own history shows whether it landed
+  // (paying.js lookAgain, pay.js landedSince). An honest refusal costs a
+  // couple of minutes' wait; a dishonest one gains nothing.
+  const said = typeof body?.error === "string" ? String(body.error).slice(0, 200) : "";
+  const e = new PaymentError("unconfirmed", said
+    ? `The artist's server turned this down (${said}). In case it went out anyway, nothing more is sent until your wallet shows, in a couple of minutes.`
+    : "The artist's server had a problem part-way through. The payment may still go through, so it won't be sent again for now.");
+  e.refused = said || null;
+  e.status = res.status;
+  throw e;
 }

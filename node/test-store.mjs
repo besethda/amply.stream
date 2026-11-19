@@ -191,8 +191,11 @@ ok("the listeners list is ordered by how much they listened",
   ok("  turned on, it notes since when, and keeps that when said again", on.since === 1000 && (await setAutoBlock(DB, true, 5000)).since === 1000);
   ok("  turned off, it forgets it", (await setAutoBlock(DB, false)).since === null && !(await autoBlockSetting(DB)).enabled);
   await forget(DB, P);
-  ok("forgetting a wallet forgets what it paid, and its payments' references",
-    (await paidOf(DB, P)) === 0 && !db.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(P));
+  ok("forgetting a wallet that has paid keeps only its money totals, and takes it off its payments' references",
+    (await paidOf(DB, P)) === 90_000 && !db.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(P)
+    && db.prepare("SELECT COUNT(*) AS n FROM paid_sigs WHERE pubkey = ''").get().n === 2 && (await listener(DB, P)) === null);
+  await pruneStale(DB, Date.now() + 366 * 86_400_000);
+  ok("  the totals go a year after its last payment", (await paidOf(DB, P)) === 0);
 }
 
 // ── plays per day, for the editor's "free streams" bar ──────────────────────

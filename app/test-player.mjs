@@ -454,5 +454,33 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   slow = 0;
 }
 
+// ── paused from the lock screen: rests too, just not at once ────────────────
+{
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const docHandlers = [];
+  globalThis.document = { visibilityState: "hidden", addEventListener: (e, f) => docHandlers.push(f) };
+  let st = {};
+  const pl = createPlayer((x) => { st = x; }, () => {}, { restAfter: 5, restHidden: 40, resolve: async (t) => `${t.url}?h` });
+  const a = pl.element();
+  const on = (e) => (a.handlers[e] || []).forEach((f) => f());
+  pl.play(tracks.slice(0, 2), 0);
+  await tick();
+  a.currentSrc = a.src; on("play"); on("playing");
+  pl.toggle(); on("pause");
+  await wait(20);
+  ok("paused in the background: not resting at once (the lock screen keeps its controls)", !pl.resting());
+  await wait(40);
+  ok("  but after a while there, it rests: the download stops", pl.resting() && a.src === "", JSON.stringify({ r: pl.resting(), src: a.src }));
+  // Paused in the background, then back in front: rests as in front.
+  pl.toggle(); await wait(10); a.currentSrc = a.src; on("play"); on("playing");
+  pl.toggle(); on("pause");
+  await wait(10);
+  globalThis.document.visibilityState = "visible";
+  docHandlers.forEach((f) => f());
+  await wait(15);
+  ok("  paused there, then opened: rests soon, as in front", pl.resting());
+  delete globalThis.document;
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

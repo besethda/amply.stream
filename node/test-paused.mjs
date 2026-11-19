@@ -116,7 +116,7 @@ const kept = sqlite.prepare("SELECT * FROM listeners WHERE pubkey = ?").get(wall
 ok("forgotten while owing 2c: the listening goes, what's owed stays", owed().micros === 20_000 && kept?.plays === 0 && kept?.seconds === 0 && kept?.first_seen === 0, JSON.stringify([owed(), kept]));
 sqlite.prepare("INSERT INTO paid (pubkey, micros) VALUES (?, 20000) ON CONFLICT(pubkey) DO UPDATE SET micros = 20000").run(wallet);
 await forget(DB, wallet);
-ok("  paid up and forgotten again: the cost goes with the rest", owed().micros === 0 && !sqlite.prepare("SELECT 1 FROM owed WHERE pubkey = ?").get(wallet) && !sqlite.prepare("SELECT 1 FROM listeners WHERE pubkey = ?").get(wallet));
+ok("  paid up and forgotten again: the listening goes, only the two money totals stay (no minutes)", owed().micros === 20_000 && owed().seconds === 0 && !sqlite.prepare("SELECT 1 FROM listeners WHERE pubkey = ?").get(wallet));
 
 // ── just below the line ──
 later(6);
@@ -361,7 +361,7 @@ rpcDown = false;
   const fetchAudio = (path, headers = {}) => worker.fetch(new Request(`${ORIGIN}${path}`, { headers }), audioEnv);
   const token = await issueToken(DB, wallet);
   const paid = await fetchAudio(`/audio/song.mp3?t=${encodeURIComponent(token)}`);
-  ok("a paid song is served to a listener with a pass, privately", paid.status === 200 && paid.headers.get("Cache-Control") === "private, max-age=31536000, immutable", `${paid.status} ${paid.headers.get("Cache-Control")}`);
+  ok("a paid song is served to a listener with a pass, privately", paid.status === 200 && paid.headers.get("Cache-Control") === "private, no-store", `${paid.status} ${paid.headers.get("Cache-Control")}`);
   const ranged = await fetchAudio(`/audio/song.mp3?t=${encodeURIComponent(token)}`, { Range: "bytes=0-99" });
   ok("  ranges and ETags as before", ranged.status === 206 && ranged.headers.get("Content-Range") === "bytes 0-99/1000" && ranged.headers.get("ETag") === '"e1"' && /^private/.test(ranged.headers.get("Cache-Control")));
   const free = await fetchAudio("/audio/free.mp3");

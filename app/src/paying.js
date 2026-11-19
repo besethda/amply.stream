@@ -254,7 +254,7 @@ async function lookAgain(pair, entry, recipients, pay, { report = noReport } = {
   if (!unsure) return { landed: 0 };
   if (Date.now() - (unsure.looked || 0) < 30_000) return { wait: true };
   noteUnsure(entry.url, { ...unsure, looked: Date.now() });
-  const landed = await pay.landedSince(pair, recipients, { since: unsure.at, signature: unsure.signature });
+  const landed = await pay.landedSince(pair, recipients, { since: unsure.at, signature: unsure.signature, upTo: unsure.micros });
   if (landed === null) return { wait: true };          // can't tell yet: wait
   forgetUnsure(entry.url);
   if (landed > 0) {

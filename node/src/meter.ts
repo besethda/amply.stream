@@ -191,7 +191,9 @@ const idOf = (k: ServedKey) => `${k.pubkey}|${k.track}|${k.day}`;
  * track, day), as sorted spans [from, to). A player that stops its download
  * while paused (app/src/player.js) asks again from where it was on play, and
  * the bytes it had read ahead come again: counted once, here. So do bytes
- * fetched again after seeking back. Kept apart from the tallies, which an
+ * fetched again after seeking back within a play. A request from the file's
+ * first byte that reads on past REPLAY_AFTER_S is a new play (the song
+ * again), and counts afresh (startOver). Kept apart from the tallies, which an
  * erase drops: the bytes were still sent.
  *
  * In this copy's memory only: another copy of the Worker counts what it
@@ -201,6 +203,12 @@ const idOf = (k: ServedKey) => `${k.pubkey}|${k.track}|${k.day}`;
  */
 const covered = new Map<string, number[][]>();
 const MAX_SPANS = 64;
+
+/** How far a request from a file's start reads before it's a new play. */
+export const REPLAY_AFTER_S = 10;
+
+/** A new play of this file from its start: nothing of it counted yet. */
+function startOver(id: string): void { covered.delete(id); }
 
 /** How many of the bytes [from, to) of this file haven't been counted here
  *  yet for this key; and they are now. */
@@ -303,6 +311,8 @@ export function metered(
   let first = true;
   // Where in the file the next piece is: bytes counted already aren't again.
   let at = Number.isFinite(t.start) && (t.start as number) >= 0 ? (t.start as number) : 0;
+  let fromStart = at === 0, skipped = 0;
+  const replayAt = REPLAY_AFTER_S * (t.duration && t.duration > 0 && t.size > 0 ? t.size / t.duration : FALLBACK_BYTES_PER_SECOND);
   const end = () => { ended = true; };
   const reader = body.getReader();
   const counting = new ReadableStream<Uint8Array>({
@@ -325,7 +335,21 @@ export function metered(
         at += value.byteLength;
         if (perMinute !== 0) {
           try {
-            const fresh = newBytes(idOf(key), from, at);
+            let fresh = newBytes(idOf(key), from, at);
+            // From the file's first byte: perhaps a new play (the song again).
+            // Perhaps not: a player picking a paused song back up reads the
+            // start for its headers, then jumps to where it was. So it counts
+            // as a new play only once it has read REPLAY_AFTER_S on from the
+            // start without stopping; then what it had sent of it counts too.
+            if (fromStart) {
+              skipped += (at - from) - fresh;
+              if (at >= replayAt) {
+                fromStart = false;
+                startOver(idOf(key));
+                newBytes(idOf(key), 0, at);
+                fresh += skipped;
+              }
+            }
             add(key, secondsOf(fresh, t.size, t.duration), trackSeconds, deps, Date.now(), perMinute);
           } catch { /* never the listener's problem */ }
         }
@@ -421,9 +445,24 @@ async function flush(t: Tally, deps: MeterDeps): Promise<void> {
   }
 }
 
-/** A wallet asked to be forgotten, or was removed: nothing counted for it
- *  here is written afterwards (another copy of the Worker may still write
- *  the few seconds it holds, which the next prune or erase removes). */
+/**
+ * A wallet asked to be forgotten, or was removed: what this copy has counted
+ * for it and not yet written is written now, before the erase, and its
+ * tallies dropped. Written, not dropped: the audio was sent, and the bytes
+ * stay counted (newBytes), so dropping them would let a wallet erase every
+ * few seconds and never be billed. Another copy of the Worker writes what it
+ * holds on its own schedule.
+ */
+export async function flushTallies(pubkey: string, deps: MeterDeps): Promise<void> {
+  const mine = [...tallies.entries()].filter(([, t]) => t.key.pubkey === pubkey);
+  for (const [id, t] of mine) {
+    tallies.delete(id);
+    await flush(t, deps);
+  }
+}
+
+/** The artist removed a wallet's record: what this copy counted for it and
+ *  hadn't written is dropped, as theirs to give up. */
 export function forgetTallies(pubkey: string): void {
   for (const [id, t] of tallies) if (t.key.pubkey === pubkey) { t.pending = 0; tallies.delete(id); }
 }

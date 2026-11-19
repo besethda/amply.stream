@@ -361,14 +361,27 @@ same("nothing owed is nothing sent", o.pieces(0), []);
   is("  which then takes it off what's held back", o.pendingCredit(URL_A), 0);
   await id.reportPaid(ORIGIN_A, "sigX");
   is("  and only once", posts.length, 1);
-  status = 429;
+  status = 422;
   await id.reportPaid(ORIGIN_A, "sigY"); await id.reportPaid(ORIGIN_A, "sigY");
-  is("a refusal isn't asked again either", posts.length, 2);
+  is("a refusal for good (422) isn't asked again", posts.length, 2);
+  // Busy, or still waiting for the network: asked again, and the credit stays.
+  for (const busy of [429, 202, 502]) {
+    status = busy;
+    const sig = `sigB${busy}`;
+    o.noteCredit(URL_A, sig, 5_000);
+    const n = posts.length;
+    await id.reportPaid(ORIGIN_A, sig);
+    await id.resendPaid(Date.now() + 3 * 60_000);
+    ok(`  answered ${busy}: asked again later, and still held back meanwhile`, posts.length >= n + 2 && o.pendingCredit(URL_A) >= 5_000, `${posts.length - n} ${o.pendingCredit(URL_A)}`);
+    status = 200;
+    await id.resendPaid(Date.now() + 6 * 60_000);
+    ok(`  then counted: held back no more`, !o.pendingCredits().some((c) => c.signature === sig));
+  }
   globalThis.fetch = async () => { throw new TypeError("Failed to fetch"); };
   await id.reportPaid(ORIGIN_A, "sigZ");
   globalThis.fetch = async (url, init) => { posts.push([url, init.body]); return new Response("{}"); };
   await id.reportPaid(ORIGIN_A, "sigZ");
-  is("one that never arrived is sent when it can be", posts.length, 3);
+  ok("one that never arrived is sent when it can be", posts.some(([, b]) => b.includes("sigZ")));
 }
 
 

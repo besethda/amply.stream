@@ -46,6 +46,8 @@ const STUCK_S = 2;          // clock still this long while playing: buffering
 const RECOVER_S = 5;        // this long: fetch the song again from where it was
 const RETRY_MAX_S = 10;     // and again, at most this far apart: a signal that comes back is not announced
 const REST_AFTER_MS = 1_500; // paused this long: stop downloading (see `rest`)
+/** In the background (the lock screen), longer: see `rest`. */
+const REST_HIDDEN_MS = 30_000;
 
 export const REPEAT = { OFF: 0, ALL: 1, ONE: 2 };
 
@@ -72,6 +74,7 @@ export function createPlayer(onChange, onListened, {
   clock = () => Date.now(),
   /** Milliseconds paused before the download is stopped (rest). */
   restAfter = REST_AFTER_MS,
+  restHidden = REST_HIDDEN_MS,
 } = {}) {
   const audio = new Audio();
   audio.preload = "auto";
@@ -98,6 +101,7 @@ export function createPlayer(onChange, onListened, {
   let seekTo = null;        // where to go once the next source has loaded (wake, recover)
   let loading = 0;          // guards against a slow resolve landing out of order
   let wanted = false;       // the listener means it to be playing
+  let pausedAt = 0;         // when it was last paused (for rest)
   let recovering = false;   // fetching the song again after losing signal
   let seen = { t: -1, at: 0 };   // the clock, and when it last moved
   let tries = 0, nextTry = 0;
@@ -215,6 +219,7 @@ export function createPlayer(onChange, onListened, {
     });
   }
   function armRest() {
+    pausedAt = clock();
     clearTimeout(restTimer);
     restTimer = setTimeout(rest, restAfter);
   }
@@ -310,6 +315,14 @@ export function createPlayer(onChange, onListened, {
     if (!wanted && !loadingNow) armRest();
   });
   audio.addEventListener("play", () => { clearTimeout(restTimer); restTimer = 0; });
+  // Back in front, still paused and not yet resting: rest soon, as in front.
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible" || !restTimer || !audio.paused || wanted) return;
+      clearTimeout(restTimer);
+      restTimer = setTimeout(rest, restAfter);
+    });
+  }
 
   /** Fetch the song again and carry on from where it got to. */
   async function recover() {
@@ -345,9 +358,15 @@ export function createPlayer(onChange, onListened, {
   function rest() {
     restTimer = 0;
     if (!audio.paused || wanted || resting || waking || loadingNow || !now()) return;
-    // Not while the app is in the background: an iPhone may take the lock
-    // screen's controls away from a player with nothing loaded.
-    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    // In the background, not at once: an iPhone may take the lock screen's
+    // controls away from a player with nothing loaded, and a pause there is
+    // often a short one. But not never, either: a browser goes on reading a
+    // paused song to its end, and its server bills what it sends. So after
+    // restHidden paused there, it rests all the same.
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      const left = restHidden - (clock() - pausedAt);
+      if (left > 0) { restTimer = setTimeout(rest, left); return; }
+    }
     const src = audio.currentSrc || audio.src || "";
     if (!src || src.startsWith("blob:")) return;
     // Where it is: a seek still waiting for the source to load counts.

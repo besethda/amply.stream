@@ -376,9 +376,10 @@ wallet that plays their paid tracks:</p>
   <li>when you first and last listened;</li>
   <li>whether ${name} has stopped serving that wallet;</li>
   <li>for the last three days only: how many seconds of each paid track it sent to your wallet
-  on each day, and how many your app said you played. Listening is charged by the larger of the
-  two (allowing for what a player loads ahead and doesn't play), so it is paid for even when an
-  app doesn't report it. These are deleted automatically after three days.</li>
+  on each day, and how many your app said you played. Listening is charged from what was sent
+  alone, less an allowance for what a player loads ahead and doesn't play, so it is paid for
+  whatever an app reports. These are deleted automatically after three days (when the server
+  is next used, which, while you're listening, is within the hour).</li>
 </ul>
 <p><strong>What is not kept:</strong> a history of which tracks you played, or when you played
 any one of them: beyond those three days of what was sent, by the day and never the time, this
@@ -437,11 +438,14 @@ contacting them.</p>
 <p>If you owe ${name} for listening, erasing removes how much and how often you listened, but
 keeps what you owe, what you've paid, the references of those payments and when you were last
 there, until it's settled, as any seller keeps an unpaid bill. Once it's paid, erasing again
-removes that too.</p>
-<p>Whatever you owe, two things outlive erasing for a short while, so that erasing can't be used
-to be charged less: the last three days of what was sent to your wallet, until they're deleted
-as above; and, for a week, the references of payments already counted, with your wallet taken
-off them, so the same payment can't be counted twice.${subs ? " A subscription's record stays while it runs (above)." : ""}</p>
+removes that too, but for the two totals below.</p>
+<p>Whatever you owe, a few things outlive erasing, so that erasing can't be used to be charged
+less: the last three days of what was sent to your wallet, until they're deleted as above; for a
+week, the references of payments already counted, with your wallet taken off them, so the same
+payment can't be counted twice; and, if you have paid anything, two totals (what your listening
+cost and what you paid, no minutes or dates) for a year after your last payment, so that payments
+already counted aren't set against listening after you come back. Payments are public on the
+Solana network anyway.${subs ? " A subscription's record stays while it runs (above)." : ""}</p>
 ${contactLine}
 <p>You can also complain to the data protection authority where you live.</p>
 ` : `

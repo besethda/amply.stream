@@ -441,14 +441,32 @@ const report = async (signature, ip = nextIp()) => {
   ok("  so erasing isn't a way not to pay: still auto-blocked, told what it owes", (await passFor(w)).status === 403);
   await recordPaid(DB, w.address, 2_000_000, newSig());
   const again = await listen("/forget", await signed(w));
-  ok("  paid up and erased again: everything goes, money record and all", again.status === 204 && (await listener(DB, w.address)) === null
-    && !sqlite.prepare("SELECT 1 FROM paid WHERE pubkey = ?").get(w.address) && !sqlite.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(w.address));
+  ok("  paid up and erased again: the listening goes, and the payments' references lose the wallet", again.status === 204 && (await listener(DB, w.address)) === null
+    && !sqlite.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(w.address));
+  ok("  but the two money totals stay, so old payments can't be set against new listening",
+    (await paidOf(DB, w.address)) === 3_000_000 && sqlite.prepare("SELECT micros, seconds FROM owed WHERE pubkey = ?").get(w.address)?.micros === 3_000_000);
+  // The editor merges the chain's all-time total: back, listening $1, it's still owed.
+  known(w, { owed: 0 });
+  sqlite.prepare("UPDATE owed SET micros = 4_000_000 WHERE pubkey = ?").run(w.address);
+  await mergePaid(DB, { [w.address]: 3_000_000 });
+  ok("  back after erasing, with the chain's all-time total merged in: new listening is still owed ($1)",
+    sqlite.prepare("SELECT micros FROM owed WHERE pubkey = ?").get(w.address).micros - (await paidOf(DB, w.address)) === 1_000_000);
 
   const kept = await makeWallet();
   known(kept, { owed: 3_000_000, blocked: 1 });
   await recordPaid(DB, kept.address, 3_000_000, newSig());
   await forget(DB, kept.address);
-  ok("a blocked wallet, paid up, erased keeps only its block: what it paid goes too", (await listener(DB, kept.address))?.blocked === 1 && (await paidOf(DB, kept.address)) === 0);
+  ok("a blocked wallet, paid up, erased keeps its block and its money totals, nothing else", (await listener(DB, kept.address))?.blocked === 1 && (await listener(DB, kept.address))?.seconds === 0 && (await paidOf(DB, kept.address)) === 3_000_000);
+
+  // A signed request, seen in passing, can't be sent again.
+  {
+    const r = await makeWallet();
+    known(r, { owed: 0 });
+    const body = await signed(r);
+    const first = await listen("/mine", body);
+    const again = await listen("/mine", body);
+    ok("a signed request to see a record works once, and not again if replayed", first.status === 200 && again.status === 403, `${first.status} ${again.status}`);
+  }
 
   // A payment counted, the wallet erased (paid up), listening again: the same
   // payment reported again isn't counted a second time.
@@ -461,7 +479,7 @@ const report = async (signature, ip = nextIp()) => {
     sqlite.prepare("SELECT pubkey, micros FROM paid_sigs WHERE sig = ?").get(sig)?.pubkey === "" && (await listener(DB, replay.address)) === null);
   known(replay, { owed: 2_000_000 });
   ok("  listening again, the same payment reported again isn't counted twice",
-    !(await recordPaid(DB, replay.address, 1_000_000, sig)) && (await paidOf(DB, replay.address)) === 0);
+    !(await recordPaid(DB, replay.address, 1_000_000, sig)) && (await paidOf(DB, replay.address)) === 1_000_000);
   await pruneStale(DB, Date.now() + 9 * DAY);
   ok("  and after a week and a day, the reference goes too", !sqlite.prepare("SELECT 1 FROM paid_sigs WHERE sig = ?").get(sig));
 
@@ -484,6 +502,7 @@ const report = async (signature, ip = nextIp()) => {
   const stale = await makeWallet();
   known(stale, { owed: 3_000_000, lastSeen: Date.now() - 400 * DAY });
   await recordPaid(DB, stale.address, 1_000_000, newSig());
+  sqlite.prepare("UPDATE paid SET last = ? WHERE pubkey = ?").run(Date.now() - 400 * DAY, stale.address);   // paid then too
   await pruneStale(DB);
   ok("a year unheard: what it paid is deleted with the rest", (await listener(DB, stale.address)) === null && (await paidOf(DB, stale.address)) === 0
     && !sqlite.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(stale.address));
