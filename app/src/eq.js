@@ -27,14 +27,8 @@ export const PRESETS = [
   { id: "vocal", name: "Vocal", gains: [-2, -1.5, 1, 3.5, 3, 1, -0.5] },
   { id: "loud", name: "Loudness", gains: [5, 3, 0, -1, 0, 3, 4.5] },
   { id: "rock", name: "Rock", gains: [4, 2.5, -1.5, -1, 1.5, 3.5, 4] },
-  { id: "pop", name: "Pop", gains: [-1, 1.5, 3, 3.5, 2, 0, -1] },
-  { id: "electronic", name: "Electronic", gains: [5, 3.5, 0, -1.5, 1, 3, 4.5] },
-  { id: "hiphop", name: "Hip-hop", gains: [5.5, 4, 1, -1, 0.5, 1.5, 2] },
-  { id: "jazz", name: "Jazz", gains: [3, 1.5, 0.5, 1.5, -1, 1.5, 3] },
-  { id: "classical", name: "Classical", gains: [3.5, 2, 0, -0.5, 0, 2, 3.5] },
   { id: "acoustic", name: "Acoustic", gains: [3, 2, 0.5, 1, 2, 2.5, 2] },
   { id: "night", name: "Late night", gains: [-3, -1, 1, 2, 1, -1, -3] },
-  { id: "speakers", name: "Small speakers", gains: [-4, 3.5, 2.5, 1, 0.5, 1, 0] },
 ];
 
 const clamp = (g) => Math.max(-RANGE, Math.min(RANGE, Math.round(Number(g) * 2) / 2 || 0));

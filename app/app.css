@@ -1359,3 +1359,41 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 .desk .coll-thead .d { margin-right: 38px; }
 .desk .artist .release-open .mono-dim { font-size: 12px; color: var(--ink2); }
 .desk .d-exp-cover { align-self: center; }
+
+/* ── round 5 ── */
+/* EQ presets: a short list, two side by side across the card (four on desktop). */
+.eq-presets, .desk .eq-presets {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 6px 0 0; padding: 0;
+  overflow: visible; -webkit-mask-image: none; mask-image: none;
+}
+.desk .eq-presets { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.eq-preset { justify-content: flex-start; min-width: 0; padding: 9px 12px; }
+
+/* Recently played tiles: the art inset by the same distance on every side,
+   its corners rounded to match the tile's. */
+.desk .recent-list .track, .desk .recent-list .track-slide { border-radius: 12px; }
+.desk .recent-list .track-main { padding: 6px 14px 6px 6px; min-height: 0; gap: 14px; }
+.desk .recent-list .track-main > .art { width: 52px; height: 52px; border-radius: 6px; }
+
+/* Desktop buttons as on the phone: lit, with their shadow, and no growing on hover. */
+.d-round { box-shadow: var(--lit-quiet); transition: background-color .12s ease, box-shadow .15s ease; }
+.d-round:hover:not(:disabled) { transform: none; }
+.d-round:active:not(:disabled) { box-shadow: var(--lit-quiet-down); }
+.d-big-play, .desk .card-play {
+  --glow: var(--orange); --glow-a: 60%; --glow-size: 8px 24px -6px;
+  background-image: var(--lit-sheen);
+  box-shadow: inset 0 1px 0 var(--lit-hi), inset 0 -2px 0 var(--lit-lo), 0 1px 2px var(--lit-drop),
+              0 var(--glow-size) color-mix(in srgb, var(--glow) var(--glow-a), transparent);
+}
+.d-big-play { transition: box-shadow .15s ease; }
+.d-big-play:hover, .desk .card-play:hover { transform: none !important; --glow-a: 80%; }
+.desk .card-art:hover .card-play:hover { transform: none !important; }
+.d-play:hover:not(:disabled) { transform: none; }
+.desk .seg:not(.on) { box-shadow: var(--lit-quiet); }
+.desk .seg.on {
+  --glow: var(--ink); --glow-a: 25%; --glow-size: 5px 14px -4px;
+  background-image: var(--lit-sheen);
+  box-shadow: inset 0 1px 0 var(--lit-hi), inset 0 -2px 0 var(--lit-lo), 0 1px 2px var(--lit-drop),
+              0 var(--glow-size) color-mix(in srgb, var(--glow) var(--glow-a), transparent);
+}
+
