@@ -21,6 +21,7 @@ const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i >= 0
 const flag = (name) => argv.includes(`--${name}`);
 const WIDTH = +opt("width", 1440), HEIGHT = +opt("height", 900);
 const THEME = opt("theme", "dark") === "light" ? "light" : "dark";
+const WAVE = opt("wave", "");   // ribbons | boxes | hills: how the music is drawn
 const OUT = opt("out", join(HERE, "shots"));
 const SCEN = opt("scenario", "all").split(",");
 const TIMEOUT = +opt("timeout", 25000);
@@ -146,11 +147,17 @@ const SCENARIOS = {
   "library-songs": async (page) => { await S.goHome(page); await S.tab(page, "Library"); await page.locator(".seg", { hasText: "Songs" }).first().click(); await page.waitForTimeout(400); },
   "library-albums": async (page) => { await S.goHome(page); await S.tab(page, "Library"); await page.locator(".seg", { hasText: "Albums" }).first().click(); await page.waitForTimeout(400); },
   "library-artists": async (page) => { await S.goHome(page); await S.tab(page, "Library"); await page.locator(".seg", { hasText: "Artists" }).first().click(); await page.waitForTimeout(400); },
-  you: async (page) => { await S.goHome(page); await S.tab(page, "You"); await clickText(page, "Wallet", { exact: true }).catch(() => {}); },
+  you: async (page) => { await S.goHome(page); await S.tab(page, "You"); },
   general: async (page) => { await S.goHome(page); await S.tab(page, "You"); await clickText(page, "General", { exact: true }); await clickText(page, "Bass boost", { exact: true }); await page.waitForTimeout(300); },
   artist: async (page) => { await toArtist(page); },
-  // A throwaway test wallet and a few receipts, then You → To spend → Payments.
+  // A throwaway test wallet and a few receipts, then You → To spend's arrow → Payments.
   payments: async (page) => {
+    await SCENARIOS["you-wallet"](page);
+    await page.locator(".bal-history").first().click({ timeout: 6000 });
+    await page.waitForTimeout(500);
+  },
+  // You, with that wallet: the balance card.
+  "you-wallet": async (page) => {
     await S.goHome(page);
     await page.evaluate((key) => {
       localStorage.setItem("amply.wallet.v1", key);
@@ -166,10 +173,17 @@ const SCENARIOS = {
       localStorage.setItem("amply.receipts.v1", JSON.stringify(r));
     }, '[175,195,238,99,208,182,48,248,232,19,232,80,184,116,188,216,13,242,25,164,246,59,47,80,74,34,239,24,169,3,24,218,37,189,238,44,40,19,119,175,148,175,60,170,158,189,159,135,254,46,90,147,252,29,225,222,222,229,112,67,224,36,87,56]');
     await page.reload(); await page.waitForTimeout(1500);
-    await S.tab(page, "You"); await clickText(page, "Wallet", { exact: true }).catch(() => {});
+    await S.tab(page, "You");
     await page.waitForTimeout(800);
-    await page.locator(".bal-open").first().click({ timeout: 6000 });
-    await page.waitForTimeout(500);
+  },
+  // General, with that wallet: its key, how paying works, removing it.
+  "general-wallet": async (page) => {
+    await SCENARIOS["you-wallet"](page);
+    await clickText(page, "General", { exact: true });
+    await page.waitForTimeout(300);
+    await page.evaluate(() => document.querySelector(".you.sub")?.closest("main, .scroll, body")?.scrollTo?.(0, 99999) || window.scrollTo(0, 99999));
+    await page.mouse.wheel(0, 3000);
+    await page.waitForTimeout(400);
   },
   // Not a picture: checks the EQ really carries sound (prints a line).
   "eq-check": async (page) => {
@@ -186,6 +200,17 @@ const SCENARIOS = {
     await toAlbum(page); await S.playFirstTrack(page);
     if (await page.locator(".mini").count()) await page.locator(".mini").first().click({ timeout: 6000 });
     await page.waitForTimeout(2500);
+  },
+  // Prints where Now playing's parts sit (desktop): for checking the layout.
+  "np-layout": async (page) => {
+    await SCENARIOS["nowplaying-full"](page);
+    console.log(await page.evaluate(() => {
+      const box = (e) => { const r = e.getBoundingClientRect(); return `${Math.round(r.top)}–${Math.round(r.bottom)}`; };
+      const ex = document.querySelector(".d-expanded");
+      return [`expanded ${box(ex)} rows ${getComputedStyle(ex).gridTemplateRows}`,
+        ...[...ex.children].map((c) => `  ${c.className} ${box(c)} ${getComputedStyle(c).position}`),
+        `cover ${box(document.querySelector(".d-exp-cover"))}`, `canvas ${box(document.querySelector(".d-exp-wave canvas"))}`].join("\n");
+    }));
   },
   // Desktop only: the expanded full-window player ("Open now playing" button in the player bar); on mobile same as nowplaying.
   "nowplaying-full": async (page) => {
@@ -207,7 +232,7 @@ for (const name of names) {
   if (!SCENARIOS[name]) { console.log(`unknown scenario ${name}; have: ${Object.keys(SCENARIOS).join(", ")}`); failures++; continue; }
   const ctx = await browser.newContext({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1, serviceWorkers: "block", colorScheme: THEME });
   const seed = seedData();
-  await ctx.addInitScript(([seed, theme]) => {
+  await ctx.addInitScript(([seed, theme, wave]) => {
     try {
       if (localStorage.getItem("__preview_seeded")) return;
       localStorage.setItem("amply.library.v1", JSON.stringify(seed.library));
@@ -215,9 +240,10 @@ for (const name of names) {
       localStorage.setItem("amply.playlists.v1", JSON.stringify(seed.playlists));
       localStorage.setItem("amply.recent.v1", JSON.stringify(seed.recent));
       localStorage.setItem("amply.theme", JSON.stringify(theme));
+      if (wave) localStorage.setItem("amply.wave", JSON.stringify(wave));
       localStorage.setItem("__preview_seeded", "1");
     } catch {}
-  }, [seed, THEME]);
+  }, [seed, THEME, WAVE]);
   await ctx.route("**/*", (route) => mockHandler(route, BASE).catch(() => route.abort().catch(() => {})));
   const page = await ctx.newPage();
   page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) console.log(`[console.error ${name}] ${m.text().slice(0, 300)}`); });
