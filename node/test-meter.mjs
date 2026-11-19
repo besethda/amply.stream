@@ -189,6 +189,9 @@ const SLACK_S = slackFor(LEN);   // 84 s for a four-minute song
 // here is what's counted, not how fast. The pacing tests move it themselves.
 paceHooks.now = () => clock;
 paceHooks.sleep = async () => {};
+// A write that waits out the gap waits a moment here, not half a minute, so
+// what comes in meanwhile still shares it.
+paceHooks.gap = () => new Promise((r) => setTimeout(r, 30));
 
 ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds === 70 && SLACK.share === 0.35 && SLACK_S === 84 && slackFor(100) === 70);
 
@@ -461,8 +464,8 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
   }
   await settled();
   const n = flushes - before;
-  // Ten seconds of them, a write at most every FLUSH.gapMs.
-  const bound = Math.ceil(10_000 / FLUSH.gapMs) + 3;
+  // A write at most every gap (shortened here): a handful, not 200.
+  const bound = 10;
   ok(`200 tiny ranges: a bounded number of writes (${n}, at most ${bound})`, n > 0 && n <= bound, `${n}`);
   ok("  and what they add up to, to the cap, is counted", row(w).delivered === DELIVERED_CAP * LEN, JSON.stringify(row(w)));
   const more = flushes;

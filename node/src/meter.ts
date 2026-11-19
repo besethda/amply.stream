@@ -92,6 +92,8 @@ export const PACE = { burst: 30, restart: 3, rate: 1.25 } as const;
 export const paceHooks = {
   now: () => Date.now(),
   sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
+  /** The wait before a write that came due inside FLUSH.gapMs. */
+  gap: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
 };
 
 interface Bucket { tokens: number; at: number; queue: Promise<void> }
@@ -140,16 +142,21 @@ function paced(id: string, seconds: number, fresh: boolean): Promise<void> {
 export const FALLBACK_BYTES_PER_SECOND = (256 * 1000) / 8;
 
 /**
- * When what's built up is written: when each response ends, but at most
- * once every FLUSH.gapMs for one (wallet, track, day) — one that comes due
- * sooner is written when the gap is up, in the background, with whatever
- * else came meanwhile. So a whole-file request is one write, and many small
- * ranged requests share a few. Nothing waits for the app to report anything.
- * What's lost if this copy of the Worker is stopped (Cloudflare does that
- * whenever it likes) is at most what came in the last gap: counted short,
- * the listener's way.
+ * When what's built up is written: as it's sent, but at most once every
+ * FLUSH.gapMs (30 s) for one (wallet, track, day) — what comes sooner is
+ * written when the gap is up, in the background, with whatever else came
+ * meanwhile. So a four-minute song paced out over three minutes is about
+ * eight writes, and many small ranged requests share them. The artist's
+ * database has a daily allowance of writes shared with everything else
+ * (100,000 on Cloudflare's free plan). Nothing waits for the app to report
+ * anything. What's lost if this copy of the Worker is stopped (Cloudflare
+ * does that whenever it likes) is at most what came in the last gap:
+ * counted short, the listener's way.
  */
-export const FLUSH = { gapMs: 3_000 } as const;
+export const FLUSH = { gapMs: 30_000 } as const;
+
+/** How often a long response reads the wallet's price again (see metered). */
+export const PRICE_EVERY_MS = 5_000;
 
 /** How many (wallet, track, day) this copy keeps count of at once. The oldest
  *  goes first, written if it holds a second or more. */
@@ -228,13 +235,13 @@ export function metered(
     : (t.sentToday ? t.sentToday().then((sent) => !sent, () => false) : Promise.resolve(true)));
   let ended = false;
   // The price for this wallet, read on the first piece and again every
-  // FLUSH.gapMs: each piece is counted at the price when it was sent, and a
+  // PRICE_EVERY_MS: each piece is counted at the price when it was sent, and a
   // piece sent while it was free (a subscriber, payments paused) isn't
   // counted at all. Unknown (couldn't be read): counted, priced when written.
   let price: number | null = null, priceAt = -Infinity;
   const priceNow = async () => {
     const now = paceHooks.now();
-    if (now - priceAt >= FLUSH.gapMs) {
+    if (now - priceAt >= PRICE_EVERY_MS) {
       price = await deps.perMinute(t.pubkey).then((p) => p, () => null);
       priceAt = now;
     }
@@ -315,7 +322,7 @@ function due(t: Tally, deps: MeterDeps, now: number): void {
   const wait = t.lastFlush + FLUSH.gapMs - now;
   if (wait <= 0) { deps.later(flush(t, deps)); return; }
   t.waiting = true;
-  deps.later(new Promise((r) => setTimeout(r, wait)).then(() => { t.waiting = false; return flush(t, deps); }));
+  deps.later(paceHooks.gap(wait).then(() => { t.waiting = false; return flush(t, deps); }));
 }
 
 function evictOldest(deps: MeterDeps): void {
