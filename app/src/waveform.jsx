@@ -186,6 +186,9 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
     };
     size();
     addEventListener("resize", size);
+    // Its own box changing too (the layout around it, not the window).
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(size) : null;
+    ro?.observe(el);
 
     // Gradients and each ribbon's swell only change with the size and theme,
     // so work them out once rather than every frame.
@@ -469,7 +472,7 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
       else if (!still || !real) raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
-    return () => { cancelAnimationFrame(raf); clearTimeout(nap); removeEventListener("resize", size); };
+    return () => { cancelAnimationFrame(raf); clearTimeout(nap); removeEventListener("resize", size); ro?.disconnect(); };
   }, [viz]);
 
   return <canvas ref={canvas} class="waveform" aria-hidden="true" />;

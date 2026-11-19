@@ -1444,27 +1444,26 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
   font-family: "IBM Plex Mono", monospace; font-size: 11px; background: var(--ink); color: var(--bg); padding: 3px 7px; border-radius: 6px;
 }
 
-/* ── now playing: the music behind everything ── */
-.d-expanded { grid-template-rows: auto minmax(0, 1fr); }
+/* ── now playing: the music in the space below the song ── */
+/* The waveform fills what's left between the bottom of the cover and the
+   progress line on the bar, its middle halfway between them. */
+.d-expanded { grid-template-rows: auto auto minmax(0, 1fr); }
+.d-exp-top { grid-row: 1; }
+.d-exp-main { grid-row: 2; }
 .d-exp-wave {
-  position: absolute; left: 0; right: 0; bottom: calc(96px - 23%); height: 46%; margin: 0; pointer-events: none; z-index: 0;
-  /* Fading up into the content, and out at both sides, so a quiet moment
-     never draws a flat line across the window. */
-  -webkit-mask-image: linear-gradient(180deg, transparent, #000 34%), linear-gradient(90deg, transparent 2%, #000 15%, #000 85%, transparent 98%);
-  -webkit-mask-composite: source-in;
-  mask-image: linear-gradient(180deg, transparent, #000 34%), linear-gradient(90deg, transparent 2%, #000 15%, #000 85%, transparent 98%);
-  mask-composite: intersect;
+  grid-row: 3; position: relative; height: auto; align-self: stretch; min-height: 120px; margin: 0; pointer-events: none; z-index: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent 2%, #000 15%, #000 85%, transparent 98%);
+  mask-image: linear-gradient(90deg, transparent 2%, #000 15%, #000 85%, transparent 98%);
 }
-.d-expanded > .d-wave-pick { position: absolute; right: 24px; bottom: 20px; z-index: 2; margin: 0; }
 .d-exp-wave .waveform { position: absolute; inset: 0; width: 100%; height: 100%; }
 .d-exp-top, .d-exp-main { z-index: 1; }
-.desk .d-exp-main { align-items: center; padding-bottom: calc(40vh - 120px); }
-.desk .d-exp-cover { width: min(40vh, 28vw, 420px); }
+.desk .d-exp-main { align-items: center; padding-top: 24px; padding-bottom: 0; }
+.desk .d-exp-cover { width: min(42vh, 28vw, 420px); height: min(42vh, 28vw, 420px); }
+.d-expanded > .d-wave-pick { position: absolute; right: 24px; bottom: 20px; z-index: 2; margin: 0; }
 .d-shape-row.big { gap: 16px; }
 .d-shape-row.big .d-shape { height: 46px; }
 .d-shape-row.big .d-time { font-size: 12.5px; color: var(--ink2); min-width: 40px; }
 /* The line along the bar's top stays while Now playing is open. */
 .d-bar.under .d-line { z-index: 61; }
 .desk .d-exp-cover, .desk .d-exp-queue { align-self: start; }
-.desk .d-exp-main { padding-top: 40px; }
 

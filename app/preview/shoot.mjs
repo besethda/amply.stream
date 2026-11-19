@@ -201,6 +201,17 @@ const SCENARIOS = {
     if (await page.locator(".mini").count()) await page.locator(".mini").first().click({ timeout: 6000 });
     await page.waitForTimeout(2500);
   },
+  // Prints where Now playing's parts sit (desktop): for checking the layout.
+  "np-layout": async (page) => {
+    await SCENARIOS["nowplaying-full"](page);
+    console.log(await page.evaluate(() => {
+      const box = (e) => { const r = e.getBoundingClientRect(); return `${Math.round(r.top)}–${Math.round(r.bottom)}`; };
+      const ex = document.querySelector(".d-expanded");
+      return [`expanded ${box(ex)} rows ${getComputedStyle(ex).gridTemplateRows}`,
+        ...[...ex.children].map((c) => `  ${c.className} ${box(c)} ${getComputedStyle(c).position}`),
+        `cover ${box(document.querySelector(".d-exp-cover"))}`, `canvas ${box(document.querySelector(".d-exp-wave canvas"))}`].join("\n");
+    }));
+  },
   // Desktop only: the expanded full-window player ("Open now playing" button in the player bar); on mobile same as nowplaying.
   "nowplaying-full": async (page) => {
     await toAlbum(page); await S.playFirstTrack(page);
