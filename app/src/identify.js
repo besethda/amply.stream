@@ -364,36 +364,54 @@ async function sendReport(pair, origin, body) {
 // ── play reports that didn't arrive ──────────────────────────────────────────
 
 const REPORTS = "amply.reports.v1";
-const REPORT_KEEP_MS = 3 * 86_400_000;   // the artist's server keeps what it sent three days
+/**
+ * Sent again for up to a day. The artist's server waits longer than that
+ * (30 hours past the end of the day it was played: node/src/store.ts
+ * UNREPORTED_GRACE_MS) before billing anything unreported, so a report sent
+ * again always lands first.
+ */
+const REPORT_KEEP_MS = 86_400_000;
 const REPORT_MAX = 100;
 const readReports = () => { try { const a = JSON.parse(localStorage.getItem(REPORTS) || "[]"); return Array.isArray(a) ? a : []; } catch { return []; } };
 const writeReports = (a) => { try { localStorage.setItem(REPORTS, JSON.stringify(a.slice(-REPORT_MAX))); } catch { /* fine */ } };
-function keepReport(origin, body) {
-  writeReports([...readReports(), { origin, body, at: Date.now() }]);
+function keepReport(origin, body, at = Date.now()) {
+  const id = `${at}-${Math.random().toString(36).slice(2, 10)}`;
+  // The UTC day it was played, so the server puts it with that day's row.
+  writeReports([...readReports(), { id, origin, body, at, day: Math.floor(at / 86_400_000) }]);
 }
 /** Reports waiting to be sent again (tests). */
 export const keptReports = () => readReports();
 
 /**
  * Send again the play reports that didn't arrive: when the app opens with a
- * wallet, and when the network comes back. Each is taken off the list once
- * its server has it; one older than the server keeps anything is dropped.
+ * wallet, and when the network comes back.
+ *
+ * Each goes as "again" for the day it was played, which the server applies
+ * as "at least this many seconds" rather than adding them: if it did arrive
+ * after all, or is sent twice, it's billed once. Each is taken off the list
+ * the moment its server has it, and only one tab sends at a time.
  */
 let resending = false;
 export async function resendReports(pair, now = Date.now()) {
   if (!pair || resending) return;
   resending = true;
+  const run = async () => {
+    for (const r of readReports()) {
+      if (!r?.origin || !(now - (r.at || 0) < REPORT_KEEP_MS)) { dropReport(r); continue; }
+      const result = await sendReport(pair, r.origin, { ...r.body, again: true, day: r.day ?? Math.floor((r.at || now) / 86_400_000) });
+      if (result !== "lost") dropReport(r);
+    }
+  };
   try {
-    const before = readReports();
-    const all = before.filter((r) => r && r.origin && now - (r.at || 0) < REPORT_KEEP_MS);
-    const left = [];
-    for (const r of all) if ((await sendReport(pair, r.origin, r.body)) === "lost") left.push(r);
-    // Anything kept meanwhile (a song that ended while these were sent) stays too.
-    const added = readReports().slice(before.length);
-    writeReports([...left, ...added]);
+    if (typeof navigator !== "undefined" && navigator.locks?.request) await navigator.locks.request("amply-reports", { ifAvailable: true }, (lock) => (lock ? run() : null));
+    else await run();
   } finally {
     resending = false;
   }
+}
+/** Off the list, read fresh: another song may have been kept meanwhile. */
+function dropReport(r) {
+  writeReports(readReports().filter((x) => !(x === r || (r && x && x.id === r.id && x.at === r.at && x.origin === r.origin))));
 }
 
 /**

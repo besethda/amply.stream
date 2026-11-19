@@ -459,12 +459,13 @@ export const REPORT_MARK = 0.0001;
 
 /**
  * How long after a UTC day ends what was sent that day, unreported, may be
- * billed: six hours. A report can arrive late (a play that ran past
- * midnight, a report the app kept and sent again), and the reported row is
- * the one that's billed. Well inside SERVED_KEEP_DAYS, so rows are billed
- * long before they're pruned.
+ * billed: thirty hours. A report can arrive late — a play that ran past
+ * midnight, or one the app couldn't send and sends again, which it does for
+ * up to a day (app/src/identify.js, REPORT_KEEP_MS) — and the reported row is
+ * the one that's billed, so every late report lands before this. Still inside
+ * SERVED_KEEP_DAYS, so rows are billed before they're pruned.
  */
-export const UNREPORTED_GRACE_MS = 6 * 3_600_000;
+export const UNREPORTED_GRACE_MS = 30 * 3_600_000;
 
 /** The last UTC day whose unreported sends may be billed at `now`. */
 export const lastBillableDay = (now = Date.now()) => servedDay(now - UNREPORTED_GRACE_MS) - 1;
@@ -546,15 +547,21 @@ export async function billUnreported(
  * go in one batch with billServed's.
  */
 export function addServed(
-  db: D1Database, k: ServedKey, { delivered = 0, reported = 0, cap, report = false }: { delivered?: number; reported?: number; cap: number; report?: boolean },
+  db: D1Database, k: ServedKey,
+  { delivered = 0, reported = 0, cap, report = false, atLeast = false }:
+    { delivered?: number; reported?: number; cap: number; report?: boolean; atLeast?: boolean },
 ): D1PreparedStatement {
   // A report, of any length, leaves its mark (REPORT_MARK).
   const add = Math.max(0, reported) + (report ? REPORT_MARK : 0);
+  // A report sent again (`atLeast`) may have arrived the first time: it
+  // raises the row to at least its seconds, never adds to them, so sending
+  // it twice — or three times — bills it once.
+  const merge = atLeast ? "MAX(reported, excluded.reported)" : "reported + excluded.reported";
   return db.prepare(
     `INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?1, ?2, ?3, MIN(?4, ?6), ?5, 0)
      ON CONFLICT(pubkey, track, day) DO UPDATE SET
        delivered = MAX(delivered, MIN(?6, delivered + excluded.delivered)),
-       reported = reported + excluded.reported`,
+       reported = ${merge}`,
   ).bind(k.pubkey, k.track, k.day, Math.max(0, delivered), add, Math.max(0, cap));
 }
 

@@ -27,7 +27,7 @@ import {
   setting, putSetting, listeners, listener, setBlocked, counted, MAX_REPORT_S, forget, remove, pruneStale, pruneHourly,
   subscribedUntil, pruneSubscriptions, heard, songTotals, playsToday,
   paidOf, recordPaid, paidSigKnown, mergePaid, MAX_PAID_WALLETS, autoBlockSetting, setAutoBlock, owedRowOf,
-  addServed, billServed, billUnreported, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
+  addServed, billServed, billUnreported, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay, SERVED_KEEP_DAYS,
   type Listener,
 } from "./store";
 import { autoBlock, owedOf, unpaidOf } from "../../spec/standing.mjs";
@@ -1097,14 +1097,22 @@ const stripeTrouble = () => fail(502, "Couldn't confirm that with Stripe; try ag
  *
  * False when there's no table to meter with: the caller bills it as before.
  */
-async function reportServed(env: Env, who: string, trackId: string, seconds: number, perMinute: number): Promise<boolean> {
+async function reportServed(
+  env: Env, who: string, trackId: string, seconds: number, perMinute: number, again: { day: number } | null = null,
+): Promise<boolean> {
   const text = await manifestText(env).catch(() => null);
   const tracks = text ? tracksOf(derive(text)) : null;
   const now = Date.now();
   let found = trackId ? tracks?.byId.get(trackId) ?? null : null;
+  // A report sent again goes with the day it was played, and only as "at
+  // least this" (addServed atLeast): it may have arrived the first time.
+  if (again && !found) return true;
   let k;
   try {
-    if (found) k = { pubkey: who, track: found.key, day: await servedDayFor(env.DB, who, found.key, now) };
+    // Placed as it would have been on that day: that day's row, or the day
+    // before's for a play that ran past midnight (servedDayFor).
+    if (found && again) k = { pubkey: who, track: found.key, day: await servedDayFor(env.DB, who, found.key, again.day * 86_400_000 + 1) };
+    else if (found) k = { pubkey: who, track: found.key, day: await servedDayFor(env.DB, who, found.key, now) };
     else {
       const guess = await unreportedServed(env.DB, who, now);
       found = guess ? tracks?.byKey.get(guess.track) ?? null : null;
@@ -1116,7 +1124,7 @@ async function reportServed(env: Env, who: string, trackId: string, seconds: num
     // A song whose length can't be known here gets no cap, which only
     // matters for what's sent: none is added without one.
     await inOneGo(env.DB, [
-      addServed(env.DB, k, { delivered: pending?.seconds ?? 0, reported: seconds, cap: DELIVERED_CAP * length, report: true }),
+      addServed(env.DB, k, { delivered: pending?.seconds ?? 0, reported: seconds, cap: DELIVERED_CAP * length, report: true, atLeast: !!again }),
       ...billServed(env.DB, k, { perMinute, plays: 1, now }),
     ]);
     return true;
@@ -1505,10 +1513,18 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     // A subscriber pays by card, so their listening costs nothing here.
     const perMinute = await perMinuteFor(env, ctx, who);
     const seconds = Math.max(0, Math.min(Math.round(Number(body?.seconds) || 0), MAX_REPORT_S));
+    // A report the app is sending again, for the day it was played. Only for
+    // a day still kept, and never added on top of what may have arrived:
+    // without the metering table it can't be told apart, so it's dropped.
+    const day = Number(body?.day), today = servedDay();
+    const again = body?.again === true
+      ? (Number.isInteger(day) && day <= today && day > today - SERVED_KEEP_DAYS ? { day } : "stale")
+      : null;
+    if (again === "stale") return new Response(null, { status: 204, headers: noStore() });
     // Beside what the node itself sent (meter.ts), so the two are billed once
     // between them; on a database without that table, as it always was.
-    if (!(await reportServed(env, who, String(body?.track ?? ""), seconds, perMinute))) {
-      await counted(env.DB, who, seconds, Date.now(), perMinute);
+    if (!(await reportServed(env, who, String(body?.track ?? ""), seconds, perMinute, again))) {
+      if (!again) await counted(env.DB, who, seconds, Date.now(), perMinute);
     }
     // Now and then, clear out wallets not heard from in a year. Here rather
     // than on a timer, so there is nothing for an artist to set up; and at

@@ -189,7 +189,7 @@ const SLACK_S = slackFor(LEN);   // 84 s for a four-minute song
 /** A day on (past the end of the day plus UNREPORTED_GRACE_MS), and the
  *  wallet asks for a pass: what it took and never reported is billed then,
  *  if it's due. */
-const later = async (w, ms = DAY) => {
+const later = async (w, ms = 2 * DAY) => {
   tick(ms);
   w.token = await issueToken(DB, w.address);
   const r = await listen("/token", await signed(w));
@@ -228,13 +228,13 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   const w = await makeWallet();
   await audio(w, "song.mp3");
   ok("a copy taken whole with no report: nothing billed on the day", owed(w).micros === 0, JSON.stringify(owed(w)));
-  // Noon now: 5 am tomorrow is under the grace past midnight; 7 am is past it.
+  // Noon now: an hour short of the grace past midnight, then an hour past it.
   tick(DAY / 2 + UNREPORTED_GRACE_MS - 3_600_000);
   w.token = await issueToken(DB, w.address);
   await listen("/token", await signed(w));
-  ok("  nor just after midnight: a late report can still come", owed(w).micros === 0, JSON.stringify(owed(w)));
+  ok("  nor the next day: a late report can still come", owed(w).micros === 0, JSON.stringify(owed(w)));
   const r = await later(w, 2 * 3_600_000);
-  ok("  six hours after that day ends, billed at what was sent less the slack (156 of 240 s)", owed(w).micros === 156_000 && owed(w).seconds === 156, JSON.stringify(owed(w)));
+  ok("  thirty hours after that day ends, billed at what was sent less the slack (156 of 240 s)", owed(w).micros === 156_000 && owed(w).seconds === 156, JSON.stringify(owed(w)));
   ok("  and the pass says so", r.body.owes === 156_000, JSON.stringify(r.body));
   ok("  and the wallet is in the listeners table, so Auto-block can see it", tally(w)?.seconds === 156 && tally(w)?.plays === 0, JSON.stringify(tally(w)));
   await listen("/token", await signed(w));
@@ -325,7 +325,45 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   sqlite.prepare("INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?, 'song.mp3', ?, ?, 0, 0)").run(kept.address, today - SERVED_KEEP_DAYS, LEN);
   await pruneStale(DB, clock, async () => { throw new Error("no page"); });
   ok("a prune that couldn't bill first keeps the rows for next time", rows(kept).length === 1, JSON.stringify(rows(kept)));
-  ok("the grace is far inside the days kept", UNREPORTED_GRACE_MS < (SERVED_KEEP_DAYS - 1) * DAY);
+  ok("the grace is inside the days kept, and longer than the app resends for", UNREPORTED_GRACE_MS < (SERVED_KEEP_DAYS - 1) * DAY && UNREPORTED_GRACE_MS > DAY);
+
+  // Reports sent again: for the day they were played, and never added twice.
+  const r = await makeWallet();
+  await audio(r, "song.mp3");
+  const day0 = servedDay(clock);
+  const again = (seconds) => call(`/listen/played?t=${encodeURIComponent(r.token)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seconds, track: "s", again: true, day: day0 }),
+  }).then(settled);
+  await played(r, 100, "s");
+  await again(100);
+  await again(100);
+  ok("a report that arrived and was then sent again twice is billed once (100 s)", owed(r).micros === 100_000, JSON.stringify([rows(r), owed(r)]));
+  tick(DAY);
+  r.token = await issueToken(DB, r.address);
+  await again(150);
+  ok("  one sent again the next day goes with the day it was played, as at least its seconds", owed(r).micros === 150_000 && rows(r).length === 1, JSON.stringify([rows(r), owed(r)]));
+  const stale = await call(`/listen/played?t=${encodeURIComponent(r.token)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seconds: 99, track: "s", again: true, day: day0 - SERVED_KEEP_DAYS }),
+  });
+  await settled();
+  ok("  one for a day no longer kept is dropped", stale.status === 204 && owed(r).micros === 150_000, JSON.stringify(owed(r)));
+
+  // A new wallet whose report couldn't be sent, sent again almost a day
+  // later: the grace outlasts the app's resend window, so it lands first.
+  const n = await makeWallet();
+  await audio(n, "two.mp3");
+  const d = servedDay(clock);
+  tick(DAY - 1_000);   // within a day of playing: the app sends it again
+  n.token = await issueToken(DB, n.address);
+  await listen("/token", await signed(n));
+  await call(`/listen/played?t=${encodeURIComponent(n.token)}`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ seconds: 30, track: "two", again: true, day: d }),
+  }).then(settled);
+  await later(n);
+  ok("a new wallet's report sent again within a day lands before anything unreported is billed: 30 s", owed(n).micros === 30_000, JSON.stringify([rows(n), owed(n)]));
 }
 
 // ── ranges that add up to the whole file ────────────────────────────────────
