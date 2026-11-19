@@ -49,7 +49,7 @@ const pair = { publicKey: { toBase58: () => "me" }, secretKey: new Uint8Array(64
 
 // The payment libraries, stood in for: what was sent, and how it went.
 const sent = [];
-let failNext = null, slow = null, nodeConfirmed = true, landed = null;
+let failNext = null, slow = null, nodeConfirmed = true, landed = null, foundSig = null;
 p.useMachinery({
   pay: {
     async payArtist(_pair, _r, micros) {
@@ -58,12 +58,12 @@ p.useMachinery({
       sent.push(micros);
       return { signature: `sig${sent.length}`, micros, nodeConfirmed };
     },
-    async landedSince() { return landed; },
+    async landedSince(_p, _r, opts = {}) { if (foundSig) opts.found?.push(foundSig); return landed; },
   },
   wallet: { bs58: () => "signed" },
 });
 const fresh = () => {
-  store.clear(); sent.length = 0; failNext = null; slow = null; nodeConfirmed = true; landed = null;
+  store.clear(); sent.length = 0; failNext = null; slow = null; nodeConfirmed = true; landed = null; foundSig = null;
   store.set("amply.network.v1", "mainnet");
 };
 const sum = (xs) => xs.reduce((n, x) => n + x, 0);
@@ -319,6 +319,22 @@ same("nothing owed is nothing sent", o.pieces(0), []);
   r = await p.settleClaim(pair, A, { report: async (origin, sig) => { told.push([origin, sig]); return true; } });
   ok("  it landed: not sent again, and the claim is paid", sent.length === 0 && r.state === "paid" && o.claimOf(URL_A).remaining === 0);
   same("  and its server is told", told, [[ORIGIN_A, "maybe"]]);
+}
+
+{
+  // Its node answered with an error, so no signature came back: found by
+  // reading the wallet, and the node is told of it by that reference.
+  fresh(); agreeRate(URL_A, 0.01); owedHere(300_000);
+  o.noteClaim(URL_A, 300_000);
+  failNext = { kind: "unconfirmed" };
+  await p.payClaim(pair, A).catch(() => {});
+  store.set("amply.unsure.v1", JSON.stringify({ [URL_A]: { ...p.unsureOf(URL_A), at: Date.now() - 600_000, looked: 0 } }));
+  o.wakeClaims();
+  landed = 300_000; foundSig = { signature: "foundOnChain", micros: 300_000 };
+  const told = [];
+  await p.settleClaim(pair, A, { report: async (origin, sig) => { told.push([origin, sig]); return true; } });
+  same("found without its signature: its server is told by the one found", told, [[ORIGIN_A, "foundOnChain"]]);
+  ok("  and the credit held meanwhile is under that reference", o.pendingCredits().some((c) => c.signature === "foundOnChain"));
 }
 
 {

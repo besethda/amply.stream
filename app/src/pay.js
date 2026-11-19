@@ -304,7 +304,7 @@ export async function payArtist(pair, recipients, micros, { artistName = "This a
  * on never will: its blockhash has expired. Returns the micros that landed
  * (0 when nothing did), or null when it can't tell yet: then nothing is sent.
  */
-export async function landedSince(pair, recipients, { since, signature, upTo = 0, known = new Set(), now = Date.now() } = {}) {
+export async function landedSince(pair, recipients, { since, signature, upTo = 0, known = new Set(), found = [], now = Date.now() } = {}) {
   const conn = rpc();
   try {
     if (signature) {
@@ -314,7 +314,10 @@ export async function landedSince(pair, recipients, { since, signature, upTo = 0
         return paidIn(tx, pair, recipients);
       }
       if (s?.err) return 0;
-      return now - since > EXPIRED_MS ? 0 : null;
+      // Not seen: gone, once its blockhash has surely expired. Given longer
+      // than that, so a node a little behind the network isn't taken at its
+      // word that something which landed didn't (and paid again).
+      return now - since > SURELY_GONE_MS ? 0 : null;
     }
     if (now - since <= EXPIRED_MS) return null;
     // At most what that payment was (`upTo`): another device or tab paying
@@ -327,7 +330,11 @@ export async function landedSince(pair, recipients, { since, signature, upTo = 0
       // however close in time: the piece before it, say.
       if (known.has(s.signature)) continue;
       const tx = await conn.getParsedTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
-      micros += await paidIn(tx, pair, recipients);
+      const paid = await paidIn(tx, pair, recipients);
+      // Which transactions they were (`found`), so the artist's server can be
+      // told of them by reference, as any other payment.
+      if (paid > 0) found.push({ signature: s.signature, micros: paid });
+      micros += paid;
     }
     return upTo > 0 ? Math.min(micros, upTo) : micros;
   } catch {
@@ -335,6 +342,7 @@ export async function landedSince(pair, recipients, { since, signature, upTo = 0
   }
 }
 const EXPIRED_MS = 2 * 60_000;
+const SURELY_GONE_MS = 5 * 60_000;
 
 /** What one transaction paid these payees for listening, from this wallet. */
 async function paidIn(tx, pair, recipients) {

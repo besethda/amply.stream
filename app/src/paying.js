@@ -41,6 +41,18 @@ export function forgetUnsure(url) {
 }
 export const unsureOf = (url) => readUnsure()[url] || null;
 
+/**
+ * Today's automatic spending, counting every payment that may have gone out
+ * and isn't settled yet (sent, or in flight) as spent. Until the network says,
+ * it might have, so it uses up the day's limit: otherwise artists' nodes
+ * answering with errors could each take a payment past the limit while
+ * they're looked into. Given back if it turns out not to have landed.
+ */
+export function spentOrMaybe(now = Date.now()) {
+  const maybe = Object.values(readUnsure()).reduce((n, u) => n + (Number(u?.micros) || 0), 0);
+  return spentToday(now) + maybe;
+}
+
 let modules = null;
 
 /**
@@ -196,7 +208,7 @@ export async function settle(pair, entry, ledger, { ending = false, report = noR
 
   // At most one payment's worth, and what's left of today's limit: a debt
   // bigger than that goes in pieces, rather than never.
-  const room = DAILY_LIMIT - spentToday();
+  const room = DAILY_LIMIT - spentOrMaybe();
   const micros = Math.min(owed.micros, MAX_PAYMENT, room);
   if (micros < LISTEN_MIN_MICROS) {
     return { ledger, paid: null, refused: { ok: false, why: "daily", limit: toUsd(DAILY_LIMIT), spent: toUsd(spentToday()) } };
@@ -255,17 +267,27 @@ async function lookAgain(pair, entry, recipients, pay, { report = noReport } = {
   if (Date.now() - (unsure.looked || 0) < 30_000) return { wait: true };
   noteUnsure(entry.url, { ...unsure, looked: Date.now() });
   const known = new Set(receipts().map((r) => r.signature).filter(Boolean));
-  const landed = await pay.landedSince(pair, recipients, { since: unsure.at, signature: unsure.signature, upTo: unsure.micros, known });
+  const found = [];
+  const landed = await pay.landedSince(pair, recipients, { since: unsure.at, signature: unsure.signature, upTo: unsure.micros, known, found });
   if (landed === null) return { wait: true };          // can't tell yet: wait
+  if (landed > 0) {
+    // Spent before it stops being "maybe": the day's limit never loses sight of it.
+    recordSpend(landed);
+    noteAutoPaid(entry.url, landed, Date.now());
+  }
   forgetUnsure(entry.url);
   if (landed > 0) {
-    recordReceipt({ micros: landed, signature: unsure.signature || null, origin: originOf(entry.url), artist: entry.manifest?.artist?.name, network: networkName() });
-    recordSpend(landed);
+    // Found by reading the wallet (no signature came back): by what it found.
+    const sig = unsure.signature || (found.length === 1 ? found[0].signature : null);
+    recordReceipt({ micros: landed, signature: sig, origin: originOf(entry.url), artist: entry.manifest?.artist?.name, network: networkName() });
     settled(loadLedger(), entry.url, landed);
     paidTowards(entry.url, landed);
-    // Its server may not know: that answer was what got lost.
-    noteCredit(entry.url, unsure.signature || `unsure:${unsure.at}`, landed);
-    if (unsure.signature) report(originOf(entry.url), unsure.signature).catch(() => {});
+    // Its server may not know: that answer was what got lost. Told by
+    // reference, every one found, so it counts them as it counts any other.
+    const sigs = unsure.signature ? [unsure.signature] : found.map((f) => f.signature);
+    if (sigs.length) for (const one of sigs) noteCredit(entry.url, one, unsure.signature ? landed : Math.min(landed, found.find((f) => f.signature === one).micros));
+    else noteCredit(entry.url, `unsure:${unsure.at}`, landed);
+    for (const one of sigs) report(originOf(entry.url), one).catch(() => {});
   }
   return { landed };
 }
@@ -382,7 +404,7 @@ export async function settleClaim(pair, entry, { explicit = false, max = null, b
   let wallet = balanceMicros;
   for (const piece of pieces(left)) {
     let micros = piece;
-    if (!explicit && micros > DAILY_LIMIT - spentToday()) return { state: "ask", why: "daily", paid };
+    if (!explicit && micros > DAILY_LIMIT - spentOrMaybe()) return { state: "ask", why: "daily", paid };
     if (wallet != null && wallet < micros) {
       // What the wallet holds goes now, if it's enough to send; the rest
       // when money is added.

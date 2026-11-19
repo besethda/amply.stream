@@ -6,7 +6,7 @@
  * checks MANAGE_CSP.
  */
 
-export const VERSION = "3.32.0";
+export const VERSION = "3.33.0";
 export const SPEC_VERSION = 1;
 
 

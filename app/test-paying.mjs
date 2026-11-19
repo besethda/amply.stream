@@ -288,6 +288,20 @@ walletOn("mainnet");
   await p.settle(pair, A, p.loadLedger());
   is("it never landed: then it's paid", sent[0], toMicros(0.5));
 
+  // Payments to other artists not yet known to have landed use up the day's
+  // limit as if they had: nodes answering with errors can't take it past $10.
+  store.delete("amply.spent.v1"); sent.length = 0;
+  store.set("amply.unsure.v1", JSON.stringify({
+    "https://b.example/amply.json": { micros: toMicros(2), signature: null, at: Date.now(), looked: Date.now() },
+    "https://c.example/amply.json": { micros: toMicros(2), signature: null, at: Date.now(), looked: Date.now() },
+    "https://d.example/amply.json": { micros: toMicros(2), signature: null, at: Date.now(), looked: Date.now() },
+    "https://e.example/amply.json": { micros: toMicros(2), signature: null, at: Date.now(), looked: Date.now() },
+  }));
+  recordSpend(toMicros(1.5));
+  await p.settle(pair, A, owe(toMicros(3)));
+  is("$8 maybe sent elsewhere, $1.50 spent: only 50¢ more today", sent[0], toMicros(0.5));
+  store.delete("amply.unsure.v1");
+
   // Another tab is paying: this one skips its turn.
   let held = false;
   Object.defineProperty(globalThis, "navigator", { configurable: true,
