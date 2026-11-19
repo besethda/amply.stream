@@ -27,7 +27,7 @@ import {
   setting, putSetting, listeners, listener, setBlocked, counted, MAX_REPORT_S, forget, remove, pruneStale, pruneHourly,
   subscribedUntil, pruneSubscriptions, heard, songTotals, playsToday,
   paidOf, recordPaid, paidSigKnown, mergePaid, MAX_PAID_WALLETS, autoBlockSetting, setAutoBlock, owedRowOf,
-  addServed, billSent, aPlay, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
+  addServed, billSent, aPlay, sentToday, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
   type Listener,
 } from "./store";
 import { autoBlock, owedOf, unpaidOf } from "../../spec/standing.mjs";
@@ -932,6 +932,7 @@ function meterAudio(
     if (!(size > 0)) return res;
     const body = metered(res.body, Number.isFinite(length) ? length : null, {
       pubkey: who, track: key, size, duration: tracksOf(view).byKey.get(key)?.duration ?? null,
+      sentToday: () => sentToday(env.DB, who, key),
     }, {
       db: env.DB, perMinute: (p) => perMinuteFor(env, ctx, p), later: laterOf(ctx),
       onFlush: () => meterHooks.onFlush?.(), tidy: () => pruneHourly(env.DB),
@@ -1110,10 +1111,13 @@ async function reportServed(env: Env, ctx: ExecutionContext | undefined, who: st
     const pending = found ? takePending(k) : null;
     const length = pending?.trackSeconds ?? (found ? lengthOf(0, found.duration) : 0);
     const perMinute = pending?.seconds ? await perMinuteFor(env, ctx, who).then((p) => p, () => null) : null;
+    // Sent while it cost this wallet nothing: not counted, as meter.ts's own
+    // writes don't count it, so it can't be billed later at a price.
+    const sent = perMinute === 0 ? 0 : pending?.seconds ?? 0;
     await inOneGo(env.DB, [
-      addServed(env.DB, k, { delivered: pending?.seconds ?? 0, reported: seconds, cap: DELIVERED_CAP * length }),
+      addServed(env.DB, k, { delivered: sent, reported: seconds, cap: DELIVERED_CAP * length }),
       // What was sent and not yet written is billed with it, as any write of it is.
-      ...(pending?.seconds && perMinute ? billSent(env.DB, k, { slack: slackFor(length), perMinute, now }) : []),
+      ...(sent && perMinute ? billSent(env.DB, k, { slack: slackFor(length), perMinute, now }) : []),
       aPlay(env.DB, who, now),
     ]);
     return true;
@@ -1168,9 +1172,9 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     // its listening cost (owed, which includes what the server metered
     // itself, meter.ts) less what it has paid — the same number Auto-block
     // refuses with, and 0 when nothing (or nothing it could pay: a
-    // subscriber, payments paused). The app pays it when it's past the
-    // artist's payment point, even if its own ledger says less; below that,
-    // the usual settling applies.
+    // subscriber, payments paused). The app pays it without asking only as
+    // far as its own count of the listening goes (app/src/paying.js); any
+    // more is its listener's call.
     const owes = subscribed ? 0 : await owesNow(env, ctx, address).catch(() => 0);
     return json({ token: result.token, subscribedUntil: subscribed ? until : null, owes });
   }
@@ -1735,8 +1739,8 @@ async function serve(request: Request, env: Env, ctx?: ExecutionContext): Promis
       }
       // Kept privately by the listener's browser for a year, and replayed
       // from there without asking: that's fine for metering (meter.ts), since
-      // what's replayed was counted when it was sent, and the app's report
-      // of the replay is what bills it. A shared cache still can't keep it.
+      // what's billed is what was sent, and a replay from the cache wasn't
+      // sent again. A shared cache still can't keep it.
       const served = await serveObject(env, request, key, CACHE_AUDIO_PAID, "audio/mpeg");
       return meterAudio(request, env, ctx, served, who, key.slice("audio/".length), view);
     }

@@ -153,7 +153,7 @@ export function unpaidSheet(v, { money, go }) {
   const differs = v.mine != null && v.owes > 0 && v.mine < v.owes;
   const mineUsd = differs ? money(v.mine / 1e6) : null;
   const mine = differs ? ` This device counted ${mineUsd}.` : "";
-  const choose = differs && v.mine > 0 && go.payMine
+  const choose = differs && v.mine >= 10_000 && go.payMine
     ? { primaryLabel: `Pay ${mineUsd}`, primary: go.payMine, children: <button class="btn-quiet-solid wide" onClick={go.pay}>Pay their {usd}</button> }
     : { primaryLabel: `Pay ${usd}`, primary: go.pay };
   switch (v.state) {

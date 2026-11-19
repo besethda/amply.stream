@@ -281,6 +281,19 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   }
   await settled();
   ok("ten seeks in a row share one allowance, not ten bursts", total / 1000 <= PACE.burst + PACE.rate * ((clock - t0) / 1000) + 20, `${total / 1000} s sent in ${(clock - t0) / 1000} s`);
+  // The same song started six times, skipped at 10 s each time: only the
+  // first start gets the burst.
+  const d = await makeWallet();
+  let sentAll = 0;
+  for (let i = 0; i < 6; i++) { sentAll += await reading(d, "song.mp3", 10); tick(60_000); }
+  ok("a song started six times a day and skipped at 10 s: one burst, not six", sentAll <= PACE.burst + 5 * PACE.restart + 6 * (PACE.rate * 10) + 6 * PIECE / 1000, `${sentAll}`);
+  // A start landing on another copy of the Worker, which has no memory of
+  // this wallet: what the database says decides, so no new burst.
+  const e = await makeWallet();
+  await reading(e, "two.mp3", 10);
+  resetTallies();   // a different copy of the Worker
+  const again = await reading(e, "two.mp3", 1);
+  ok("  nor on another copy of the Worker: the database says it was sent today", again <= PACE.restart + PACE.rate + PIECE / 1000, `${again}`);
   paceHooks.sleep = async () => {};
 }
 
@@ -352,6 +365,18 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   ok("the artist's own copy (/manage/audio): played, nothing counted", own.status === 200 && ownBytes === LEN * 1000
     && sqlite.prepare("SELECT COUNT(*) AS n FROM served").get().n === servedBefore);
   ok("  and none of that wrote anything", flushes === before.flushes && batches === before.batches, `${flushes - before.flushes} / ${batches - before.batches}`);
+}
+
+// ── a subscription that ends: what was sent during it is never billed ──────
+{
+  const sub = await makeWallet();
+  sqlite.prepare("INSERT INTO subscriptions (wallet, subscription, customer, until, updated) VALUES (?, 'sub_y', 'cus_y', ?, ?)").run(sub.address, clock + 30 * DAY, clock);
+  await audio(sub, "two.mp3", { Range: "bytes=0-9999" });
+  await played(sub, 10, "two");   // the report carries what this copy hadn't written
+  sqlite.prepare("DELETE FROM subscriptions WHERE wallet = ?").run(sub.address);
+  tick(6_000);
+  await audio(sub, "two.mp3");
+  ok("a subscription ends: only what was sent after it is billed (240 - 84), not what went during it", owed(sub).micros === (LEN - SLACK_S) * 1000, JSON.stringify([rows(sub), owed(sub)]));
 }
 
 // ── no duration published: counted at the streaming bitrate ─────────────────

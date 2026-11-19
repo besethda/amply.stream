@@ -432,5 +432,15 @@ same("nothing owed is nothing sent", o.pieces(0), []);
   same("a play is reported with the song's id", posts, [{ seconds: 241, track: "song-1" }]);
 }
 
+// ── never more than shown, not even a rounding cent ─────────────────────────
+{
+  fresh(); agreeRate(URL_A, 0.01); owedHere(3_000);
+  o.noteClaim(URL_A, 500_000);
+  let r = await p.settleClaim(pair, A);
+  ok("this device counted 0.3¢: nothing goes on its own (a cent would be more than counted)", sent.length === 0 && r.state === "ask", JSON.stringify(r));
+  r = await p.settleClaim(pair, A, { explicit: true, max: 3_000 });
+  ok("  nor on a tap for 0.3¢: it waits, rather than round up to a cent", sent.length === 0, JSON.stringify(sent));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

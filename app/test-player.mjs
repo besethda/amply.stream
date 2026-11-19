@@ -8,7 +8,8 @@ class FakeAudio {
   addEventListener(e, f) { (this.handlers[e] ||= []).push(f); }
   play() { this.paused = false; return Promise.resolve(); }
   pause() { this.paused = true; }
-  removeAttribute() {}
+  removeAttribute(a) { if (a === "src") { this.src = ""; this.currentSrc = ""; } }
+  load() { this.loads = (this.loads || 0) + 1; if (!this.src) { this.currentTime = 0; this.duration = NaN; } }
 }
 globalThis.Audio = FakeAudio;
 
@@ -286,6 +287,53 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   // Skipped with nothing heard: nothing reported at all.
   pm.next(); await tick();
   ok("a song skipped before it counted isn't reported", told.length === 1, JSON.stringify(told));
+}
+
+// ── paused a while: the download stops, and picks up where it was ──────────
+{
+  let st = {};
+  const pr = createPlayer((x) => { st = x; }, () => {}, { restAfter: 5, resolve: async (t) => `${t.url}?fresh` });
+  const a = pr.element();
+  const on = (e) => (a.handlers[e] || []).forEach((f) => f());
+  pr.play(tracks.slice(0, 2), 0);
+  await tick();
+  a.currentSrc = a.src; a.duration = 200; a.paused = false; on("play");
+  a.currentTime = 42;
+  pr.toggle(); on("pause");
+  await new Promise((r) => setTimeout(r, 20));
+  ok("paused a while: the download is stopped", a.src === "" && a.loads >= 1, a.src);
+  ok("  and the song still shows where it was", st.at === 42 && st.duration === 200 && st.track?.id === "a", JSON.stringify({ at: st.at, d: st.duration }));
+  pr.seek(60);
+  ok("  dragging the bar while paused moves where it'll pick up", st.at === 60);
+  pr.toggle();
+  await tick();
+  ok("play: fetched afresh", a.src === "https://x/a.mp3?fresh", a.src);
+  on("loadedmetadata");
+  ok("  from where it was left", a.currentTime === 60, a.currentTime);
+  // A pause shorter than that: nothing stopped.
+  a.currentSrc = a.src; a.paused = false; on("play");
+  pr.toggle(); on("pause");
+  pr.toggle(); a.paused = false; on("play");
+  await new Promise((r) => setTimeout(r, 20));
+  ok("a short pause, then play: the download is left alone", a.src === "https://x/a.mp3?fresh", a.src);
+}
+
+// ── when a play counts: the longer of the two lengths decides ───────────────
+{
+  let wall = 0;
+  const counted = [];
+  const pl = createPlayer(() => {}, (t, step) => counted.push(step), { clock: () => wall });
+  const a = pl.element();
+  const on = (e) => (a.handlers[e] || []).forEach((f) => f());
+  pl.play([{ id: "z", title: "Z", url: "https://x/z.mp3", duration: 200 }], 0);
+  await tick();
+  a.duration = 40;   // the file claims to be 40 s (so half of it would be 20 s); the page says 200
+  a.paused = false; on("play");
+  for (let t = 1; t <= 25; t++) { wall += 1000; a.currentTime = t; on("timeupdate"); }
+  ok("a file claiming to be short doesn't make a play count sooner (25 s: nothing)", counted.length === 0, JSON.stringify(counted));
+  for (let t = 26; t <= 30; t++) { wall += 1000; a.currentTime = t; on("timeupdate"); }
+  ok("  it counts at 30 s, as the page's length says", Math.abs(counted.reduce((n, x) => n + x, 0) - 30) < 0.01, JSON.stringify(counted));
+  a.duration = 200;
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

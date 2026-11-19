@@ -247,9 +247,10 @@ export async function seen(db: D1Database, pubkey: string, now = Date.now()): Pr
  * per request: audio arrives in many ranged pieces, and counting those would
  * count a paused song a hundred times and spend the write budget doing it.
  *
- * A dishonest client could inflate or omit this. That is tolerable, because the
- * number is the artist's own view of their own listeners rather than anything
- * anyone is charged on: money moves on chain, where nobody has to be believed.
+ * A dishonest client could inflate or omit this. That is tolerable, because it
+ * is only a count of plays in the artist's record, never money: what's owed
+ * is this server's own count of what it sent (billSent), and money moves on
+ * chain, where nobody has to be believed.
  */
 export async function counted(
   db: D1Database,
@@ -490,6 +491,13 @@ export async function unreportedServed(db: D1Database, pubkey: string, now = Dat
       ORDER BY delivered - reported DESC LIMIT 1`,
   ).bind(pubkey, today, today - 1).first<{ track: string; day: number }>();
   return row ? { track: String(row.track), day: Number(row.day) } : null;
+}
+
+/** Whether this track has gone to this wallet already today (meter.ts PACE). */
+export async function sentToday(db: D1Database, pubkey: string, track: string, now = Date.now()): Promise<boolean> {
+  const row = await db.prepare("SELECT delivered FROM served WHERE pubkey = ? AND track = ? AND day = ?")
+    .bind(pubkey, track, servedDay(now)).first<{ delivered: number }>();
+  return Number(row?.delivered) > 0;
 }
 
 /** How many tracks this wallet has rows for (/listen/mine): null without the table. */

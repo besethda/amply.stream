@@ -372,6 +372,10 @@ export async function settleClaim(pair, entry, { explicit = false, max = null, b
     if (left > room) { left = room; more = true; }
   }
 
+  // Less than a cent can't be sent on its own (pieces() would round it up to
+  // one): it waits, rather than pay more than was counted or shown.
+  if (left < LISTEN_MIN_MICROS) return { state: "ask", why: "claim", paid };
+
   let wallet = balanceMicros;
   for (const piece of pieces(left)) {
     let micros = piece;

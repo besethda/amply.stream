@@ -44,7 +44,8 @@ const LEAD = 0.35;          // seconds before the end to move on
 const MAX_STEP = 2;         // a bigger jump than this is a seek, not listening
 const STUCK_S = 2;          // clock still this long while playing: buffering
 const RECOVER_S = 5;        // this long: fetch the song again from where it was
-const RETRY_MAX_S = 10;     // and again, at most this far apart: a signal that comes back is not announced
+const RETRY_MAX_S = 10;
+const REST_AFTER_MS = 5_000; // paused this long: stop downloading (see `rest`)     // and again, at most this far apart: a signal that comes back is not announced
 
 export const REPEAT = { OFF: 0, ALL: 1, ONE: 2 };
 
@@ -71,6 +72,8 @@ export function createPlayer(onChange, onListened, {
   clock = () => Date.now(),
   /** Whether the listener has the sound off: then nothing is heard. */
   silent = () => false,
+  /** Milliseconds paused before the download is stopped (rest). */
+  restAfter = REST_AFTER_MS,
 } = {}) {
   const audio = new Audio();
   audio.preload = "auto";
@@ -88,6 +91,8 @@ export function createPlayer(onChange, onListened, {
   let played = 0;           // seconds of this play counted (and not yet reported)
   let heard = 0;            // seconds of this play heard, whether or not it counts yet
   let held = 0;             // heard before the play counted: counted when it does
+  let resting = null;       // paused long enough that the download was stopped: { at, duration }
+  let restTimer = 0;
   let loading = 0;          // guards against a slow resolve landing out of order
   let wanted = false;       // the listener means it to be playing
   let recovering = false;   // fetching the song again after losing signal
@@ -97,7 +102,14 @@ export function createPlayer(onChange, onListened, {
 
   const now = () => (pos >= 0 && pos < order.length ? list[order[pos]] : null);
   /** The song's length: the file's own, else as published. */
-  const lengthNow = () => (Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : now()?.duration);
+  const lengthNow = () => {
+    // The longer of the published length and the file's own: neither alone
+    // decides how soon a play counts, so a file can't bring it forward by
+    // claiming to be short.
+    const file = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : null;
+    const listed = Number(now()?.duration) > 0 ? Number(now().duration) : null;
+    return file && listed ? Math.max(file, listed) : file || listed;
+  };
   const hasNext = () => pos < order.length - 1 || (repeat === REPEAT.ALL && order.length > 0);
 
   function report() {
@@ -119,8 +131,8 @@ export function createPlayer(onChange, onListened, {
     report();
     onChange({
       track: now(), playing: !audio.paused && !audio.ended, waiting,
-      at: audio.currentTime || 0,
-      duration: audio.duration || now()?.duration || 0,
+      at: resting ? resting.at : audio.currentTime || 0,
+      duration: (resting ? resting.duration : audio.duration) || now()?.duration || 0,
       hasNext: hasNext(),
       hasPrev: pos > 0,
       shuffle, repeat, from,
@@ -148,6 +160,8 @@ export function createPlayer(onChange, onListened, {
     last = 0;
     advancing = false;
     refused = null;
+    resting = null;
+    clearTimeout(restTimer);
     const track = now();
     describe(track);
     audio.pause();
@@ -255,7 +269,12 @@ export function createPlayer(onChange, onListened, {
   // by them, the lock screen, or a phone call — but not when losing signal,
   // or our own reloading, pauses it.
   audio.addEventListener("playing", () => { wanted = true; recovering = false; tries = 0; });
-  audio.addEventListener("pause", () => { if (!recovering && !audio.error) wanted = false; });
+  audio.addEventListener("pause", () => {
+    if (!recovering && !audio.error) wanted = false;
+    clearTimeout(restTimer);
+    if (!wanted) restTimer = setTimeout(rest, restAfter);
+  });
+  audio.addEventListener("play", () => { clearTimeout(restTimer); restTimer = 0; });
 
   /** Fetch the song again and carry on from where it got to. */
   async function recover() {
@@ -272,6 +291,47 @@ export function createPlayer(onChange, onListened, {
     audio.src = url;
     audio.play().catch(() => {});
   }
+
+  /**
+   * Paused a while: stop the download. A browser goes on reading a paused
+   * song, and a paid song's server counts what it sends — it can't tell that
+   * from listening (node/src/meter.ts) — so this app stops it, for its
+   * listener's sake. Picked up where it was on play (wake). Not for a song on
+   * this device (nothing to download), nor while the listener means to play.
+   */
+  function rest() {
+    restTimer = 0;
+    if (!audio.paused || wanted || resting || !now()) return;
+    const src = audio.currentSrc || audio.src || "";
+    if (!src || src.startsWith("blob:")) return;
+    resting = { at: audio.currentTime || 0, duration: audio.duration };
+    audio.removeAttribute("src");
+    audio.load?.();
+    tell();
+  }
+  /** Play again after resting: fetched afresh (a pass may have expired), from where it was. */
+  async function wake() {
+    const r = resting;
+    if (!r) return;
+    resting = null;
+    const track = now(), mine = loading;
+    wanted = true;
+    let url;
+    try {
+      url = await resolve(track);
+    } catch (e) {
+      if (mine !== loading) return;
+      resting = r;
+      refused = { kind: e.kind || "refused", message: e.message, ...(e.data || {}) };
+      tell();
+      return;
+    }
+    if (mine !== loading) return;
+    audio.addEventListener("loadedmetadata", () => { last = r.at; audio.currentTime = r.at; }, { once: true });
+    audio.src = url;
+    audio.play().catch(() => tell());
+  }
+  const position = () => (resting ? resting.at : audio.currentTime || 0);
 
   /** The watchdog: once a second, is it moving when it should be? */
   function check() {
@@ -315,7 +375,7 @@ export function createPlayer(onChange, onListened, {
     const set = (action, fn) => {
       try { navigator.mediaSession.setActionHandler(action, fn); } catch { /* unsupported */ }
     };
-    set("play", () => { wanted = true; audio.play().catch(() => {}); });
+    set("play", () => { if (resting) { wake(); return; } wanted = true; audio.play().catch(() => {}); });
     set("pause", () => audio.pause());
     set("nexttrack", () => api.next());
     set("previoustrack", () => api.prev());
@@ -353,6 +413,7 @@ export function createPlayer(onChange, onListened, {
     toggle() {
       if (!now()) return;
       if (refused) return load(pos);
+      if (resting) return wake();
       if (audio.paused) { wanted = true; audio.play().catch(() => {}); } else { wanted = false; audio.pause(); }
     },
     next() {
@@ -361,7 +422,7 @@ export function createPlayer(onChange, onListened, {
     },
     /** Back to the start of the song, or to the one before if we're near it. */
     prev() {
-      if (audio.currentTime > 3 || pos <= 0) { api.seek(0); tell(); return; }
+      if (position() > 3 || pos <= 0) { api.seek(0); tell(); return; }
       load(pos - 1);
     },
     /** Straight to a song in Up next, by its place there; those before it are skipped. */
@@ -369,7 +430,10 @@ export function createPlayer(onChange, onListened, {
       const at = pos + 1 + k;
       if (at > pos && at < order.length) load(at);
     },
-    seek(seconds) { last = seconds; audio.currentTime = seconds; },
+    seek(seconds) {
+      if (resting) { resting.at = seconds; tell(); return; }
+      last = seconds; audio.currentTime = seconds;
+    },
     /** Try the current song again — after agreeing a price, topping up… */
     retry() { if (now()) load(pos); },
     setShuffle(on) { shuffle = !!on; if (list.length) reorder(); tell(); },
@@ -418,7 +482,7 @@ export function createPlayer(onChange, onListened, {
       order = keep;
       tell();
     },
-    stop() { finish(); wanted = false; audio.pause(); audio.removeAttribute("src"); list = []; order = []; pos = -1; refused = null; tell(); },
+    stop() { finish(); resting = null; clearTimeout(restTimer); wanted = false; audio.pause(); audio.removeAttribute("src"); list = []; order = []; pos = -1; refused = null; tell(); },
     /** The playing element — read by the waveform, never rerouted. */
     element: () => audio,
     current: now,

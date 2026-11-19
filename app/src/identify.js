@@ -318,10 +318,8 @@ export async function reportPaid(origin, signature) {
   return false;
 }
 
-/** Tell the node a track finished, so the artist can see how much was played,
- *  and which song (its id): the node bills the larger of this and what it
- *  sent for that song, so naming it is what keeps the two from both being
- *  charged. */
+/** Tell the node a track finished, and which song (its id): a play in the
+ *  artist's record of who listens. */
 export async function reportPlayed(pair, origin, seconds, track = null) {
   // A play, for the artist's record of who listens. It decides nothing about
   // money: their server bills what it sent (node/src/meter.ts), and this app

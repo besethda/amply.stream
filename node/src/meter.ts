@@ -43,12 +43,16 @@ import { addServed, billSent, inOneGo, servedDay, type ServedKey } from "./store
 /**
  * What of each track sent isn't billed, in seconds of audio: 60 seconds, or
  * 35% of the track, whichever is more. With the pacing below, a listener who
- * plays continuously and stops at any point has been sent at most
- * PACE.burst + PACE.rate x what they played; less this, that is never more
- * than they played, for a track of any length (the worst case, stopping just
- * as the whole file has gone, is 24 - 0.15 x length seconds, below zero from
- * 160 s; under 160 s the 60 s floor covers it). So the server's count of an
- * honest listener is at most what they heard, usually less.
+ * starts a song and plays it without pausing, stopping at any point, has
+ * been sent at most PACE.burst + PACE.rate x what they played; less this,
+ * that is never more than they played, for a track of any length (the worst
+ * case, stopping just as the whole file has gone, is 24 - 0.15 x length
+ * seconds, below zero from 160 s; under 160 s the 60 s floor covers it).
+ * Starting it again the same day adds only PACE.restart up front, and a
+ * paused song isn't downloaded by the app; a listener who restarts one song
+ * many times a day can still be counted a little over (each start's 3 s,
+ * and a quarter of what they played on top), which the slack covers for a
+ * handful of starts.
  */
 export const SLACK = { seconds: 60, share: 0.35 } as const;
 export const slackFor = (trackSeconds: number) => Math.max(SLACK.seconds, SLACK.share * trackSeconds);
@@ -65,13 +69,20 @@ export const DELIVERED_CAP = 3;
 
 /**
  * How fast paid audio goes to a wallet, per track: a burst of 30 seconds'
- * worth to start (enough to begin playing, and to seek within), then 1.25
- * seconds of audio per second. Faster than anyone listens, so playback never
- * waits once started; slow enough that what's sent follows what's heard.
- * Kept per wallet and track in this copy of the Worker, across requests, so
- * seeking around doesn't start a new burst each time.
+ * worth the first time the track is sent to it that day (enough to begin
+ * playing, and to seek within), then 1.25 seconds of audio per second.
+ * Faster than anyone listens, so playback never waits once started; slow
+ * enough that what's sent follows what's heard. Any later start that day —
+ * the song again, a seek, a request landing on another copy of the Worker —
+ * gets only `restart` seconds up front, so the one SLACK a day covers one
+ * burst, not one per start. Whether it was sent already today is read from
+ * the database (store.ts `served`), not this copy's memory.
+ *
+ * The listener's app does its part for its own sake: it stops downloading
+ * while paused (app/src/player.js), since a browser left to itself would go
+ * on reading a paused song, and this server can't tell that from listening.
  */
-export const PACE = { burst: 30, rate: 1.25 } as const;
+export const PACE = { burst: 30, restart: 3, rate: 1.25 } as const;
 
 /** The clock and the wait the pacing uses: stood in for by tests. */
 export const paceHooks = {
@@ -82,19 +93,25 @@ export const paceHooks = {
 interface Bucket { tokens: number; at: number; queue: Promise<void> }
 const buckets = new Map<string, Bucket>();
 
-/** Wait until `seconds` of audio may go to this wallet for this track. One
- *  at a time per wallet and track, so two requests share the allowance. */
-function paced(id: string, seconds: number): Promise<void> {
+/**
+ * Wait until `seconds` of audio may go to this wallet for this track. One at
+ * a time per wallet and track, so two requests share the allowance. `fresh`:
+ * the track hasn't been sent to this wallet today, so it gets the burst;
+ * otherwise only the restart allowance. Idle time refills up to the restart
+ * allowance, never back to a burst.
+ */
+function paced(id: string, seconds: number, fresh: boolean): Promise<void> {
   let b = buckets.get(id);
   if (!b) {
     if (buckets.size >= MAX_KEYS) buckets.delete(buckets.keys().next().value as string);
-    b = { tokens: PACE.burst, at: paceHooks.now(), queue: Promise.resolve() };
+    b = { tokens: fresh ? PACE.burst : PACE.restart, at: paceHooks.now(), queue: Promise.resolve() };
     buckets.set(id, b);
   }
   const bucket = b;
   const turn = bucket.queue.then(async () => {
     const now = paceHooks.now();
-    bucket.tokens = Math.min(PACE.burst, bucket.tokens + ((now - bucket.at) / 1000) * PACE.rate);
+    const refilled = bucket.tokens + ((now - bucket.at) / 1000) * PACE.rate;
+    bucket.tokens = bucket.tokens >= PACE.restart ? Math.min(bucket.tokens, Math.max(PACE.restart, refilled)) : Math.min(PACE.restart, refilled);
     bucket.at = now;
     if (bucket.tokens < seconds) {
       const wait = ((seconds - bucket.tokens) / PACE.rate) * 1000;
@@ -164,9 +181,7 @@ export interface MeterDeps {
   later: (p: Promise<unknown>) => void;
   /** Writes, counted (tests). */
   onFlush?: () => void;
-  /** Now and then after a write: clear out what's past keeping (pruneHourly),
-   *  since a wallet that never reports never reaches /listen/played, where
-   *  that otherwise happens. */
+  /** Now and then after a write: clear out what's past keeping (pruneHourly). */
   tidy?: () => Promise<unknown>;
 }
 
@@ -192,12 +207,22 @@ export const lengthOf = (size: number, duration: number | null) =>
 export function metered(
   body: ReadableStream<Uint8Array>,
   length: number | null,
-  t: { pubkey: string; track: string; size: number; duration: number | null; now?: number },
+  t: {
+    pubkey: string; track: string; size: number; duration: number | null; now?: number;
+    /** Whether this track has gone to this wallet already today, as the
+     *  database says (read once, on the first piece; true on any doubt is
+     *  false: no burst). */
+    sentToday?: () => Promise<boolean>;
+  },
   deps: MeterDeps,
 ): ReadableStream<Uint8Array> {
   const key: ServedKey = { pubkey: t.pubkey, track: t.track, day: servedDay(t.now ?? Date.now()) };
   const trackSeconds = lengthOf(t.size, t.duration);
   const pace = `${t.pubkey}|${t.track}`;
+  let fresh: Promise<boolean> | null = null;
+  const isFresh = () => (fresh ??= tallies.has(idOf(key)) || buckets.has(pace)
+    ? Promise.resolve(false)
+    : (t.sentToday ? t.sentToday().then((sent) => !sent, () => false) : Promise.resolve(true)));
   let bytes = 0, ended = false;
   const end = () => {
     if (ended) return;
@@ -211,7 +236,7 @@ export function metered(
         const { done, value } = await reader.read();
         if (done) { c.close(); end(); return; }
         // Not sent until it may be (PACE): what's sent follows what's heard.
-        await paced(pace, secondsOf(value.byteLength, t.size, t.duration));
+        await paced(pace, secondsOf(value.byteLength, t.size, t.duration), await isFresh());
         bytes += value.byteLength;
         c.enqueue(value);
       } catch (e) {
