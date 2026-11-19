@@ -16,3 +16,4 @@ node/wrangler.local.jsonc
 manage/node_modules/
 
 .build/
+app/preview/fixtures/

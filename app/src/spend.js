@@ -106,6 +106,9 @@ export function accrue(ledger, url, seconds, perMinute, { agreed = agreements(),
   if (!(seconds > 0)) return ledger;
   const status = rateStatus(url, perMinute, agreed);
   if (status.ask || status.rate <= 0) return ledger;
+  // A price that came down is the new agreement: going back up later is a
+  // rise, and is asked about, rather than slipping back to the old figure.
+  if (agreed[url] != null && toMicros(status.rate) < agreed[url]) agreeRate(url, status.rate, agreed);
 
   const micros = Math.round((seconds / 60) * status.rate * 1e6);
   if (micros <= 0 && seconds < 1) return ledger;

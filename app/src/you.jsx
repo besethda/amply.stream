@@ -3,6 +3,7 @@
  */
 import { useState } from "preact/hooks";
 import { Icon } from "./icons.jsx";
+import { artStyle } from "./looks.js";
 import { money, TopUp, SendBack, SaveBackup } from "./wallet-ui.jsx";
 import { backupSaved, machinery, passkeyWallet } from "./paying.js";
 import { NETWORKS, networkName, useNetwork } from "./networks.js";
@@ -10,6 +11,61 @@ import { isSubscribed, subscriptionUntil, originOf } from "./identify.js";
 import { nameOf } from "./screens.jsx";
 import { charges } from "../../spec/pricing.mjs";
 import { ask } from "./sheets.jsx";
+import { Equalizer, Appearance } from "./eq-ui.jsx";
+import { receipts, forgetReceipts } from "./receipts.js";
+
+const KINDS = { listen: "Listening", tip: "Tip", purchase: "Purchase", owed: "Listening" };
+const dayOf = (t) => {
+  const d = new Date(t), today = new Date();
+  const y = new Date(); y.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === y.toDateString()) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+};
+
+/** Every payment this device sent, newest first, by day. */
+function History({ entries, onOpenArtist }) {
+  const all = receipts();
+  if (!all.length) return <p class="dim">No payments yet.</p>;
+  const byOrigin = (o) => entries.find((e) => { try { return new URL(e.url).origin === o; } catch { return false; } });
+  const days = [];
+  for (const r of all) {
+    const d = dayOf(r.at);
+    if (!days.length || days[days.length - 1].d !== d) days.push({ d, rows: [] });
+    days[days.length - 1].rows.push(r);
+  }
+  const month = new Date(); month.setDate(1); month.setHours(0, 0, 0, 0);
+  const spent = all.filter((r) => r.at >= month.getTime()).reduce((n, r) => n + r.micros, 0);
+  const KIND_ICON = { tip: <Icon.tip size={12} />, purchase: <Icon.card size={12} />, listen: <Icon.note size={12} />, owed: <Icon.note size={12} /> };
+  return (
+    <div class="history">
+      <div class="tx-sum">
+        <span class="label">THIS MONTH</span>
+        <b>{money(spent / 1e6)}</b>
+        <span class="dim small">{all.filter((r) => r.at >= month.getTime()).length} payments, straight to artists</span>
+      </div>
+      {days.map(({ d, rows }) => (
+        <section key={d}>
+          <span class="label">{d.toUpperCase()}</span>
+          {rows.map((r, i) => {
+            const e = r.origin && byOrigin(r.origin);
+            const img = e?.manifest?.artist?.image;
+            return (
+              <button class="tx" key={r.signature || `${r.at}${i}`} onClick={() => e && onOpenArtist(e.url)} disabled={!e}>
+                <span class="art round s40" style={artStyle(img, r.artist || "?")} />
+                <span class="t"><b>{r.artist || "Artist"}</b><span class="tx-meta"><i class={`tx-kind ${r.kind || "listen"}`}>{KIND_ICON[r.kind] || KIND_ICON.listen}</i>{KINDS[r.kind] || "Payment"} · {new Date(r.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span></span>
+                <span class="tx-amt"><i>−</i>{money(r.micros / 1e6)}</span>
+              </button>
+            );
+          })}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+const TABS = [["wallet", "Wallet"], ["general", "General"]];
+const TAB_KEY = "amply.you.tab";
 
 function Row({ icon, label, meta, onClick, tone }) {
   return (
@@ -24,7 +80,7 @@ function Row({ icon, label, meta, onClick, tone }) {
 
 function Sub({ title, onBack, children }) {
   return (
-    <div class="screen">
+    <div class="screen you sub">
       <div class="head">
         <button class="circle-btn" onClick={onBack} aria-label="Back"><Icon.back size={17} /></button>
         <h1 class="h-sub">{title}</h1>
@@ -34,7 +90,9 @@ function Sub({ title, onBack, children }) {
   );
 }
 
-export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenArtist, view, setView, themeName, onTheme, purchases, onSetUp }) {
+export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenArtist, view, setView, themeName, onTheme, purchases, onSetUp, eq }) {
+  const [tab, pickTab] = useState(() => { try { return localStorage.getItem(TAB_KEY) === "general" ? "general" : "wallet"; } catch { return "wallet"; } });
+  const setTab = (t) => { pickTab(t); try { localStorage.setItem(TAB_KEY, t); } catch { /* fine */ } };
   const [where, setWhere] = useState(networkName);
   const network = NETWORKS[where];
   const saved = pair && backupSaved(pair.publicKey.toBase58());
@@ -48,6 +106,7 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
     if (!ok) return;
     const { wallet } = await machinery();
     wallet.forgetWallet();
+    forgetReceipts();
     setPair(null);
     back();
   }
@@ -74,6 +133,7 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
       </Sub>
     );
   }
+  if (view === "history") return <Sub title="Payments" onBack={back}><History entries={entries || []} onOpenArtist={onOpenArtist} /></Sub>;
   if (view === "purchases") return <Sub title="Purchases" onBack={back}>{purchases}</Sub>;
   if (view === "network") {
     return (
@@ -90,12 +150,39 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
     );
   }
 
+  const tabs = (
+    <div class="segs you-tabs" role="tablist">
+      {TABS.map(([id, name]) => (
+        <button key={id} role="tab" aria-selected={tab === id} class={`seg${tab === id ? " on" : ""}`} onClick={() => setTab(id)}>{name}</button>
+      ))}
+    </div>
+  );
+
+  if (tab === "general") {
+    return (
+      <div class="screen you">
+        <div class="head"><h1>You</h1></div>
+        {tabs}
+        <div class="pad general">
+          <span class="label">APPEARANCE</span>
+          <Appearance themeName={themeName} onTheme={onTheme} />
+          <span class="label">SOUND</span>
+          {eq && <Equalizer eq={eq} />}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div class="screen">
+    <div class="screen you">
       <div class="head"><h1>You</h1></div>
+      {tabs}
       <div class="pad stack">
         {!pair ? (
-          <button class="btn-primary wide" onClick={() => onSetUp?.()}><Icon.key size={18} /> Save your ID</button>
+          <div class="id-card">
+            <button class="btn-primary wide" onClick={() => onSetUp?.()}><Icon.key size={18} /> Save your ID</button>
+            <span class="dim small">Needed for paid songs. No account, no email.</span>
+          </div>
         ) : <>
           {passkeyWallet(pair.publicKey.toBase58()) ? (
             <p class="note-line good-ink small"><Icon.check size={14} /> Protected by your passkey. Use it to open this
@@ -106,12 +193,15 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
             </button>
           )}
           <div class="balance-card">
-            <span class="label">TO SPEND{!network.real ? " · TEST" : ""}</span>
-            <div class="bal">
-              <b>{balance ? money(Math.max(0, balance.usdc - owed)) : "…"}</b>
-              {owed > 0 && <span class="mono-dim">{money(owed)} owed</span>}
-              <button class="icon-btn dim" onClick={onRefresh} aria-label="Refresh"><Icon.refresh size={16} /></button>
-            </div>
+            <button class="bal-open" onClick={() => setView("history")} aria-label="Payments">
+              <span class="label">TO SPEND{!network.real ? " · TEST" : ""}</span>
+              <span class="bal">
+                <b>{balance ? money(Math.max(0, balance.usdc - owed)) : "…"}</b>
+                {owed > 0 && <span class="mono-dim">{money(owed)} owed</span>}
+                <span class="bal-more">Payments <Icon.chevron size={14} /></span>
+              </span>
+            </button>
+            <button class="icon-btn dim bal-refresh" onClick={onRefresh} aria-label="Refresh"><Icon.refresh size={16} /></button>
             <div class="row">
               <button class="btn-primary sm" onClick={() => setView("topup")}><Icon.plus size={15} /> Top up</button>
               <button class="pill" onClick={() => setView("send")}><Icon.send size={15} /> Send back</button>
@@ -125,7 +215,6 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
         <Row icon={<Icon.folder size={18} />} label="Purchases" onClick={() => setView("purchases")} />
         {pair && <Row icon={<Icon.key size={18} />} label="Backup key" meta={saved ? "saved" : "not saved"} tone={saved ? "" : "warn-ink"} onClick={() => setView("backup")} />}
         {pair && <Row icon={<Icon.globe size={18} />} label="Network" meta={network.real ? "Solana" : "Test"} onClick={() => setView("network")} />}
-        <Row icon={themeName === "dark" ? <Icon.sun size={18} /> : <Icon.moon size={18} />} label={themeName === "dark" ? "Light mode" : "Dark mode"} onClick={onTheme} />
         <a class="you-row" href="/paying" target="_blank" rel="noopener">
           <span class="you-icon"><Icon.help size={18} /></span><span class="t">How paying works</span><Icon.external size={14} />
         </a>

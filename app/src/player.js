@@ -337,6 +337,11 @@ export function createPlayer(onChange, onListened, {
       if (audio.currentTime > 3 || pos <= 0) { api.seek(0); tell(); return; }
       load(pos - 1);
     },
+    /** Straight to a song in Up next, by its place there; those before it are skipped. */
+    jump(k) {
+      const at = pos + 1 + k;
+      if (at > pos && at < order.length) load(at);
+    },
     seek(seconds) { last = seconds; audio.currentTime = seconds; },
     /** Try the current song again — after agreeing a price, topping up… */
     retry() { if (now()) load(pos); },

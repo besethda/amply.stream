@@ -43,6 +43,8 @@ const artist = (url, perMinute = 0.01, settleAt = 1) => ({
   },
 });
 const A = artist(URL_A);
+/** Listening this device itself counted as owed to A: what backs a claim up. */
+const owedHere = (micros) => store.set("amply.owed.v2", JSON.stringify({ [URL_A]: { micros, seconds: 60, since: Date.now(), network: "mainnet" } }));
 const pair = { publicKey: { toBase58: () => "me" }, secretKey: new Uint8Array(64).fill(7) };
 
 // The payment libraries, stood in for: what was sent, and how it went.
@@ -122,24 +124,49 @@ same("nothing owed is nothing sent", o.pieces(0), []);
 {
   fresh(); agreeRate(URL_A, 0.01);
   o.noteClaim(URL_A, 300_000);
-  await p.settleClaim(pair, A);
-  same("an empty ledger (a new phone) pays the server's number", sent, [300_000]);
+  let r = await p.settleClaim(pair, A);
+  same("an empty ledger (a new phone): only a little of the server's number goes without asking", sent, [p.CLAIM_SLACK_MICROS]);
+  ok("  the rest waits for the listener's tap", r.state === "ask" && r.why === "claim" && o.claimOf(URL_A).remaining === 50_000);
+  r = await p.settleClaim(pair, A, { explicit: true, max: 50_000 });
+  same("  which pays it", sent, [p.CLAIM_SLACK_MICROS, 50_000]);
 
   fresh(); agreeRate(URL_A, 0.01);
   store.set("amply.owed.v2", JSON.stringify({ [URL_A]: { micros: 100_000, seconds: 600, since: Date.now(), network: "mainnet" } }));
   o.noteClaim(URL_A, 300_000);
   await p.settleClaim(pair, A);
-  same("a ledger short of it still pays the server's number", sent, [300_000]);
+  same("a ledger a little short of it (within the margin) still pays the server's number", sent, [300_000]);
   is("  and the ledger's part of it is settled too, not paid again later", p.loadLedger()[URL_A], undefined);
+}
+
+{
+  // The attack: a cheap price agreed, then a server inventing a big debt.
+  fresh(); agreeRate(URL_A, 0.001);
+  o.noteClaim(URL_A, 900_000_000);
+  let r = await p.settleClaim(pair, A);
+  ok("a made-up debt draws no more than a little without a tap", sent.reduce((n, m) => n + m, 0) <= p.CLAIM_SLACK_MICROS && r.state === "ask");
+  for (let i = 0; i < 5; i++) await p.settleClaim(pair, A);
+  ok("  however often it's tried in a day", sent.reduce((n, m) => n + m, 0) <= p.UNATTENDED_DAY_MICROS);
+  store.set("amply.owed.v2", JSON.stringify({ [URL_A]: { micros: 5_000_000, seconds: 1, since: Date.now(), network: "mainnet" } }));
+  for (let i = 0; i < 5; i++) await p.settleClaim(pair, A);
+  ok("  even with real listening owed: a dollar a day per artist, then a tap", sent.reduce((n, m) => n + m, 0) <= p.UNATTENDED_DAY_MICROS);
 }
 
 {
   fresh(); agreeRate(URL_A, 0.01);
   o.noteClaim(URL_A, 4_500_000);
-  const r = await p.settleClaim(pair, A);
+  const r = await p.settleClaim(pair, A, { explicit: true, max: 4_500_000 });
   same("over one payment's worth goes as several, in one go", sent, [1_500_000, 1_500_000, 1_500_000]);
   is("  all of it", r.state, "paid");
   is("  and counted against the day", spentToday(), 4_500_000);
+}
+
+{
+  fresh(); agreeRate(URL_A, 0.01);
+  o.noteClaim(URL_A, 300_000);
+  o.noteClaim(URL_A, 3_000_000);   // raised after the sheet showed $0.30
+  const r = await p.settleClaim(pair, A, { explicit: true, max: 300_000 });
+  same("a tap pays what it was shown, not what the server has said since", sent, [300_000]);
+  ok("  and asks again for the rest", r.state === "ask");
 }
 
 {
@@ -200,7 +227,7 @@ same("nothing owed is nothing sent", o.pieces(0), []);
 // ── trying again, kept across a reload ──────────────────────────────────────
 
 {
-  fresh(); agreeRate(URL_A, 0.01);
+  fresh(); agreeRate(URL_A, 0.01); owedHere(300_000);
   const t0 = Date.now();
   o.noteClaim(URL_A, 300_000, t0);
   ok("a new claim is due at once", o.claimDue(o.claimOf(URL_A), t0));
@@ -237,7 +264,7 @@ same("nothing owed is nothing sent", o.pieces(0), []);
 // ── after paying: a pass, or what's still owed ──────────────────────────────
 
 {
-  fresh(); agreeRate(URL_A, 0.01);
+  fresh(); agreeRate(URL_A, 0.01); owedHere(300_000);
   o.noteClaim(URL_A, 300_000);
   let asked = 0;
   const r = await p.payClaim(pair, A, { token: async () => { asked++; return "pass"; } });
@@ -245,7 +272,7 @@ same("nothing owed is nothing sent", o.pieces(0), []);
 }
 
 {
-  fresh(); agreeRate(URL_A, 0.01);
+  fresh(); agreeRate(URL_A, 0.01); owedHere(300_000);
   o.noteClaim(URL_A, 300_000);
   const token = async () => { const e = new Error("still"); e.unpaid = true; e.owes = 40_000; throw e; };
   const r = await p.payClaim(pair, A, { token });
@@ -256,7 +283,7 @@ same("nothing owed is nothing sent", o.pieces(0), []);
 // ── never twice ─────────────────────────────────────────────────────────────
 
 {
-  fresh(); agreeRate(URL_A, 0.01);
+  fresh(); agreeRate(URL_A, 0.01); owedHere(300_000);
   o.noteClaim(URL_A, 300_000);
   let release;
   slow = new Promise((r) => { release = r; });
@@ -288,10 +315,26 @@ same("nothing owed is nothing sent", o.pieces(0), []);
   same("  and its server is told", told, [[ORIGIN_A, "maybe"]]);
 }
 
+{
+  fresh(); agreeRate(URL_A, 0.01); owedHere(300_000);
+  o.noteClaim(URL_A, 300_000);
+  let release;
+  slow = new Promise((r) => { release = r; });
+  const going = p.settleClaim(pair, A);
+  await new Promise((r) => setTimeout(r, 0));
+  ok("a payment in flight is remembered before it goes, in case the app is closed", !!p.unsureOf(URL_A));
+  release(); slow = null;
+  await going;
+  ok("  and forgotten once it's confirmed", p.unsureOf(URL_A) === null);
+  failNext = { kind: "paused" }; o.noteClaim(URL_A, 300_000); owedHere(300_000); o.wakeClaims();
+  await p.settleClaim(pair, A).catch(() => {});
+  ok("  or once it's definitely not sent", p.unsureOf(URL_A) === null);
+}
+
 // ── telling the server, once ────────────────────────────────────────────────
 
 {
-  fresh(); agreeRate(URL_A, 0.01);
+  fresh(); agreeRate(URL_A, 0.01); owedHere(300_000);
   o.noteClaim(URL_A, 300_000);
   nodeConfirmed = false;
   const told = [];
@@ -344,15 +387,18 @@ same("nothing owed is nothing sent", o.pieces(0), []);
   is("  once: an old number can't be paid twice", id.takePassOwes(ORIGIN_A), null);
   same("passOwes reads it as strictly as a refusal", [o.passOwes({ owes: 5 }), o.passOwes({ owes: 1.5 }), o.passOwes({ owes: -1 }), o.passOwes({ owes: 5e12 }), o.passOwes({})], [5, null, null, null, null]);
 
-  // Above the artist's $1 payment point: paid as the server says, even though
-  // this device's ledger holds only 10 cents of it.
+  // Above the artist's $1 payment point, but this device's ledger holds only
+  // 10 cents of it: what the device backs up (and the rounding margin) goes
+  // on its own; the rest waits for the listener's tap (paying.js settleClaim).
   store.set("amply.owed.v2", JSON.stringify({ [URL_A]: { micros: 100_000, seconds: 600, since: Date.now(), network: "mainnet" } }));
   const claim = o.claimFromPass(A, 1_500_000);
   ok("$1.50 owed, over the $1 point: noted as a claim, due now", claim?.remaining === 1_500_000 && o.claimDue(claim));
   const r = await p.settleAll(pair, [A], p.loadLedger(), { token: async () => "pass" });
-  same("  and paid: the server's number, not the ledger's", sent, [1_500_000]);
-  ok("  settled, and the claim forgotten", r.claimed[0]?.state === "clear" && o.claimOf(URL_A) === null, JSON.stringify(r.claimed[0]));
+  same("  only what this device backs up is paid without asking", sent, [100_000 + p.CLAIM_SLACK_MICROS]);
+  ok("  the rest is put to the listener", r.claimed[0]?.state === "ask" && o.claimOf(URL_A)?.remaining === 1_500_000 - 100_000 - p.CLAIM_SLACK_MICROS, JSON.stringify(r.claimed[0]));
   ok("  the ledger's 10 cents went with it, not paid again", !(p.loadLedger()[URL_A]?.micros > 0), JSON.stringify(p.loadLedger()[URL_A]));
+  const tap = await p.payClaim(pair, A, { explicit: true, max: o.claimOf(URL_A).remaining, token: async () => "pass" });
+  ok("  their tap pays the rest, and the claim is forgotten", tap.state === "clear" && sum(sent) === 1_500_000 && o.claimOf(URL_A) === null, JSON.stringify(tap));
 
   // Below the point: nothing. The ledger settles as it always does.
   fresh(); agreeRate(URL_A, 0.01);
@@ -366,11 +412,11 @@ same("nothing owed is nothing sent", o.pieces(0), []);
 
   // After paying a claim, a pass that still says enough is owed is taken as
   // a refusal saying so: noted and backed off, not paid again on the spot.
-  fresh(); agreeRate(URL_A, 0.01);
-  o.claimFromPass(A, 1_200_000);
-  const still = async () => { const e = new Error("still"); e.unpaid = true; e.owes = 1_100_000; throw e; };
+  fresh(); agreeRate(URL_A, 0.01); owedHere(800_000);
+  o.claimFromPass(artist(URL_A, 0.01, 0.5), 800_000);
+  const still = async () => { const e = new Error("still"); e.unpaid = true; e.owes = 700_000; throw e; };
   const again = await p.payClaim(pair, A, { token: still });
-  ok("  a pass after paying that still says $1.10: backed off, paid at the next try", again.state === "owes" && sent.length === 1 && o.claimOf(URL_A).next > Date.now(), JSON.stringify(again));
+  ok("  a pass after paying that still says $0.70: backed off, paid at the next try", again.state === "owes" && sent.length === 1 && o.claimOf(URL_A).next > Date.now(), JSON.stringify(again));
 
   // The report of a play names the song, so the server bills it once.
   const posts = [];

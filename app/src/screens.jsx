@@ -85,14 +85,14 @@ export function TrackRow({ track, n, entry, current, playing, onPlay, showArtist
       <div class="track-slide">
       <button class="track-main" onClick={onPlay}>
         {n != null
-          ? <span class="n">{on && playing ? <span class="bars" aria-hidden="true"><i /><i /><i /></span> : n}</span>
+          ? <span class="n">{on && playing ? <span class="bars" aria-hidden="true"><i /><i /><i /></span> : <span class={`n-num${on ? " accent-ink" : ""}`}>{n}</span>}<span class="n-play" aria-hidden="true"><Icon.play size={14} /></span></span>
           : <span class="art s44" style={artStyle(track.art, track.releaseTitle || track.title)} />}
         <span class="t">
           <b>{track.title}</b>
           {showArtist && <span>{track.artistName || nameOf(entry)}</span>}
         </span>
         {!edit && <Badge badge={badgeOf(entry, track)} />}
-        {!edit && n != null && <span class="d">{mmss(track.duration)}</span>}
+        {!edit && <span class={`d${n == null ? " d-wide" : ""}`}>{mmss(track.duration)}</span>}
       </button>
       {edit ? (
         <span class="track-edit">
@@ -105,6 +105,17 @@ export function TrackRow({ track, n, entry, current, playing, onPlay, showArtist
     </div>
   );
 }
+
+/** On a computer, a play button that rises on a card as the pointer passes. */
+function CardPlay({ onPlay, label }) {
+  const go = (e) => { e.stopPropagation(); e.preventDefault(); onPlay(); };
+  return (
+    <span class="card-play" role="button" tabIndex={0} aria-label={label} title={label}
+      onClick={go} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && go(e)}><Icon.play size={20} /></span>
+  );
+}
+const releaseTracks = (entry, release) => tracksOf(entry).filter((t) => t.releaseId === release.id)
+  .map((t) => ({ ...t, artistName: t.artistName || nameOf(entry), verified: !!entry.domain }));
 
 function Header({ title, onAdd }) {
   return (
@@ -161,7 +172,7 @@ export function AddForm({ onAdd, autoFocus = true }) {
 
 // ── home ────────────────────────────────────────────────────────────────────
 
-export function Home({ entries, recentTracks, onOpenArtist, onPlay, current, playing, onAdd, onMore, lists, onOpenPlaylist, onNewPlaylist }) {
+export function Home({ entries, recentTracks, onOpenArtist, onOpenAlbum, onPlay, current, playing, onAdd, onMore, lists, onOpenPlaylist, onNewPlaylist }) {
   // Each followed artist's latest release, newest first.
   const latest = entries.flatMap((e) => {
     const rels = (e.manifest.releases || []).filter((r) => (r.tracks || []).length);
@@ -177,10 +188,11 @@ export function Home({ entries, recentTracks, onOpenArtist, onPlay, current, pla
         <span class="label pad">LATEST</span>
         <div class="hscroll">
           {latest.map(({ entry, release }) => (
-            <button class="card-art" key={`${entry.url}#${release.id}`} onClick={() => onOpenArtist(entry.url)}>
+            <button class="card-art" key={`${entry.url}#${release.id}`} onClick={() => (onOpenAlbum ? onOpenAlbum(entry.url, release.id) : onOpenArtist(entry.url))}>
               <span class="art s152" style={artStyle(release.art, release.title)}>
                 {isNew(release.date) && <span class="new">NEW</span>}
               </span>
+              <CardPlay label={`Play ${release.title}`} onPlay={() => onPlay(releaseTracks(entry, release), 0, release.title)} />
               <b>{release.title}</b>
               <span>{nameOf(entry)}</span>
             </button>
@@ -190,7 +202,7 @@ export function Home({ entries, recentTracks, onOpenArtist, onPlay, current, pla
 
       {recentTracks.length > 0 && <>
         <span class="label pad">RECENT</span>
-        <div class="list">
+        <div class="list recent-list">
           {recentTracks.map(({ track, entry }, i) => (
             <TrackRow key={`${track.from}#${track.id}`} track={track} entry={entry} showArtist
               current={current} playing={playing}
@@ -229,6 +241,9 @@ export function Home({ entries, recentTracks, onOpenArtist, onPlay, current, pla
 const SEG = "amply.library.section.v1", SEGS = ["Playlists", "Songs", "Albums", "Artists"];
 
 export function Library({ entries, localEntry, onOpenArtist, onAdd, lists, liked, onOpenPlaylist, onNewPlaylist, onOpenAlbum, onPlay, onMore, current, playing }) {
+  const playAlbum = (entry, release) => (entry.local
+    ? onPlay((release.tracks || []), 0, release.title)
+    : onPlay(releaseTracks(entry, release), 0, release.title));
   // The section you were in, kept for next time — leaving for another tab or
   // an album and coming back shouldn't reset it.
   const [seg, pickSeg] = useState(() => {
@@ -274,6 +289,7 @@ export function Library({ entries, localEntry, onOpenArtist, onAdd, lists, liked
           {albums.map(({ entry, release }) => (
             <button class="card-art" key={`${entry.url}#${release.id}`} onClick={() => onOpenAlbum(entry.url, release.id)}>
               <span class="art sq" style={artStyle(release.art, release.title)} />
+              <CardPlay label={`Play ${release.title}`} onPlay={() => playAlbum(entry, release)} />
               <b>{release.title}</b>
               <span>{release.artistName || nameOf(entry)}{entry.local && <span class="badge">local</span>}</span>
             </button>
@@ -291,9 +307,9 @@ export function Library({ entries, localEntry, onOpenArtist, onAdd, lists, liked
                   ? <span class="mono dim">{seemsGone(e) ? "seems to be gone" : "offline right now"}</span>
                   : e.domain
                   ? <span class="mono good-ink"><Icon.check size={11} /> {e.domain}</span>
-                  : <span class="mono warn-ink"><Icon.warn size={11} /> no website</span>}
+                  : <span class="mono no-site">no website</span>}
               </span>
-              <span class="mono-dim">{priceShort(e)}</span>
+              <span class={`badge${priceShort(e) === "Free" ? " good" : ""}`}>{priceShort(e)}</span>
             </button>
           ))}
         </div>
@@ -446,6 +462,17 @@ export function ArtistPage({
   return (
     <div class="screen artist">
       <div class="banner" style={artStyle(artist.banner, nameOf(entry))}>
+        <div class="d-hero">
+          {entry.domain
+            ? <span class="d-hero-verified"><span class="tick-badge"><Icon.check size={12} /></span>{entry.domain}</span>
+            : <span class="d-hero-verified">Artist</span>}
+          <h1>{nameOf(entry)}</h1>
+          <span class="d-hero-sub">{[
+            `${all.length} song${all.length === 1 ? "" : "s"}`,
+            `${(m.releases || []).length} release${(m.releases || []).length === 1 ? "" : "s"}`,
+            priceShort(entry) === "Free" ? "Free to listen" : priceShort(entry),
+          ].join(" · ")}</span>
+        </div>
         <button class="float-btn" onClick={onBack} aria-label="Back"><Icon.back size={18} /></button>
         <div class="banner-actions">
           <button class="float-btn" onClick={share} aria-label={`Share ${nameOf(entry)}`}><Icon.share size={17} /></button>
@@ -453,6 +480,19 @@ export function ArtistPage({
             ? <button class="float-pill" onClick={async () => (await ask({ title: `Unfollow ${nameOf(entry)}?`, confirm: "Unfollow", icon: <Icon.artist size={22} /> })) && onUnfollow()}>Following</button>
             : <button class="float-pill follow" onClick={onFollow}>Follow</button>}
         </div>
+      </div>
+      <div class="d-artist-acts">
+        <button class="d-big-play" onClick={() => all.length && onPlay(all, 0, nameOf(entry))} disabled={!all.length || !reachable(entry)}
+          aria-label={`Play ${nameOf(entry)}`} title={`Play ${nameOf(entry)}`}><Icon.play size={24} /></button>
+        {followed
+          ? <button class="pill" onClick={async () => (await ask({ title: `Unfollow ${nameOf(entry)}?`, confirm: "Unfollow", icon: <Icon.artist size={22} /> })) && onUnfollow()}>Following</button>
+          : <button class="pill" onClick={onFollow}>Follow</button>}
+        <button class="d-text-btn" onClick={share}><Icon.share size={16} /> Share</button>
+        <button class="d-text-btn" onClick={() => setAbout(true)}><Icon.artist size={16} /> About</button>
+        <span class="chips" style="margin:0 0 0 auto">
+          {held?.micros > 0 && <span class="chip">owe {money(held.micros / 1e6)}</span>}
+          {perMinute(m) && plansOf(m).length > 0 && !isSubscribed(originOf(entry.url)) && <span class="chip">or subscribe</span>}
+        </span>
       </div>
       <div class="pad">
         <div class="artist-top">
@@ -501,6 +541,7 @@ export function ArtistPage({
         </div>
       )}
 
+      {reachable(entry) && (m.releases || []).length > 0 && <span class="label pad d-only">DISCOGRAPHY</span>}
       {reachable(entry) && (m.releases || []).map((release) => {
         const tracks = all.filter((t) => t.releaseId === release.id);
         return (

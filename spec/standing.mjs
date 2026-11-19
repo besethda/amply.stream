@@ -14,6 +14,9 @@ import { LISTEN_MIN_MICROS, SETTLE_WITHIN_DAYS } from "./pricing.mjs";
 
 export const DAY = 86_400_000;
 
+/** How far past the payment point a listener may fall before they count as behind. */
+export const ALLOWANCE_FACTOR = 1.5;
+
 /**
  * What a listener's listening cost, by the server's count.
  *
@@ -38,7 +41,7 @@ export function owedOf(row, ratePerMinute) {
  */
 export function behind(owedMicros, paidMicros, settleAt) {
   const allowance = (Number(settleAt) > 0 ? Number(settleAt) : 1) * 1_000_000;
-  return owedMicros - paidMicros > allowance * 1.5;
+  return owedMicros - paidMicros > allowance * ALLOWANCE_FACTOR;
 }
 
 /**
