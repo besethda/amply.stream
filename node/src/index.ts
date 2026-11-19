@@ -929,8 +929,10 @@ function meterAudio(
       ? Number(/\/(\d+)$/.exec(res.headers.get("Content-Range") || "")?.[1])
       : length;
     if (!(size > 0)) return res;
+    // Where the body starts in the file: bytes counted already aren't again (meter.ts).
+    const start = res.status === 206 ? Number(/bytes\s+(\d+)-/.exec(res.headers.get("Content-Range") || "")?.[1]) : 0;
     const body = metered(res.body, Number.isFinite(length) ? length : null, {
-      pubkey: who, track: key, size, duration: tracksOf(view).byKey.get(key)?.duration ?? null,
+      pubkey: who, track: key, size, duration: tracksOf(view).byKey.get(key)?.duration ?? null, start,
       sentToday: () => sentToday(env.DB, who, key),
       markSent: () => markSent(env.DB, who, key),
     }, {
@@ -1092,8 +1094,8 @@ const stripeTrouble = () => fail(502, "Couldn't confirm that with Stripe; try ag
  *
  * Which track: the app says, by the song's id (`track`); an older app's
  * report goes with the track sent furthest ahead of what's been reported.
- * What this copy of the Worker had sent of it and not yet written goes in the
- * same write. False when there's no table: the caller records the play alone.
+ * What was sent is written on its own schedule (meter.ts FLUSH), not with
+ * this. False when there's no table: the caller records the play alone.
  */
 async function reportServed(env: Env, who: string, trackId: string, seconds: number): Promise<boolean> {
   const text = await manifestText(env).catch(() => null);
@@ -1237,6 +1239,8 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (!(await allow(env as never, RULES.wallet, `${host}|paid|${from}`))) return tooMany(withCors(new Headers()));
     const already = await paidSigKnown(env.DB, signature);
     if (already) {
+      // Counted for a wallet since erased: only the reference is left.
+      if (!already.pubkey) return json({ recorded: false });
       return json({ recorded: false, wallet: already.pubkey, micros: already.micros, paidMicros: await paidOf(env.DB, already.pubkey) });
     }
     const pay = walletOf(await manifestNowOf(env));
@@ -1517,15 +1521,19 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
   // A listener holds their key, so they can prove a row is theirs and have it
   // deleted. No documents, no mailbox, no judgement call by a musician. A
   // blocked wallet may still erase itself: being refused the music is not a
-  // reason to be refused a right. (What survives for a blocked wallet is the
-  // bar alone — see forget() in store.ts.)
+  // reason to be refused a right. (What survives — a block, an unpaid bill,
+  // a week of payment references, three days of `served` — and why: see
+  // forget() in store.ts.)
   if (path === "/forget" && request.method === "POST") {
     const body = await jsonBody(request);
     if (!body) return fail(400, "bad request");
     const proof = await proveOwnership(host, body as never);
     if (!proof.ok) return fail(403, proof.why);
     forgetTallies(proof.address);
-    await forget(env.DB, proof.address);
+    // The price now: what an unpaid bill from before prices were kept is
+    // worth, as Auto-block counts it (forget keeps a bill).
+    const perMinute = await perMinuteFor(env, ctx, proof.address).catch(() => 0);
+    await forget(env.DB, proof.address, perMinute);
     return new Response(null, { status: 204, headers: noStore() });
   }
 

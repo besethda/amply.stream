@@ -402,5 +402,57 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   slow = 0;
 }
 
+// ── review 5: taps while loading, refused plays, where it is while waking ──
+{
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  let st = {}, slow = 0;
+  const pl = createPlayer((x) => { st = x; }, () => {}, { restAfter: 5, resolve: async (t) => { if (slow) await wait(slow); return `${t.url}?q${Math.random()}`; } });
+  const a = pl.element();
+  const on = (e) => (a.handlers[e] || []).forEach((f) => f());
+  let plays = 0;
+  const realPlay = a.play.bind(a);
+  a.play = () => { plays++; return realPlay(); };
+  pl.play(tracks.slice(0, 3), 0);
+  await tick();
+  a.currentSrc = a.src; on("play"); on("playing");
+  // Skip to a slow song, and tap pause while it's fetched.
+  slow = 30;
+  pl.next();
+  const before = plays, oldSrc = a.src;
+  pl.toggle();
+  ok("a tap while the next song loads doesn't play the old one", plays === before && a.paused && a.src === oldSrc, JSON.stringify({ plays: plays - before, paused: a.paused }));
+  await wait(60);
+  ok("  and it arrives paused, as the tap asked (and rests)", a.paused && plays === before && st.track?.id === "b" && pl.resting(), JSON.stringify({ paused: a.paused, src: a.src }));
+  // Two taps while loading: it plays once loaded.
+  pl.next();
+  pl.toggle(); pl.toggle();
+  await wait(60);
+  ok("(skipped from a resting song)", st.track?.id === "c");
+  ok("two taps while loading: plays once it's there", !a.paused && /c\.mp3/.test(a.src));
+  slow = 0;
+
+  // The browser refuses to play: shown paused, and it rests like any pause.
+  a.play = () => { a.paused = true; return Promise.reject(new Error("NotAllowedError")); };
+  pl.play(tracks.slice(0, 2), 0);
+  await tick(); await tick();
+  ok("a refused play shows paused", st.playing === false);
+  a.currentSrc = a.src;
+  await wait(20);
+  ok("  and the download stops after a while, as a pause does", pl.resting() && a.src === "", JSON.stringify({ r: pl.resting(), src: a.src }));
+  a.play = () => { a.paused = false; return Promise.resolve(); };
+
+  // Where it is while waking, and a seek before the fresh source has loaded.
+  pl.seek(50);
+  slow = 30;
+  pl.toggle();             // waking from 0:50
+  ok("while waking, it's where it was resting", st.at === 50, st.at);
+  await wait(60);
+  ok("  and before the fresh source loads, where it's about to be", st.at === 50, st.at);
+  pl.seek(80);
+  on("loadedmetadata");
+  ok("a seek before the fresh source loaded is where it plays from", a.currentTime === 80, a.currentTime);
+  slow = 0;
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

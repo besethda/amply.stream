@@ -25,7 +25,7 @@ import {
 } from "./identify.js";
 import { perMinute, subscriptionOnly, plans as plansOf } from "../../spec/pricing.mjs";
 import { Icon } from "./icons.jsx";
-import { money } from "./wallet-ui.jsx";
+import { money, asShown } from "./wallet-ui.jsx";
 import { recent, played, forgetRecent, theme, setTheme, waveStyle, setWaveStyle, WAVE_STYLES } from "./looks.js";
 import { MiniPlayer, NowPlaying, Tips } from "./playing.jsx";
 import { Sheet, Toast, refusalSheet, unpaidSheet, registerAsk, ask } from "./sheets.jsx";
@@ -645,7 +645,9 @@ export function App() {
     // At most what the sheet showed, read before anything redraws it: a
     // server (or another tab) can't raise it between reading and tapping.
     const shown = owesView.current?.url === url ? owesView.current.owes : claimOf(url)?.remaining;
-    const max = Math.min(shown ?? 0, upTo ?? Infinity);
+    // And no more than it reads: money() shows cents from a dollar up, so
+    // $1.234 reads "$1.23" and pays $1.23. The fraction left is paid later.
+    const max = asShown(Math.min(shown ?? 0, upTo ?? Infinity));
     showOwes(url, "paying");
     let r;
     try {

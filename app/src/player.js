@@ -105,7 +105,9 @@ export function createPlayer(onChange, onListened, {
 
   const now = () => (pos >= 0 && pos < order.length ? list[order[pos]] : null);
   /** Where the song is: where it rests, when nothing is loaded. */
-  const position = () => (resting ? resting.at : audio.currentTime || 0);
+  const position = () => (resting ? resting.at
+    : waking && wakingFrom ? wakingFrom.at
+    : seekTo ?? (audio.currentTime || 0));
   /** The song's length, for when a play counts: see below. */
   const lengthNow = () => {
     // The longer of the published length and the file's own: neither alone
@@ -193,8 +195,28 @@ export function createPlayer(onChange, onListened, {
     resting = null;
 
     audio.src = url;
-    if (autoplay) audio.play().catch(() => tell());
+    // A tap while it loaded changed what the listener wants (toggle).
+    if (wanted) start(mine);
+    else armRest();
     tell();
+  }
+
+  /**
+   * Play what's loaded. If the browser refuses (no tap behind it, say), it
+   * isn't playing and the listener isn't waiting for it: shown paused, and
+   * the download stopped after a while like any pause, not left running.
+   */
+  function start(mine) {
+    audio.play().catch(() => {
+      if (mine !== loading || !audio.paused) return;
+      wanted = false;
+      armRest();
+      tell();
+    });
+  }
+  function armRest() {
+    clearTimeout(restTimer);
+    restTimer = setTimeout(rest, restAfter);
   }
 
   /** The next song, as repeat decides. */
@@ -281,9 +303,11 @@ export function createPlayer(onChange, onListened, {
   // or our own reloading, pauses it.
   audio.addEventListener("playing", () => { wanted = true; recovering = false; tries = 0; });
   audio.addEventListener("pause", () => {
-    if (!recovering && !audio.error) wanted = false;
+    // Not while a song is being fetched: that pause is load()'s own, and
+    // what the listener wants then is in `wanted` already (toggle).
+    if (!recovering && !audio.error && !loadingNow) wanted = false;
     clearTimeout(restTimer);
-    if (!wanted && !loadingNow) restTimer = setTimeout(rest, restAfter);
+    if (!wanted && !loadingNow) armRest();
   });
   audio.addEventListener("play", () => { clearTimeout(restTimer); restTimer = 0; });
 
@@ -362,7 +386,7 @@ export function createPlayer(onChange, onListened, {
     wakingFrom = null;
     seekTo = r.at;
     audio.src = url;
-    audio.play().catch(() => tell());
+    start(mine);
   }
   /** A tap while waking: don't start after all. */
   function stayPaused() {
@@ -417,8 +441,18 @@ export function createPlayer(onChange, onListened, {
     const set = (action, fn) => {
       try { navigator.mediaSession.setActionHandler(action, fn); } catch { /* unsupported */ }
     };
-    set("play", () => { if (resting) { wake(); return; } wanted = true; audio.play().catch(() => {}); });
-    set("pause", () => { if (waking) { stayPaused(); return; } audio.pause(); });
+    set("play", () => {
+      if (resting) { wake(); return; }
+      wanted = true;
+      // Still fetching it: load() starts it once it's there.
+      if (loadingNow) { tell(); return; }
+      audio.play().catch(() => {});
+    });
+    set("pause", () => {
+      if (waking) { stayPaused(); return; }
+      if (loadingNow) { wanted = false; tell(); return; }
+      audio.pause();
+    });
     set("nexttrack", () => api.next());
     set("previoustrack", () => api.prev());
     set("seekto", null);
@@ -458,6 +492,9 @@ export function createPlayer(onChange, onListened, {
       if (resting) return wake();
       if (waking) return stayPaused();
       if (refused) return load(pos);
+      // Still fetching the song: the old one is in the element, so playing it
+      // now would play that. Note what's wanted; load() acts on it.
+      if (loadingNow) { wanted = !wanted; tell(); return; }
       if (audio.paused) { wanted = true; audio.play().catch(() => {}); } else { wanted = false; audio.pause(); }
     },
     next() {
@@ -477,6 +514,8 @@ export function createPlayer(onChange, onListened, {
     seek(seconds) {
       if (resting) { resting.at = seconds; tell(); return; }
       if (waking && wakingFrom) { wakingFrom.at = seconds; seekTo = seconds; tell(); return; }
+      // A fresh source not loaded yet: its seek is still to come, so move that.
+      if (seekTo !== null) { seekTo = seconds; tell(); return; }
       last = seconds; audio.currentTime = seconds;
     },
     /** Try the current song again — after agreeing a price, topping up… */

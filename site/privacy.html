@@ -35,7 +35,8 @@ you pay, and the payment network. Here is exactly what.</p>
   <li><strong>Amply stores nothing about you.</strong> No account, no analytics, no cookies.</li>
   <li><strong>The app keeps your library and listening on your phone.</strong> It never leaves it.</li>
   <li><strong>An artist you pay sees a total for your wallet:</strong> how much you've listened and when
-  you were last there. Never which songs. You can erase it from the app at any time.</li>
+  you were last there. To bill fairly it also keeps, for three days only, how much of each song it
+  sent you. You can erase it from the app at any time.</li>
   <li><strong>Payments are public records</strong> on the payment network, and can't be deleted.
   They show a wallet code, not your name.</li>
   <li><strong>If you top up with Coinbase,</strong> Coinbase sees what it needs for the purchase.</li>
@@ -115,9 +116,11 @@ someone who doesn't pay. Your app does that by signing a challenge; there is sti
 account, no password and no email.</p>
 
 <p>When you play a paid track, <strong>that artist's server keeps a running total for your
-wallet</strong>: how many tracks, how many minutes, and when you were last there. It does
-not record which tracks you played, or when you played them, because Amply's software does
-not collect that. The artist can see those totals and can decide to stop serving your
+wallet</strong>: how many tracks, how many minutes, and when you were last there. The one
+exception is billing: for three days, it keeps how much of each paid song it sent your wallet
+on each day (the day, never the time), because that's what it charges by; then it's deleted.
+Beyond that it doesn't record which tracks you played, or when, because Amply's software does
+not collect that. The artist can see the totals and can decide to stop serving your
 wallet.</p>
 
 <p>Each song also keeps a count of how often it has been played by everyone together, so the
@@ -128,10 +131,15 @@ also deletable by you, without asking anyone: your app can prove the row is your
 signing for it, and the record is erased immediately. No form, no identity documents, and
 nobody to persuade.</p>
 
-<p><strong>If you owe the artist for listening</strong>, erasing removes everything about
-the listening, but keeps what you owe and what you've paid until it's settled, as any seller
-keeps an unpaid bill. Otherwise erasing would be a way not to pay. Once it's paid, erasing
-again removes the rest.</p>
+<p><strong>If you owe the artist for listening</strong>, erasing removes how much and how
+often you listened, but keeps what you owe, what you've paid, those payments' references and
+when you were last there, until it's settled, as any seller keeps an unpaid bill. Otherwise
+erasing would be a way not to pay. Once it's paid, erasing again removes the rest.</p>
+
+<p>Either way, two things outlive erasing for a short while, so that erasing can't be used to
+be charged less: the last three days of what was sent to your wallet, until they're deleted as
+usual; and for a week, the references of payments already counted, with your wallet taken off
+them, so a payment can't be counted twice. A subscription's record stays while it runs.</p>
 
 <p><strong>One exception, and we would rather state it than bury it.</strong> If an artist
 has stopped serving your wallet, erasing your record does not lift that. Everything about

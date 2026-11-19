@@ -19,6 +19,13 @@ import { ask } from "./sheets.jsx";
 export const money = (usd) =>
   usd >= 1 || usd === 0 ? `$${usd.toFixed(2)}` : `${Number((usd * 100).toFixed(2))}¢`;
 
+/** Micros, no more than money() shows for them: whole cents from a dollar
+ *  up, hundredths of a cent below. What a Pay button labelled by money() pays. */
+export const asShown = (micros) => {
+  const m = Math.max(0, Number(micros) || 0);
+  return m >= 1_000_000 ? Math.floor(m / 10_000) * 10_000 : Math.floor(m / 100) * 100;
+};
+
 export function Copy({ text, label = "Copy", onCopied }) {
   const [done, setDone] = useState(false);
   useEffect(() => {

@@ -434,9 +434,14 @@ record is yours by signing for it with your wallet, and the answer comes straigh
 <p>If ${name} has stopped serving your wallet, erasing removes everything but the address
 and that decision, which ${name} keeps so that it stands. You can object to that by
 contacting them.</p>
-<p>If you owe ${name} for listening, erasing removes everything about the listening, but keeps
-what you owe and what you've paid until it's settled, as any seller keeps an unpaid bill. Once
-it's paid, erasing again removes that too.</p>
+<p>If you owe ${name} for listening, erasing removes how much and how often you listened, but
+keeps what you owe, what you've paid, the references of those payments and when you were last
+there, until it's settled, as any seller keeps an unpaid bill. Once it's paid, erasing again
+removes that too.</p>
+<p>Whatever you owe, two things outlive erasing for a short while, so that erasing can't be used
+to be charged less: the last three days of what was sent to your wallet, until they're deleted
+as above; and, for a week, the references of payments already counted, with your wallet taken
+off them, so the same payment can't be counted twice.${subs ? " A subscription's record stays while it runs (above)." : ""}</p>
 ${contactLine}
 <p>You can also complain to the data protection authority where you live.</p>
 ` : `

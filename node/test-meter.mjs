@@ -21,7 +21,7 @@ import { SCHEMA, putSetting, recordPaid, pruneStale, pruneHourly, setAutoBlock, 
 import { feeAddress, feeBalance, OFFER_ABOVE_LAMPORTS } from "./src/settle.ts";
 import { issueToken } from "./src/listen.ts";
 import { parseRange } from "./src/media.ts";
-import { SLACK, slackFor, DELIVERED_CAP, FLUSH, FALLBACK_BYTES_PER_SECOND, PACE, paceHooks, resetTallies } from "./src/meter.ts";
+import { SLACK, slackFor, DELIVERED_CAP, FLUSH, FALLBACK_BYTES_PER_SECOND, PACE, paceHooks, resetTallies, resetCovered, newBytes } from "./src/meter.ts";
 import { renderPrivacy } from "./src/page.ts";
 import { base58 } from "./src/solana-tx.ts";
 
@@ -324,18 +324,39 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
   ok("  inside the slack: nothing owed", owed(a).micros === 0, JSON.stringify(owed(a)));
 }
 
-// ── seeking back: sent again is counted again, up to three plays' worth ─────
+// ── which bytes were counted: spans ─────────────────────────────────────────
+{
+  ok("new bytes: all of a first range", newBytes("k1", 0, 100) === 100);
+  ok("  none of it again", newBytes("k1", 10, 90) === 0);
+  ok("  only the part past it", newBytes("k1", 50, 150) === 50);
+  ok("  a gap, then filling it", newBytes("k1", 300, 400) === 100 && newBytes("k1", 100, 350) === 150);
+  let total = 0;
+  for (let i = 0; i < 500; i++) total += newBytes("k2", i * 10, i * 10 + 5);
+  ok("  many scattered pieces: each counted once, bounded in memory", total === 2500 && newBytes("k2", 0, 5000) <= 2500);
+}
+
+// ── sent again: once per copy, up to three plays' worth a day ───────────────
 {
   const w = await makeWallet();
   await audio(w, "song.mp3", { Range: "bytes=0-119999" });
   tick(FLUSH.gapMs);
   await audio(w, "song.mp3", { Range: "bytes=0-119999" });
-  ok("the same first half fetched twice counts twice (240 s sent)", near(row(w).delivered, LEN), JSON.stringify(row(w)));
-  for (let i = 0; i < 5; i++) { tick(FLUSH.gapMs); await audio(w, "song.mp3"); }
+  ok("the same first half fetched twice from one copy counts once (120 s)", near(row(w).delivered, LEN / 2), JSON.stringify(row(w)));
+  // Paused, the app stops the download; on play it asks from where it was,
+  // and the 20 s it had read ahead come again.
+  tick(FLUSH.gapMs);
+  await audio(w, "song.mp3", { Range: "bytes=100000-159999" });
+  ok("  resumed after a pause, overlapping what was read ahead: only the new 40 s count", near(row(w).delivered, 160), JSON.stringify(row(w)));
+  // Another copy of the Worker doesn't know what this one sent: it counts.
+  resetCovered();
+  tick(FLUSH.gapMs);
+  await audio(w, "song.mp3", { Range: "bytes=0-119999" });
+  ok("  from another copy of the Worker, sent again is counted again (280 s)", near(row(w).delivered, 280), JSON.stringify(row(w)));
+  for (let i = 0; i < 5; i++) { resetCovered(); tick(FLUSH.gapMs); await audio(w, "song.mp3"); }
   ok(`  but never more than ${DELIVERED_CAP}x the song a day (720 s)`, row(w).delivered === DELIVERED_CAP * LEN, JSON.stringify(row(w)));
   ok("  so it's billed at most 3x less the slack", owed(w).micros === (DELIVERED_CAP * LEN - SLACK_S) * 1000, JSON.stringify(owed(w)));
   const writes = flushes;
-  for (let i = 0; i < 3; i++) { tick(FLUSH.gapMs); await audio(w, "song.mp3"); }
+  for (let i = 0; i < 3; i++) { resetCovered(); tick(FLUSH.gapMs); await audio(w, "song.mp3"); }
   ok("  and past the cap, nothing more is written", flushes === writes, `${flushes - writes}`);
 }
 
@@ -467,13 +488,13 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
   // A write at most every gap (shortened here): a handful, not 200.
   const bound = 10;
   ok(`200 tiny ranges: a bounded number of writes (${n}, at most ${bound})`, n > 0 && n <= bound, `${n}`);
-  ok("  and what they add up to, to the cap, is counted", row(w).delivered === DELIVERED_CAP * LEN, JSON.stringify(row(w)));
+  ok("  and each byte counts once, however often it was asked for (240 s)", near(row(w).delivered, LEN), JSON.stringify(row(w)));
   const more = flushes;
   for (let i = 0; i < 200; i++) {
     await call(`/audio/song.mp3?t=${encodeURIComponent(w.token)}`, { headers: { Range: "bytes=0-3999" } }).then((r) => r.arrayBuffer());
   }
   await settled();
-  ok("  200 more past the cap: no more writes at all", flushes === more, `${flushes - more}`);
+  ok("  200 more of bytes already counted: no more writes at all", flushes === more, `${flushes - more}`);
 
   const q = await makeWallet();
   const b2 = flushes;
@@ -556,7 +577,17 @@ ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds ===
   ok("  even for a wallet with no totals yet", theirs.held?.servedTracks === 1, JSON.stringify(theirs.held));
 
   const r = await listen("/forget", await signed(w));
-  ok("erasing deletes what was sent too", r.status === 204 && rows(w).length === 0, JSON.stringify(rows(w)));
+  const keptRows = rows(w);
+  ok("erasing keeps what was sent, until it ages out: erasing between plays doesn't start the slack again",
+    r.status === 204 && keptRows.length === 2 && keptRows.every((x) => x.billed === 156), JSON.stringify(keptRows));
+  // Half a song, erased, then the rest: billed as if never erased (240 s sent,
+  // 84 s of slack, 156 s billed), not the second half against a fresh slack.
+  const eraser = await makeWallet();
+  await audio(eraser, "three.mp3", { Range: "bytes=0-119999" });
+  await listen("/forget", await signed(eraser));
+  await audio(eraser, "three.mp3", { Range: "bytes=120000-239999" });
+  ok("  half a song, erased, then the rest: billed as the whole song, 156 s",
+    Math.round(row(eraser, "three.mp3")?.billed) === 156, JSON.stringify(row(eraser, "three.mp3")));
 
   const today = servedDay(clock);
   const old = await makeWallet();

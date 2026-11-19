@@ -24,6 +24,7 @@
  * D1 rather than KV because KV allows a thousand writes a day on the free plan
  * and a single enthusiastic listener would spend a tenth of that in an evening.
  */
+import { SETTLE_WITHIN_DAYS } from "../../spec/pricing.mjs";
 
 export const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS settings (
@@ -340,70 +341,97 @@ export async function setBlocked(db: D1Database, pubkey: string, blocked: boolea
  * judgement call by a musician. It is a better erasure process than most
  * companies manage, and this is all of it.
  *
- * **One thing survives, and only for a wallet the artist has stopped serving:**
- * the address itself, with the block still on it, and every number wiped. A
- * plain delete would make the ban button useless — the banned party could lift
- * their own ban by asking to be forgotten, and again every time it was reapplied. So
- * what is kept is the minimum that enforces the artist's decision, holding
- * nothing about what anyone listened to. Erasure is not absolute where a
- * controller has grounds to refuse it, and "this person is barred" is the
- * textbook one. A wallet nobody has blocked is deleted outright.
+ * What goes: how much they listened, how often, and since when. Some things
+ * stay, each because without it erasing would be a way round something:
+ *
+ * - **A block the artist made.** The address, with the block on it and every
+ *   number wiped. Otherwise the banned party could lift their own ban by
+ *   asking to be forgotten, again every time it was reapplied. Erasure is not
+ *   absolute where a controller has grounds to refuse it, and "this person is
+ *   barred" is the textbook one.
+ * - **An unpaid bill.** What it owes, what it paid, those payments'
+ *   references, and when it was last here (so a bill a week old still reads
+ *   as overdue). That's the record any seller keeps; once it's paid, erasing
+ *   again takes it.
+ * - **Payment references, for a week, with no wallet on them.** The
+ *   transaction ids of payments already counted, so one can't be reported
+ *   again and counted twice. Swept after SETTLE_WITHIN_DAYS and a day, when
+ *   a report that old is refused anyway (pruneStale).
+ * - **What was sent in the last three days** (`served`), until it ages out
+ *   like everyone's. It's what this server bills from; wiped, a listener
+ *   could erase between plays to be billed afresh from nothing, every time.
+ *
+ * `perMinute`: the price now, for listening from before the server priced it
+ * as heard (see owedOf in spec/standing.mjs), so a bill that old counts too.
  */
-export async function forget(db: D1Database, pubkey: string): Promise<void> {
-  // An unpaid balance stays, with only what it needs (see forgetOwed).
-  const unpaid = await unpaidOfWallet(db, pubkey);
+export async function forget(db: D1Database, pubkey: string, perMinute = 0): Promise<void> {
+  const row = await db.prepare("SELECT seconds FROM listeners WHERE pubkey = ?").bind(pubkey).first<{ seconds: number }>();
+  const ledger = await moneyOf(db, pubkey);
+  // Listening from before `owed`, at today's price, as Auto-block counts it.
+  const older = Math.max(0, (Number(row?.seconds) || 0) - ledger.seconds);
+  const olderMicros = Math.round((older / 60) * (perMinute > 0 ? perMinute : 0) * 1_000_000);
+  const unpaid = ledger.owed + olderMicros - ledger.paid;
+  if (unpaid > 0 && ledger.tables) {
+    // The older listening becomes part of the bill, priced, and how long
+    // anyone listened goes: a bill needs the amount, not the minutes.
+    await db.prepare(
+      `INSERT INTO owed (pubkey, micros, seconds) VALUES (?, ?, 0)
+       ON CONFLICT(pubkey) DO UPDATE SET micros = micros + excluded.micros, seconds = 0`,
+    ).bind(pubkey, olderMicros).run();
+  }
+  const owing = unpaid > 0 && ledger.tables;
+  // last_seen stays as it was for a bill (overdue reads it); 0 for a block.
   await db.prepare(
-    `UPDATE listeners SET plays = 0, seconds = 0, first_seen = 0, last_seen = ?
-     WHERE pubkey = ? AND (blocked = 1 OR ? > 0)`,
-  ).bind(unpaid > 0 ? Date.now() : 0, pubkey, unpaid).run();
-  await db.prepare("DELETE FROM listeners WHERE pubkey = ? AND blocked = 0 AND ? <= 0").bind(pubkey, unpaid).run();
-  await forgetOwed(db, pubkey, unpaid > 0);
+    `UPDATE listeners SET plays = 0, seconds = 0, first_seen = 0,
+       last_seen = CASE WHEN ? THEN last_seen ELSE 0 END
+     WHERE pubkey = ? AND (blocked = 1 OR ?)`,
+  ).bind(owing ? 1 : 0, pubkey, owing ? 1 : 0).run();
+  await db.prepare("DELETE FROM listeners WHERE pubkey = ? AND blocked = 0 AND NOT ?").bind(pubkey, owing ? 1 : 0).run();
+  await forgetOwed(db, pubkey, owing);
 }
 
-/** What a wallet owes here and hasn't paid, in micros: 0 without the tables. */
-async function unpaidOfWallet(db: D1Database, pubkey: string): Promise<number> {
+/** A wallet's money record here, in micros: 0s without the tables. */
+async function moneyOf(db: D1Database, pubkey: string): Promise<{ owed: number; seconds: number; paid: number; tables: boolean }> {
   try {
-    const owed = await db.prepare("SELECT micros FROM owed WHERE pubkey = ?").bind(pubkey).first<{ micros: number }>();
+    const owed = await db.prepare("SELECT micros, seconds FROM owed WHERE pubkey = ?").bind(pubkey).first<{ micros: number; seconds: number }>();
     const paid = await db.prepare("SELECT micros FROM paid WHERE pubkey = ?").bind(pubkey).first<{ micros: number }>();
-    return Math.max(0, (Number(owed?.micros) || 0) - (Number(paid?.micros) || 0));
+    return { owed: Number(owed?.micros) || 0, seconds: Number(owed?.seconds) || 0, paid: Number(paid?.micros) || 0, tables: true };
   } catch {
-    return 0;
+    return { owed: 0, seconds: 0, paid: 0, tables: false };
   }
 }
+
+/** How long a counted payment's reference outlives its wallet's record: as
+ *  long as a report of it is accepted (SETTLE_WITHIN_DAYS), and a day more. */
+export const PAID_SIGS_KEEP_MS = (SETTLE_WITHIN_DAYS + 1) * 86_400_000;
 
 /**
- * What a wallet's listening cost, and what it has paid, go with the rest of
- * what's held about it — unless it still owes something.
+ * A wallet's money record goes with the rest of what's held about it,
+ * unless it still owes something (`keepMoney`): then what it owes, what it
+ * paid and its payments' references all stay (see forget).
  *
- * Erasing wipes everything about the listening: which songs went to it, how
- * much, how often, when. But a wallet that hasn't paid for what it took keeps
- * its money record (what it owes, what it paid, and the payments' signatures,
- * so none can be counted twice), and an empty row in `listeners`, last seen
- * now, so Auto-block still knows it. That's the record any seller keeps of an
- * unpaid bill; without it, erasing would be a way not to pay. Once it's paid,
- * erasing again takes the rest. A block the artist made by hand survives
- * either way.
+ * Paid or not, a payment's reference outlives the record by a week, with no
+ * wallet on it (and no amount): only so the same payment can't be reported
+ * again and counted twice. With no `pubkey`, this is the sweep (pruneStale):
+ * money records of wallets no longer held, and references past the week.
  */
-async function forgetOwed(db: D1Database, pubkey?: string, keepMoney = false): Promise<void> {
+async function forgetOwed(db: D1Database, pubkey?: string, keepMoney = false, now = Date.now()): Promise<void> {
   // Each on its own: a database from before one of these tables still has
   // the others cleared.
-  if (!keepMoney) {
-    for (const table of ["owed", "paid", "paid_sigs"]) {
-      try {
-        await (pubkey
-          ? db.prepare(`DELETE FROM ${table} WHERE pubkey = ?`).bind(pubkey)
-          : db.prepare(`DELETE FROM ${table} WHERE pubkey NOT IN (SELECT pubkey FROM listeners)`)
-        ).run();
-      } catch { /* no such table yet */ }
-    }
-  }
-  // What was sent to this wallet goes, owing or not: the money record above
-  // is all an unpaid bill needs. Not swept with the others below: a wallet
-  // whose listening hasn't cost anything yet has rows here and no record in
-  // listeners. They go by age instead (pruneStale).
+  const run = async (sql: string, ...args: unknown[]) => {
+    try { await db.prepare(sql).bind(...args).run(); } catch { /* no such table yet */ }
+  };
   if (pubkey) {
-    try { await db.prepare("DELETE FROM served WHERE pubkey = ?").bind(pubkey).run(); } catch { /* no such table yet */ }
+    if (keepMoney) return;
+    await run("DELETE FROM owed WHERE pubkey = ?", pubkey);
+    await run("DELETE FROM paid WHERE pubkey = ?", pubkey);
+    await run("UPDATE paid_sigs SET pubkey = '', micros = 0 WHERE pubkey = ?", pubkey);
+    return;
   }
+  await run("DELETE FROM owed WHERE pubkey NOT IN (SELECT pubkey FROM listeners)");
+  await run("DELETE FROM paid WHERE pubkey NOT IN (SELECT pubkey FROM listeners)");
+  await run("UPDATE paid_sigs SET pubkey = '', micros = 0 WHERE pubkey <> '' AND pubkey NOT IN (SELECT pubkey FROM listeners)");
+  await run("DELETE FROM paid_sigs WHERE pubkey = '' AND at < ?", now - PAID_SIGS_KEEP_MS);
 }
 
 // ── what was sent, metered (meter.ts) ──────────────────────────────────────
@@ -562,7 +590,9 @@ export async function paidOf(db: D1Database, pubkey: string): Promise<number | n
 /**
  * One payment, counted once: keyed by its transaction, so a payment reported
  * twice — the app asking again, two copies of the Worker at once, the same
- * signature sent by someone else — adds to the total only the first time.
+ * signature sent by someone else, or again after its wallet was erased (the
+ * reference outlives that by a week: forgetOwed) — adds to the total only the
+ * first time.
  * Returns whether it was new. A database without the tables records nothing.
  */
 export async function recordPaid(db: D1Database, pubkey: string, micros: number, sig: string, now = Date.now()): Promise<boolean> {
@@ -673,7 +703,7 @@ const KEEP_FOR = 365 * 86400_000;
 export async function pruneStale(db: D1Database, now = Date.now()): Promise<void> {
   await db.prepare("DELETE FROM listeners WHERE blocked = 0 AND last_seen < ?")
     .bind(now - KEEP_FOR).run();
-  await forgetOwed(db);
+  await forgetOwed(db, undefined, false, now);
   // What was sent, after three days (SERVED_KEEP_DAYS).
   try {
     await db.prepare("DELETE FROM served WHERE day <= ?").bind(servedDay(now) - SERVED_KEEP_DAYS).run();

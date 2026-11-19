@@ -450,6 +450,31 @@ const report = async (signature, ip = nextIp()) => {
   await forget(DB, kept.address);
   ok("a blocked wallet, paid up, erased keeps only its block: what it paid goes too", (await listener(DB, kept.address))?.blocked === 1 && (await paidOf(DB, kept.address)) === 0);
 
+  // A payment counted, the wallet erased (paid up), listening again: the same
+  // payment reported again isn't counted a second time.
+  const replay = await makeWallet();
+  known(replay, { owed: 1_000_000 });
+  const sig = newSig();
+  await recordPaid(DB, replay.address, 1_000_000, sig);
+  await forget(DB, replay.address);
+  ok("erased, paid up: the payment's reference stays, with no wallet or amount on it",
+    sqlite.prepare("SELECT pubkey, micros FROM paid_sigs WHERE sig = ?").get(sig)?.pubkey === "" && (await listener(DB, replay.address)) === null);
+  known(replay, { owed: 2_000_000 });
+  ok("  listening again, the same payment reported again isn't counted twice",
+    !(await recordPaid(DB, replay.address, 1_000_000, sig)) && (await paidOf(DB, replay.address)) === 0);
+  await pruneStale(DB, Date.now() + 9 * DAY);
+  ok("  and after a week and a day, the reference goes too", !sqlite.prepare("SELECT 1 FROM paid_sigs WHERE sig = ?").get(sig));
+
+  // Owing from before the server priced listening as heard: still owed.
+  const older = await makeWallet();
+  known(older, { owed: 0, seconds: 0, lastSeen: Date.now() - 3 * DAY });
+  sqlite.prepare("UPDATE listeners SET seconds = 3000 WHERE pubkey = ?").run(older.address);   // 50 minutes, unpriced
+  await forget(DB, older.address, 0.06);
+  ok("erasing a wallet whose bill is from before prices were kept: it's priced and kept ($3.00)",
+    sqlite.prepare("SELECT micros, seconds FROM owed WHERE pubkey = ?").get(older.address)?.micros === 3_000_000
+    && (await listener(DB, older.address))?.seconds === 0);
+  ok("  and when it was last here stays, so the bill still ages", Math.abs(lastSeenOf(older) - (Date.now() - 3 * DAY)) < 5_000, String(lastSeenOf(older)));
+
   const gone = await makeWallet();
   known(gone, { owed: 3_000_000 });
   await recordPaid(DB, gone.address, 1_000_000, newSig());

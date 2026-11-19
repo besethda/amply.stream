@@ -50,11 +50,16 @@ import { addServed, billSent, inOneGo, servedDay, type ServedKey } from "./store
  * that is never more than they played, for a track of any length (the worst
  * case, stopping just as the whole file has gone, is 24 - 0.15 x length
  * seconds, below zero from 160 s; under 160 s the 70 s floor covers it).
- * Starting it again the same day adds only PACE.restart up front, and a
- * paused song isn't downloaded by the app; a listener who restarts one song
- * many times a day can still be counted a little over (each start's 3 s,
- * and a quarter of what they played on top), which the slack covers for a
- * handful of starts.
+ * Bytes this copy has already counted aren't counted again (newBytes), so
+ * picking a paused song up again — the app asks afresh from where it was —
+ * adds only what's new. A player that keeps downloading while paused is
+ * still paced (1.25 s of audio a second, never past the song's end; browsers
+ * stop reading ahead of their own accord after a while): this server can't
+ * tell that from listening and doesn't try. The listener's app stops downloading 1.5 s into a pause, for
+ * its own sake (app/src/player.js); nothing here relies on it. A listener
+ * who restarts one song many times a day, or whose requests land on several
+ * copies of the Worker, can still be counted a little over (each start's 3 s
+ * up front), which the slack covers for a handful of starts.
  */
 export const SLACK = { seconds: 70, share: 0.35 } as const;
 export const slackFor = (trackSeconds: number) => Math.max(SLACK.seconds, SLACK.share * trackSeconds);
@@ -181,6 +186,52 @@ interface Tally {
 const tallies = new Map<string, Tally>();
 const idOf = (k: ServedKey) => `${k.pubkey}|${k.track}|${k.day}`;
 
+/**
+ * Which bytes of each file this copy has already counted, per (wallet,
+ * track, day), as sorted spans [from, to). A player that stops its download
+ * while paused (app/src/player.js) asks again from where it was on play, and
+ * the bytes it had read ahead come again: counted once, here. So do bytes
+ * fetched again after seeking back. Kept apart from the tallies, which an
+ * erase drops: the bytes were still sent.
+ *
+ * In this copy's memory only: another copy of the Worker counts what it
+ * sends afresh, which DELIVERED_CAP bounds. At most MAX_SPANS a key; past
+ * that, the two spans closest together become one, the bytes between them
+ * taken as counted (the listener's way).
+ */
+const covered = new Map<string, number[][]>();
+const MAX_SPANS = 64;
+
+/** How many of the bytes [from, to) of this file haven't been counted here
+ *  yet for this key; and they are now. */
+export function newBytes(id: string, from: number, to: number): number {
+  if (!(to > from)) return 0;
+  let spans = covered.get(id);
+  if (!spans) {
+    if (covered.size >= MAX_KEYS) covered.delete(covered.keys().next().value as string);
+    spans = [];
+    covered.set(id, spans);
+  }
+  let seen = 0;
+  for (const [a, b] of spans) seen += Math.max(0, Math.min(b, to) - Math.max(a, from));
+  // Merge [from, to) in.
+  const merged: number[][] = [];
+  let lo = from, hi = to, placed = false;
+  for (const [a, b] of spans) {
+    if (b < lo) merged.push([a, b]);
+    else if (a > hi) { if (!placed) { merged.push([lo, hi]); placed = true; } merged.push([a, b]); }
+    else { lo = Math.min(lo, a); hi = Math.max(hi, b); }
+  }
+  if (!placed) merged.push([lo, hi]);
+  while (merged.length > MAX_SPANS) {
+    let k = 0;
+    for (let i = 1; i < merged.length - 1; i++) if (merged[i + 1][0] - merged[i][1] < merged[k + 1][0] - merged[k][1]) k = i;
+    merged.splice(k, 2, [merged[k][0], merged[k + 1][1]]);
+  }
+  covered.set(id, merged);
+  return to - from - seen;
+}
+
 /** What metering needs to write: the database, the price now for a wallet
  *  (dollars a minute, 0 while it's free to them), and somewhere to put work
  *  that outlives the response (ctx.waitUntil). */
@@ -217,6 +268,8 @@ export function metered(
   length: number | null,
   t: {
     pubkey: string; track: string; size: number; duration: number | null; now?: number;
+    /** Where in the file the body starts (a range's first byte). */
+    start?: number;
     /** Whether this track has gone to this wallet already today, as the
      *  database says. Read once, on the first piece; if it can't be read,
      *  taken as yes (no burst). */
@@ -248,6 +301,8 @@ export function metered(
     return price;
   };
   let first = true;
+  // Where in the file the next piece is: bytes counted already aren't again.
+  let at = Number.isFinite(t.start) && (t.start as number) >= 0 ? (t.start as number) : 0;
   const end = () => { ended = true; };
   const reader = body.getReader();
   const counting = new ReadableStream<Uint8Array>({
@@ -266,8 +321,13 @@ export function metered(
         const seconds = secondsOf(value.byteLength, t.size, t.duration);
         await paced(pace, seconds, freshNow);
         c.enqueue(value);
+        const from = at;
+        at += value.byteLength;
         if (perMinute !== 0) {
-          try { add(key, seconds, trackSeconds, deps, Date.now(), perMinute); } catch { /* never the listener's problem */ }
+          try {
+            const fresh = newBytes(idOf(key), from, at);
+            add(key, secondsOf(fresh, t.size, t.duration), trackSeconds, deps, Date.now(), perMinute);
+          } catch { /* never the listener's problem */ }
         }
       } catch (e) {
         end();
@@ -369,4 +429,7 @@ export function forgetTallies(pubkey: string): void {
 }
 
 /** For tests: start again with nothing counted. */
-export function resetTallies(): void { tallies.clear(); buckets.clear(); }
+export function resetTallies(): void { tallies.clear(); buckets.clear(); covered.clear(); }
+
+/** For tests: as another copy of the Worker would be, knowing no bytes sent. */
+export function resetCovered(): void { covered.clear(); }

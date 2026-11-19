@@ -442,5 +442,16 @@ same("nothing owed is nothing sent", o.pieces(0), []);
   ok("  nor on a tap for 0.3¢: it waits, rather than round up to a cent", sent.length === 0, JSON.stringify(sent));
 }
 
+// The Pay button pays no more than its label reads.
+{
+  const { money, asShown } = await import("./src/wallet-ui.jsx");
+  for (const m of [1_234_567, 1_239_999, 999_999, 12_345, 1_000_000, 0, 87]) {
+    const shown = money(m / 1e6), paid = asShown(m);
+    const read = shown.endsWith("¢") ? parseFloat(shown) * 10_000 : parseFloat(shown.slice(1)) * 1e6;
+    ok(`Pay for ${m} micros, shown ${shown}: pays ${paid}, no more than shown or owed`, paid <= m && paid <= Math.round(read) + 0.5, `${paid} vs ${read}`);
+  }
+  ok("  $1.234 owed pays $1.23", asShown(1_234_567) === 1_230_000);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
