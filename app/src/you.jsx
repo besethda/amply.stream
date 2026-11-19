@@ -10,6 +10,10 @@ import { isSubscribed, subscriptionUntil, originOf } from "./identify.js";
 import { nameOf } from "./screens.jsx";
 import { charges } from "../../spec/pricing.mjs";
 import { ask } from "./sheets.jsx";
+import { Equalizer, Appearance } from "./eq-ui.jsx";
+
+const TABS = [["wallet", "Wallet"], ["general", "General"]];
+const TAB_KEY = "amply.you.tab";
 
 function Row({ icon, label, meta, onClick, tone }) {
   return (
@@ -34,7 +38,9 @@ function Sub({ title, onBack, children }) {
   );
 }
 
-export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenArtist, view, setView, themeName, onTheme, purchases, onSetUp }) {
+export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenArtist, view, setView, themeName, onTheme, purchases, onSetUp, eq }) {
+  const [tab, pickTab] = useState(() => { try { return localStorage.getItem(TAB_KEY) === "general" ? "general" : "wallet"; } catch { return "wallet"; } });
+  const setTab = (t) => { pickTab(t); try { localStorage.setItem(TAB_KEY, t); } catch { /* fine */ } };
   const [where, setWhere] = useState(networkName);
   const network = NETWORKS[where];
   const saved = pair && backupSaved(pair.publicKey.toBase58());
@@ -90,9 +96,33 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
     );
   }
 
+  const tabs = (
+    <div class="segs you-tabs" role="tablist">
+      {TABS.map(([id, name]) => (
+        <button key={id} role="tab" aria-selected={tab === id} class={`seg${tab === id ? " on" : ""}`} onClick={() => setTab(id)}>{name}</button>
+      ))}
+    </div>
+  );
+
+  if (tab === "general") {
+    return (
+      <div class="screen you">
+        <div class="head"><h1>You</h1></div>
+        {tabs}
+        <div class="pad general">
+          <span class="label">APPEARANCE</span>
+          <Appearance themeName={themeName} onTheme={onTheme} />
+          <span class="label">SOUND</span>
+          {eq && <Equalizer eq={eq} />}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div class="screen">
+    <div class="screen you">
       <div class="head"><h1>You</h1></div>
+      {tabs}
       <div class="pad stack">
         {!pair ? (
           <button class="btn-primary wide" onClick={() => onSetUp?.()}><Icon.key size={18} /> Save your ID</button>
@@ -125,7 +155,6 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
         <Row icon={<Icon.folder size={18} />} label="Purchases" onClick={() => setView("purchases")} />
         {pair && <Row icon={<Icon.key size={18} />} label="Backup key" meta={saved ? "saved" : "not saved"} tone={saved ? "" : "warn-ink"} onClick={() => setView("backup")} />}
         {pair && <Row icon={<Icon.globe size={18} />} label="Network" meta={network.real ? "Solana" : "Test"} onClick={() => setView("network")} />}
-        <Row icon={themeName === "dark" ? <Icon.sun size={18} /> : <Icon.moon size={18} />} label={themeName === "dark" ? "Light mode" : "Dark mode"} onClick={onTheme} />
         <a class="you-row" href="/paying" target="_blank" rel="noopener">
           <span class="you-icon"><Icon.help size={18} /></span><span class="t">How paying works</span><Icon.external size={14} />
         </a>

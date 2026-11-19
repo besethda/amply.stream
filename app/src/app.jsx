@@ -41,6 +41,7 @@ import { Onboard } from "./onboard.jsx";
 import { AddScreen } from "./add.jsx";
 import { createVisualizer } from "./visualizer.js";
 import { pageScroll, setPageScroll, scrollToTop } from "./scroll.js";
+import { createEq } from "./eq.js";
 import { useDesktop, MainPanel, TopBar, Sidebar, PlayerBar, SidePanel, Expanded, useKeys, useVolume } from "./desktop.jsx";
 import {
   LOCAL, localSongs, audioUrl as localAudio, wavesResponse, albums as albumsOf, editSong, removeSong, saveOwned, ownedIndex, setOwned, filesOf,
@@ -300,6 +301,13 @@ export function App() {
   try { if (location.hostname === "localhost") window.__amplyPlayer = player; } catch { /* not a browser */ }
   // A computer's volume slider, and its keys: space, arrows, M, L.
   const volume = useVolume(player);
+  // The equaliser: nothing routed through it until it's first switched on.
+  const eq = useMemo(() => (typeof window !== "undefined" ? createEq(player.element()) : null), []);
+  useEffect(() => {
+    const a = player.element(), wake = () => eq?.wake();
+    a.addEventListener("play", wake);
+    return () => a.removeEventListener("play", wake);
+  }, []);
   useKeys({ player, state, volume, onLike: () => { if (state.track) { toggleLike(state.track); bump((n) => n + 1); } } });
 
   // ── listening, banked and paid for ────────────────────────────────────────
@@ -1490,7 +1498,7 @@ export function App() {
       <You pair={pair} setPair={setPair} balance={balance} owed={owedAll} onRefresh={refresh}
         onSetUp={() => needWallet()}
         entries={entries} onOpenArtist={(u) => go({ open: u })} view={youView} setView={setYouView}
-        themeName={themeName} onTheme={toggleTheme}
+        themeName={themeName} onTheme={toggleTheme} eq={eq}
         purchases={<Purchases pair={pair} entries={entries} owned={ownedMap} onOpenArtist={(u) => go({ open: u })}
           onDownload={(e, ids) => keepSongs(e, ids, titleOfItem(e, ids[0]))}
           onShareGift={(e, code, title) => giftSheet(e, code, title)} />} />
