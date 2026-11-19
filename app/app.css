@@ -1411,13 +1411,13 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 :root[data-theme="light"] .d-bar-waves { opacity: .26; }
 .d-bar-waves .waveform { position: absolute; left: 0; right: 0; top: 0; height: 100%; width: 100%; }
 /* Behind the controls and their times, the bar's own colour, so the waves never cross text. */
-.d-bar-mid::before {
-  content: ""; position: absolute; left: 50%; top: 50%; width: 460px; height: 76px; transform: translate(-50%, -50%); z-index: -1; pointer-events: none;
-  background: radial-gradient(closest-side, var(--d-frame) 62%, transparent);
-}
-.d-bar-song::before {
-  content: ""; position: absolute; inset: -10px -30px -10px -16px; z-index: -1; pointer-events: none;
-  background: radial-gradient(closest-side, var(--d-frame) 70%, transparent);
+:root[data-theme] .d-bar-waves.wave-boxes { opacity: .32; }
+/* Behind the text and buttons, the bar's own colour, feathered: just their
+   width, so the waves show everywhere else across the bar. */
+.d-controls, .d-bar-text, .d-bar-right { position: relative; }
+.d-controls::before, .d-bar-text::before, .d-bar-right::before {
+  content: ""; position: absolute; inset: -14px -24px; z-index: -1; pointer-events: none; border-radius: 999px;
+  background: var(--d-frame); filter: blur(14px);
 }
 .d-bar-mid { flex-direction: row; justify-content: center; }
 .d-controls .d-time { min-width: 40px; text-align: right; margin-right: 6px; }
@@ -1447,12 +1447,12 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 /* ── now playing: the music behind everything ── */
 .d-expanded { grid-template-rows: auto minmax(0, 1fr); }
 .d-exp-wave {
-  position: absolute; left: 0; right: 0; bottom: 0; height: 46%; margin: 0; pointer-events: none; z-index: 0;
+  position: absolute; left: 0; right: 0; bottom: calc(96px - 23%); height: 46%; margin: 0; pointer-events: none; z-index: 0;
   /* Fading up into the content, and out at both sides, so a quiet moment
      never draws a flat line across the window. */
-  -webkit-mask-image: linear-gradient(180deg, transparent, #000 34%), linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 34%), linear-gradient(90deg, transparent 2%, #000 15%, #000 85%, transparent 98%);
   -webkit-mask-composite: source-in;
-  mask-image: linear-gradient(180deg, transparent, #000 34%), linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 34%), linear-gradient(90deg, transparent 2%, #000 15%, #000 85%, transparent 98%);
   mask-composite: intersect;
 }
 .d-expanded > .d-wave-pick { position: absolute; right: 24px; bottom: 20px; z-index: 2; margin: 0; }
@@ -1465,4 +1465,6 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 .d-shape-row.big .d-time { font-size: 12.5px; color: var(--ink2); min-width: 40px; }
 /* The line along the bar's top stays while Now playing is open. */
 .d-bar.under .d-line { z-index: 61; }
+.desk .d-exp-cover, .desk .d-exp-queue { align-self: start; }
+.desk .d-exp-main { padding-top: 40px; }
 

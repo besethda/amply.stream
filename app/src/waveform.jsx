@@ -329,7 +329,7 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
       // by side merge into one wide peak. The columns away from a band's
       // middle show it a moment earlier, so a beat still rises from the
       // middle out.
-      const n = bands.length, sigma = 0.42;
+      const n = bands.length, sigma = 0.34;
       return Array.from({ length: cols }, (_, c) => {
         const f = (c / (cols - 1)) * (n - 1);
         const away = Math.abs(f - Math.round(f));
@@ -341,7 +341,7 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
           sum += (now[b] ?? bands[b]) * wgt; weights += wgt;
         }
         // Between two bands the bell dips a little, so each band reads as its own peak.
-        const dip = 1 - 0.5 * Math.sin(Math.PI * away) ** 2;
+        const dip = 1 - 0.7 * Math.sin(Math.PI * away) ** 2;
         return Math.max(0, (sum / weights) * dip);
       });
     };

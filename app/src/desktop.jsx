@@ -420,7 +420,7 @@ export function PlayerBar({
       {/* The music, moving softly behind everything (in Now playing, its
           own larger waves take over); and the song's progress along the top
           edge, the one place it's shown, always. */}
-      {t && !expanded && <div class="d-bar-waves" aria-hidden="true">
+      {t && !expanded && <div class={`d-bar-waves wave-${wave}`} aria-hidden="true">
         <Waveform viz={viz} playing={state.playing && !state.waiting} accent={t.colors?.accent} style={wave} inset={0} wide bare />
       </div>}
       {t && <BarLine state={state} player={player} />}
