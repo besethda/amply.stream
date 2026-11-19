@@ -160,10 +160,12 @@ function boxColours(accent, light, cols, rows = BOX_ROWS) {
   });
 }
 
-export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20, style = "ribbons", wide = false }) {
+export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20, style = "ribbons", wide = false, bare = false }) {
   const canvas = useRef(null);
-  const live = useRef({ playing, progress, accent, style, wide });
-  live.current = { playing, progress, accent, style, wide };
+  const live = useRef({ playing, progress, accent, style, wide, bare });
+  // `bare`: the music alone, without the progress line or its dot (desktop:
+  // behind the player bar, and above the song's own shape in Now playing).
+  live.current = { playing, progress, accent, style, wide, bare };
 
   useEffect(() => {
     const el = canvas.current;
@@ -320,11 +322,27 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
       const past = Array.from({ length: DETAIL_MAX + 1 }, (_, k) => viz.bands(age + k * DETAIL_S));
       const bands = past[0];
       if (!bands) return null;
+      // Each band a rounded peak several columns wide, blending into its
+      // neighbours: every column is the bands near it, weighted by how near
+      // (a bell, a little narrower than a band), so a loud band rises as a
+      // mound with shoulders, not a one-column spike, and two loud bands side
+      // by side merge into one wide peak. The columns away from a band's
+      // middle show it a moment earlier, so a beat still rises from the
+      // middle out.
+      const n = bands.length, sigma = 0.42;
       return Array.from({ length: cols }, (_, c) => {
-        const f = (c / (cols - 1)) * (bands.length - 1), b = Math.round(f);
-        const away = Math.abs(f - b) * ((cols - 1) / (bands.length - 1));
-        const k = Math.min(DETAIL_MAX, Math.round(away));
-        return Math.max(0, (past[k]?.[b] ?? bands[b]) * (1 - EDGE_DROP * Math.min(1, away / 2)));
+        const f = (c / (cols - 1)) * (n - 1);
+        const away = Math.abs(f - Math.round(f));
+        const k = Math.min(DETAIL_MAX, Math.round(away * 2 * DETAIL_MAX * 0.75));
+        const now = past[k] || bands;
+        let sum = 0, weights = 0;
+        for (let b = Math.max(0, Math.floor(f) - 2); b <= Math.min(n - 1, Math.ceil(f) + 2); b++) {
+          const wgt = Math.exp(-((f - b) ** 2) / (2 * sigma * sigma));
+          sum += (now[b] ?? bands[b]) * wgt; weights += wgt;
+        }
+        // Between two bands the bell dips a little, so each band reads as its own peak.
+        const dip = 1 - EDGE_DROP * 0.5 * Math.sin(Math.PI * away) ** 2;
+        return Math.max(0, (sum / weights) * dip);
       });
     };
 
@@ -400,6 +418,7 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
     };
 
     const afterRibbons = (now, real, settled, P, w, h, mid, pad, head, light) => {
+      if (live.current.bare) { next(now, real, settled); return; }
       // Still to come: dim the ribbons after the playhead. Not the boxes: across,
       // they're frequencies, and cutting them at the playhead only confuses.
       if (live.current.style === "ribbons") {

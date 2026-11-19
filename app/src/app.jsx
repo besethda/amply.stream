@@ -1595,7 +1595,7 @@ export function App() {
           onLike={() => { if (t) { toggleLike(t); redraw(); } }} onArtist={() => t && toArtist(t)}
           onAlbum={() => t && t.releaseId && openAlbum(t.from, t.releaseId)}
           panel={showPanel ? panel : null} onPanel={(p) => { if (np) setNp(false); setPanel(panel === p && !np ? null : p); }}
-          expanded={np} onExpand={() => setNp(!np)} volume={volume} />
+          expanded={np} onExpand={() => setNp(!np)} volume={volume} wave={wave} />
         {np && t && <Expanded state={state} player={player} viz={viz} cost={cost} wave={wave} onWave={nextWave}
           onClose={() => setNp(false)} onArtist={() => toArtist(t)} liked={isLiked(t)}
           onLike={() => { toggleLike(t); redraw(); }} onAddTo={() => pickPlaylist(t)} onShare={() => shareSong(t)}

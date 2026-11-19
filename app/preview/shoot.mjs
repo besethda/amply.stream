@@ -21,6 +21,7 @@ const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i >= 0
 const flag = (name) => argv.includes(`--${name}`);
 const WIDTH = +opt("width", 1440), HEIGHT = +opt("height", 900);
 const THEME = opt("theme", "dark") === "light" ? "light" : "dark";
+const WAVE = opt("wave", "");   // ribbons | boxes | hills: how the music is drawn
 const OUT = opt("out", join(HERE, "shots"));
 const SCEN = opt("scenario", "all").split(",");
 const TIMEOUT = +opt("timeout", 25000);
@@ -220,7 +221,7 @@ for (const name of names) {
   if (!SCENARIOS[name]) { console.log(`unknown scenario ${name}; have: ${Object.keys(SCENARIOS).join(", ")}`); failures++; continue; }
   const ctx = await browser.newContext({ viewport: { width: WIDTH, height: HEIGHT }, deviceScaleFactor: 1, serviceWorkers: "block", colorScheme: THEME });
   const seed = seedData();
-  await ctx.addInitScript(([seed, theme]) => {
+  await ctx.addInitScript(([seed, theme, wave]) => {
     try {
       if (localStorage.getItem("__preview_seeded")) return;
       localStorage.setItem("amply.library.v1", JSON.stringify(seed.library));
@@ -228,9 +229,10 @@ for (const name of names) {
       localStorage.setItem("amply.playlists.v1", JSON.stringify(seed.playlists));
       localStorage.setItem("amply.recent.v1", JSON.stringify(seed.recent));
       localStorage.setItem("amply.theme", JSON.stringify(theme));
+      if (wave) localStorage.setItem("amply.wave", JSON.stringify(wave));
       localStorage.setItem("__preview_seeded", "1");
     } catch {}
-  }, [seed, THEME]);
+  }, [seed, THEME, WAVE]);
   await ctx.route("**/*", (route) => mockHandler(route, BASE).catch(() => route.abort().catch(() => {})));
   const page = await ctx.newPage();
   page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) console.log(`[console.error ${name}] ${m.text().slice(0, 300)}`); });

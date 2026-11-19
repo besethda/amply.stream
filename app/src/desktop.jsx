@@ -194,6 +194,7 @@ export function Sidebar({
 // ── the song's shape: the player bar's progress ────────────────────────────
 
 const BAR = 2.6, GAP = 1.6;   // css px: each column's bar, and the space after it
+const BIG = { bar: 4, gap: 3 };   // in Now playing, where it's the scrubber across the window
 
 /**
  * The whole song drawn as its loudness, played part in the cover's colour,
@@ -201,7 +202,8 @@ const BAR = 2.6, GAP = 1.6;   // css px: each column's bar, and the space after 
  * column under the playhead breathes with the music, so it reads as alive
  * even though the shape is the whole song. Without a waves file, a plain line.
  */
-export function SongShape({ viz, state, player, accent, trackKey }) {
+export function SongShape({ viz, state, player, accent, trackKey, big = false }) {
+  const barW = big ? BIG.bar : BAR, gapW = big ? BIG.gap : GAP;
   const canvas = useRef(null);
   const box = useRef(null);
   const [hover, setHover] = useState(null);     // 0..1 under the pointer
@@ -225,7 +227,7 @@ export function SongShape({ viz, state, player, accent, trackKey }) {
       const r = el.getBoundingClientRect();
       dpr = Math.min(2, devicePixelRatio || 1);
       el.width = Math.round(r.width * dpr); el.height = Math.round(r.height * dpr);
-      cols = Math.max(24, Math.floor(r.width / (BAR + GAP)));
+      cols = Math.max(24, Math.floor(r.width / (barW + gapW)));
     };
     size();
     const ro = typeof ResizeObserver === "function" ? new ResizeObserver(size) : null;
@@ -248,7 +250,7 @@ export function SongShape({ viz, state, player, accent, trackKey }) {
       smooth += (loud - smooth) * 0.35;
       glow += ((L.playing ? 1 : 0) - glow) * 0.08;
       g.clearRect(0, 0, w, h);
-      const mid = h / 2, cell = (BAR + GAP) * dpr, bw = BAR * dpr, x0 = (w - cols * cell + GAP * dpr) / 2;
+      const mid = h / 2, cell = (barW + gapW) * dpr, bw = barW * dpr, x0 = (w - cols * cell + gapW * dpr) / 2;
       const head = L.progress * w, hov = L.hover;
 
       if (!shape) {
@@ -291,6 +293,12 @@ export function SongShape({ viz, state, player, accent, trackKey }) {
           g.globalCompositeOperation = light ? "source-over" : "lighter";
           g.fillStyle = halo; g.beginPath(); g.arc(head, mid, rad, 0, Math.PI * 2); g.fill();
           g.globalCompositeOperation = "source-over";
+          if (big) {
+            // A dot on the playhead, as on the line through the phone's waves.
+            g.fillStyle = light ? "#fff" : "#fff7ef";
+            g.beginPath(); g.arc(head, mid, 6.5 * dpr, 0, Math.PI * 2); g.fill();
+            if (light) { g.fillStyle = `rgb(${line})`; g.beginPath(); g.arc(head, mid, 4.5 * dpr, 0, Math.PI * 2); g.fill(); }
+          }
         }
       }
       // The hover line: where a click would go.
@@ -303,7 +311,7 @@ export function SongShape({ viz, state, player, accent, trackKey }) {
     };
     raf = requestAnimationFrame(draw);
     return () => { cancelAnimationFrame(raf); ro?.disconnect(); };
-  }, [viz]);
+  }, [viz, big]);
 
   const at = (e) => {
     const r = box.current.getBoundingClientRect();
@@ -312,7 +320,7 @@ export function SongShape({ viz, state, player, accent, trackKey }) {
   const commit = (f) => { player.seek(f * dur); setHold(f); setDrag(null); };
   const tipAt = drag ?? hover;
   return (
-    <div class="d-shape-row">
+    <div class={`d-shape-row${big ? " big" : ""}`}>
       <span class="d-time">{mmss((drag ?? hold ?? now) * dur)}</span>
       <div class="d-shape" ref={box} role="slider" tabIndex={0} aria-label="Position"
         aria-valuemin={0} aria-valuemax={Math.round(dur)} aria-valuenow={Math.round(shown * dur)} aria-valuetext={mmss(shown * dur)}
@@ -330,6 +338,53 @@ export function SongShape({ viz, state, player, accent, trackKey }) {
         {tipAt != null && dur > 0 && <span class="d-shape-tip" style={`left:${tipAt * 100}%`}>{mmss(tipAt * dur)}</span>}
       </div>
       <span class="d-time">{mmss(dur)}</span>
+    </div>
+  );
+}
+
+// ── the line along the top of the player bar ───────────────────────────────
+
+/**
+ * How far through the song, as the phone's mini player shows it: a thin line
+ * along the top of the bar in the cover's colour, with a small dot at the
+ * playhead. Hover thickens it and shows the time under the pointer; click or
+ * drag to go there.
+ */
+function BarLine({ state, player }) {
+  const box = useRef(null);
+  const [hover, setHover] = useState(null);
+  const [drag, setDrag] = useState(null);
+  const [hold, setHold] = useState(null);
+  const dur = state.duration || 0;
+  const now = dur ? Math.min(1, Math.max(0, (state.at || 0) / dur)) : 0;
+  useEffect(() => { if (hold != null && Math.abs(now - hold) < 0.01) setHold(null); }, [now, hold]);
+  useEffect(() => { if (hold == null) return; const h = setTimeout(() => setHold(null), 2000); return () => clearTimeout(h); }, [hold]);
+  const shown = drag ?? hold ?? now;
+  const at = (e) => {
+    const r = box.current.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+  };
+  const commit = (f) => { player.seek(f * dur); setHold(f); setDrag(null); };
+  const tipAt = drag ?? hover;
+  return (
+    <div class={`d-line${drag != null ? " held" : ""}`} ref={box} role="slider" tabIndex={0} aria-label="Position"
+      aria-valuemin={0} aria-valuemax={Math.round(dur)} aria-valuenow={Math.round(shown * dur)} aria-valuetext={mmss(shown * dur)}
+      onPointerDown={(e) => { if (!dur) return; e.currentTarget.setPointerCapture?.(e.pointerId); setDrag(at(e)); }}
+      onPointerMove={(e) => { const f = at(e); setHover(f); if (drag != null) setDrag(f); }}
+      onPointerUp={(e) => { if (drag != null) commit(at(e)); }}
+      onPointerLeave={() => setHover(null)}
+      onPointerCancel={() => setDrag(null)}
+      onKeyDown={(e) => {
+        if (!dur) return;
+        if (e.key === "ArrowRight") { e.preventDefault(); e.stopPropagation(); commit(Math.min(1, shown + 5 / dur)); }
+        if (e.key === "ArrowLeft") { e.preventDefault(); e.stopPropagation(); commit(Math.max(0, shown - 5 / dur)); }
+      }}>
+      <span class="d-line-track" aria-hidden="true">
+        {hover != null && hover > shown && <span class="d-line-ahead" style={`left:${shown * 100}%;width:${(hover - shown) * 100}%`} />}
+        <span class="d-line-done" style={`transform:scaleX(${shown})`} />
+      </span>
+      <span class="d-line-dot" aria-hidden="true" style={`left:${shown * 100}%`} />
+      {tipAt != null && dur > 0 && <span class="d-line-tip" style={`left:${tipAt * 100}%`}>{mmss(tipAt * dur)}</span>}
     </div>
   );
 }
@@ -354,14 +409,21 @@ function useVolume(player, eq) {
 }
 
 export function PlayerBar({
-  state, player, viz, cost, liked, onLike, onArtist, onAlbum, panel, onPanel, onExpand, expanded, volume,
+  state, player, viz, cost, liked, onLike, onArtist, onAlbum, panel, onPanel, onExpand, expanded, volume, wave = "ribbons",
 }) {
   const t = state.track;
   const repeatOn = state.repeat !== REPEAT.OFF;
   const { vol, muted, setVol, toggleMute } = volume;
   const level = muted ? 0 : vol;
   return (
-    <footer class={`d-bar${t ? "" : " idle"}`} style={accentVars(t?.colors?.accent)} aria-label="Player">
+    <footer class={`d-bar${t ? "" : " idle"}${expanded ? " under" : ""}`} style={accentVars(t?.colors?.accent)} aria-label="Player">
+      {/* The music, moving softly behind everything; and the song's progress
+          along the top edge. In Now playing, its own waves and the song's
+          shape take over both. */}
+      {t && !expanded && <div class="d-bar-waves" aria-hidden="true">
+        <Waveform viz={viz} playing={state.playing && !state.waiting} accent={t.colors?.accent} style={wave} inset={0} wide bare />
+      </div>}
+      {t && !expanded && <BarLine state={state} player={player} />}
       <div class="d-bar-song">
         {t ? <>
           <button class="d-bar-art" onClick={onExpand} aria-label="Open now playing" title="Open now playing">
@@ -384,6 +446,7 @@ export function PlayerBar({
 
       <div class="d-bar-mid">
         <div class="d-controls">
+          <span class="d-time">{t ? mmss(state.at || 0) : ""}</span>
           <button class={`icon-btn d-ctl${state.shuffle ? " on" : ""}`} onClick={() => player.toggleShuffle()} aria-label="Shuffle" aria-pressed={state.shuffle} title="Shuffle" disabled={!t}>
             <Icon.shuffle size={17} />
           </button>
@@ -398,8 +461,8 @@ export function PlayerBar({
             <Icon.repeat size={17} />
             {state.repeat === REPEAT.ONE && <span class="badge-1">1</span>}
           </button>
+          <span class="d-time end">{t ? mmss(state.duration || 0) : ""}</span>
         </div>
-        <SongShape viz={viz} state={state} player={player} accent={t?.colors?.accent} trackKey={t ? `${t.from}#${t.id}` : ""} />
       </div>
 
       <div class="d-bar-right">
@@ -549,18 +612,7 @@ export function Expanded({ state, player, viz, cost, wave, onWave, onClose, onAr
     addEventListener("keydown", esc);
     return () => removeEventListener("keydown", esc);
   }, []);
-  // Scrubbing on the waveform, as on the phone: its middle line seeks.
-  const strip = useRef(null);
-  const [drag, setDrag] = useState(null);
-  const [hold, setHold] = useState(null);
-  const at = drag ?? hold ?? state.at;
-  useEffect(() => { if (hold != null && Math.abs(state.at - hold) < 0.75) setHold(null); }, [state.at, hold]);
-  const timeAt = (e) => {
-    const r = strip.current.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (state.duration || 0);
-  };
   if (!t) return null;
-  const pct = state.duration ? Math.min(1, at / state.duration) : 0;
   const c = t.colors;
   return (
     <div class="d-expanded" role="dialog" aria-label="Now playing" style={accentVars(c?.accent)}>
@@ -606,15 +658,13 @@ export function Expanded({ state, player, viz, cost, wave, onWave, onClose, onAr
           {!state.upNext?.length && <p class="dim small">Nothing queued.</p>}
         </div>
       </div>
-      <div class="d-exp-wave">
-        <Waveform viz={viz} playing={state.playing && !state.waiting} progress={pct} accent={c?.accent} style={wave} inset={8} wide />
-        <div class="d-exp-hit" ref={strip} role="slider" tabIndex={0} aria-label="Position"
-          aria-valuemin={0} aria-valuemax={Math.round(state.duration || 0)} aria-valuenow={Math.round(at || 0)} aria-valuetext={mmss(at)}
-          onPointerDown={(e) => { if (!state.duration) return; strip.current.setPointerCapture?.(e.pointerId); setDrag(timeAt(e)); }}
-          onPointerMove={(e) => { if (drag != null) setDrag(timeAt(e)); }}
-          onPointerUp={(e) => { if (drag != null) { const v = timeAt(e); player.seek(v); setHold(v); setDrag(null); } }}
-          onPointerCancel={() => setDrag(null)} />
-        <div class="d-exp-times"><span>{mmss(at)}</span><span>{mmss(state.duration)}</span></div>
+      {/* Two waveforms: the music as it plays, across the window; and under
+          it the whole song's shape, which is where it's at and where to go. */}
+      <div class="d-exp-wave" aria-hidden="true">
+        <Waveform viz={viz} playing={state.playing && !state.waiting} accent={c?.accent} style={wave} inset={40} wide bare />
+      </div>
+      <div class="d-exp-shape">
+        <SongShape viz={viz} state={state} player={player} accent={c?.accent} trackKey={`${t.from}#${t.id}`} big />
       </div>
     </div>
   );
