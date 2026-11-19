@@ -308,5 +308,63 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   a.duration = 200;
 }
 
+// ── resting, the hard cases ─────────────────────────────────────────────────
+{
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  // A skip on a slow network: the pause that loading causes isn't the
+  // listener's, and nothing armed then may touch the new song.
+  let st = {}, slow = 0, refuseNext = false;
+  const pr = createPlayer((x) => { st = x; }, () => {}, {
+    restAfter: 5,
+    resolve: async (t) => {
+      if (slow) await wait(slow);
+      if (refuseNext) { refuseNext = false; const e = new Error("agree first"); e.kind = "price"; throw e; }
+      return `${t.url}?pass`;
+    },
+  });
+  const a = pr.element();
+  const on = (e) => (a.handlers[e] || []).forEach((f) => f());
+  pr.play(tracks.slice(0, 3), 0);
+  await tick();
+  a.currentSrc = a.src; a.paused = false; on("play"); a.currentTime = 2;
+  slow = 30;
+  pr.next(); on("pause");          // loading pauses the element
+  await wait(60);
+  ok("a skip that takes longer than the rest delay: the new song isn't left resting", !pr.resting() && a.src === "https://x/b.mp3?pass", JSON.stringify({ resting: pr.resting(), src: a.src }));
+  slow = 0;
+  a.currentSrc = a.src; a.paused = false; on("play");
+  pr.seek(50);
+  ok("  and seeking moves the song itself", a.currentTime === 50, a.currentTime);
+
+  // Refused on picking up (a price to agree): back where it was, not from 0.
+  a.currentTime = 70; pr.toggle(); on("pause");
+  await wait(20);
+  ok("(resting at 1:10)", pr.resting() && st.at === 70);
+  refuseNext = true;
+  pr.toggle();
+  await wait(5);
+  ok("refused on resuming: still resting at 1:10, the refusal shown", pr.resting() && st.at === 70 && st.refused?.kind === "price", JSON.stringify({ at: st.at, r: st.refused }));
+  pr.toggle();
+  await wait(5);
+  on("loadedmetadata");
+  ok("  agreed and tapped again: picks up at 1:10, not from the start", a.currentTime === 70 && !pr.resting() && st.track?.id === "b", a.currentTime);
+
+  // A second tap while it's waking calls it off.
+  a.currentSrc = a.src; a.paused = false; on("play");
+  pr.toggle(); on("pause");
+  await wait(20);
+  slow = 30;
+  pr.toggle();           // play: waking
+  pr.toggle();           // and pause again before it's fetched
+  await wait(60);
+  ok("tapped again while waking: it stays paused, still resting where it was", pr.resting() && a.src === "", JSON.stringify({ resting: pr.resting(), src: a.src }));
+  slow = 0;
+
+  // The watchdog after a wake: one seek, to where it was.
+  pr.toggle();
+  await wait(5);
+  ok("(woken)", !pr.resting());
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

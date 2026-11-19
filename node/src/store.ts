@@ -493,11 +493,18 @@ export async function unreportedServed(db: D1Database, pubkey: string, now = Dat
   return row ? { track: String(row.track), day: Number(row.day) } : null;
 }
 
-/** Whether this track has gone to this wallet already today (meter.ts PACE). */
+/** Whether this track has gone to this wallet already today (meter.ts PACE):
+ *  its row exists, made when the first piece went (markSent). */
 export async function sentToday(db: D1Database, pubkey: string, track: string, now = Date.now()): Promise<boolean> {
-  const row = await db.prepare("SELECT delivered FROM served WHERE pubkey = ? AND track = ? AND day = ?")
-    .bind(pubkey, track, servedDay(now)).first<{ delivered: number }>();
-  return Number(row?.delivered) > 0;
+  const row = await db.prepare("SELECT 1 AS yes FROM served WHERE pubkey = ? AND track = ? AND day = ?")
+    .bind(pubkey, track, servedDay(now)).first<{ yes: number }>();
+  return !!row;
+}
+
+/** The first piece of a track went to this wallet today: its row, now. */
+export function markSent(db: D1Database, pubkey: string, track: string, now = Date.now()): Promise<unknown> {
+  return db.prepare("INSERT OR IGNORE INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?, ?, ?, 0, 0, 0)")
+    .bind(pubkey, track, servedDay(now)).run();
 }
 
 /** How many tracks this wallet has rows for (/listen/mine): null without the table. */

@@ -27,11 +27,11 @@ import {
   setting, putSetting, listeners, listener, setBlocked, counted, MAX_REPORT_S, forget, remove, pruneStale, pruneHourly,
   subscribedUntil, pruneSubscriptions, heard, songTotals, playsToday,
   paidOf, recordPaid, paidSigKnown, mergePaid, MAX_PAID_WALLETS, autoBlockSetting, setAutoBlock, owedRowOf,
-  addServed, billSent, aPlay, sentToday, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
+  addServed, aPlay, sentToday, markSent, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
   type Listener,
 } from "./store";
 import { autoBlock, owedOf, unpaidOf } from "../../spec/standing.mjs";
-import { metered, slackFor, lengthOf, takePending, forgetTallies, DELIVERED_CAP } from "./meter";
+import { metered, lengthOf, forgetTallies } from "./meter";
 import { fromBase58 } from "./identity";
 import { readListeningPayment } from "./payment-check";
 import { introduce, readToken, guardedKeys, masterKeys, proveOwnership } from "./listen";
@@ -892,8 +892,8 @@ async function whoIsAsking(request: Request, env: Env): Promise<string | null> {
 /**
  * What a minute of listening costs this wallet right now, in dollars: the
  * artist's USDC price, or nothing while it's free to them (a subscriber, who
- * pays by card; or payments paused, when nobody can pay). Priced as it's
- * heard: a later change of price doesn't reprice it.
+ * pays by card; or payments paused, when nobody can pay). Audio is priced
+ * with this when it's sent (meter.ts), so a later change doesn't reprice it.
  */
 async function perMinuteFor(env: Env, ctx: ExecutionContext | undefined, who: string): Promise<number> {
   if (!(await takingPayments(env, ctx))) return 0;
@@ -933,6 +933,7 @@ function meterAudio(
     const body = metered(res.body, Number.isFinite(length) ? length : null, {
       pubkey: who, track: key, size, duration: tracksOf(view).byKey.get(key)?.duration ?? null,
       sentToday: () => sentToday(env.DB, who, key),
+      markSent: () => markSent(env.DB, who, key),
     }, {
       db: env.DB, perMinute: (p) => perMinuteFor(env, ctx, p), later: laterOf(ctx),
       onFlush: () => meterHooks.onFlush?.(), tidy: () => pruneHourly(env.DB),
@@ -1095,29 +1096,22 @@ const stripeTrouble = () => fail(502, "Couldn't confirm that with Stripe; try ag
  * What this copy of the Worker had sent of it and not yet written goes in the
  * same write. False when there's no table: the caller records the play alone.
  */
-async function reportServed(env: Env, ctx: ExecutionContext | undefined, who: string, trackId: string, seconds: number): Promise<boolean> {
+async function reportServed(env: Env, who: string, trackId: string, seconds: number): Promise<boolean> {
   const text = await manifestText(env).catch(() => null);
   const tracks = text ? tracksOf(derive(text)) : null;
   const now = Date.now();
-  let found = trackId ? tracks?.byId.get(trackId) ?? null : null;
+  const found = trackId ? tracks?.byId.get(trackId) ?? null : null;
   let k;
   try {
     if (found) k = { pubkey: who, track: found.key, day: await servedDayFor(env.DB, who, found.key, now) };
     else {
       const guess = await unreportedServed(env.DB, who, now);
-      found = guess ? tracks?.byKey.get(guess.track) ?? null : null;
-      k = guess && found ? { pubkey: who, ...guess } : { pubkey: who, track: "", day: servedDay(now) };
+      k = guess && tracks?.byKey.get(guess.track) ? { pubkey: who, ...guess } : { pubkey: who, track: "", day: servedDay(now) };
     }
-    const pending = found ? takePending(k) : null;
-    const length = pending?.trackSeconds ?? (found ? lengthOf(0, found.duration) : 0);
-    const perMinute = pending?.seconds ? await perMinuteFor(env, ctx, who).then((p) => p, () => null) : null;
-    // Sent while it cost this wallet nothing: not counted, as meter.ts's own
-    // writes don't count it, so it can't be billed later at a price.
-    const sent = perMinute === 0 ? 0 : pending?.seconds ?? 0;
+    // Only what the app says, beside what was sent, and a play in the record.
+    // Nothing here touches what this server counted or bills (meter.ts).
     await inOneGo(env.DB, [
-      addServed(env.DB, k, { delivered: sent, reported: seconds, cap: DELIVERED_CAP * length }),
-      // What was sent and not yet written is billed with it, as any write of it is.
-      ...(sent && perMinute ? billSent(env.DB, k, { slack: slackFor(length), perMinute, now }) : []),
+      addServed(env.DB, k, { reported: seconds, cap: 0 }),
       aPlay(env.DB, who, now),
     ]);
     return true;
@@ -1476,7 +1470,7 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     const body = await jsonBody(request);
     const seconds = Math.max(0, Math.min(Math.round(Number(body?.seconds) || 0), MAX_REPORT_S));
     // A play for the record, never money (reportServed).
-    if (!(await reportServed(env, ctx, who, String(body?.track ?? ""), seconds))) {
+    if (!(await reportServed(env, who, String(body?.track ?? ""), seconds))) {
       await counted(env.DB, who, seconds, Date.now());
     }
     // Now and then, clear out wallets not heard from in a year. Here rather

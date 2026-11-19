@@ -190,7 +190,7 @@ const SLACK_S = slackFor(LEN);   // 84 s for a four-minute song
 paceHooks.now = () => clock;
 paceHooks.sleep = async () => {};
 
-ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds === 60 && SLACK.share === 0.35 && SLACK_S === 84 && slackFor(100) === 60);
+ok("the slack is 70 s or 35% of the track, whichever is more", SLACK.seconds === 70 && SLACK.share === 0.35 && SLACK_S === 84 && slackFor(100) === 70);
 
 // ── what was sent, less the slack: the server's own count ───────────────────
 {
@@ -379,11 +379,51 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   ok("a subscription ends: only what was sent after it is billed (240 - 84), not what went during it", owed(sub).micros === (LEN - SLACK_S) * 1000, JSON.stringify([rows(sub), owed(sub)]));
 }
 
+// ── priced as it was sent, whatever happens before it's written ────────────
+{
+  const sub = await makeWallet();
+  sqlite.prepare("INSERT INTO subscriptions (wallet, subscription, customer, until, updated) VALUES (?, 'sub_z', 'cus_z', ?, ?)").run(sub.address, clock + 30 * DAY, clock);
+  await audio(sub, "three.mp3", { Range: "bytes=0-34999" });   // 35 s, no report
+  sqlite.prepare("DELETE FROM subscriptions WHERE wallet = ?").run(sub.address);
+  tick(6_000);
+  await audio(sub, "three.mp3");
+  ok("35 s sent while subscribed (no report), then the whole song after: billed only for the song (156 s)", owed(sub).micros === (LEN - SLACK_S) * 1000, JSON.stringify([rows(sub), owed(sub)]));
+
+  // A report, even a forged 0 s one, changes nothing this server counted.
+  const r = await makeWallet();
+  await audio(r, "song.mp3", { Range: "bytes=0-99999" });
+  tick(FLUSH.gapMs);
+  await audio(r, "song.mp3", { Range: "bytes=100000-129999" });
+  const before = owed(r).micros;
+  await played(r, 0, "s");
+  await played(r, 0);
+  await played(r, 3 * 3600, "s");
+  ok("reports of 0 s, no song, and three hours after 130 s sent: what's owed doesn't move", owed(r).micros === before && before === (130 - SLACK_S) * 1000, JSON.stringify([before, owed(r)]));
+}
+
+// ── several copies of the Worker at once: one burst a day, not one each ────
+{
+  paceHooks.sleep = async (ms) => { tick(Math.ceil(ms)); };
+  const w = await makeWallet();
+  let sent = 0;
+  for (let i = 0; i < 4; i++) {
+    resetTallies();   // each start on a different copy, before anything's been written
+    const res = await call(`/audio/two.mp3?t=${encodeURIComponent(w.token)}`, { headers: { Range: `bytes=${i * 30_000}-` } });
+    const reader = res.body.getReader();
+    const start = clock;
+    while (clock - start < 2_000) { const { done, value } = await reader.read(); if (done) break; sent += value.byteLength / 1000; }
+    await reader.cancel();
+    await settled();
+  }
+  ok("four starts on four copies of the Worker: one burst between them", sent <= PACE.burst + 3 * PACE.restart + 4 * (PACE.rate * 2 + PIECE / 1000) + 1, `${sent}`);
+  paceHooks.sleep = async () => {};
+}
+
 // ── no duration published: counted at the streaming bitrate ─────────────────
 {
   const w = await makeWallet();
   await audio(w, "nolength.mp3");
-  ok("a song with no published length is counted at 256 kbps", near(row(w, "nolength.mp3")?.delivered ?? 0, 100) && owed(w).micros === 40_000, JSON.stringify([row(w, "nolength.mp3"), owed(w)]));
+  ok("a song with no published length is counted at 256 kbps", near(row(w, "nolength.mp3")?.delivered ?? 0, 100) && owed(w).micros === 30_000, JSON.stringify([row(w, "nolength.mp3"), owed(w)]));
 }
 
 // ── the write budget ────────────────────────────────────────────────────────
@@ -397,7 +437,8 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   }
   await settled();
   const n = flushes - before;
-  const bound = Math.ceil((DELIVERED_CAP * LEN) / Math.max(FLUSH.seconds, FLUSH.share * LEN)) + 2;
+  // Ten seconds of them, a write at most every FLUSH.gapMs.
+  const bound = Math.ceil(10_000 / FLUSH.gapMs) + 3;
   ok(`200 tiny ranges: a bounded number of writes (${n}, at most ${bound})`, n > 0 && n <= bound, `${n}`);
   ok("  and what they add up to, to the cap, is counted", row(w).delivered === DELIVERED_CAP * LEN, JSON.stringify(row(w)));
   const more = flushes;

@@ -320,6 +320,7 @@ export function App() {
   // The equaliser: nothing routed through it until it's first switched on.
   const eq = useMemo(() => (typeof window !== "undefined" ? createEq(player.element(), {
     onTrouble: () => flash({ bad: true, text: "This song can't play through the EQ. Reload to hear it without." }),
+    resting: () => player.resting(),
   }) : null), []);
   const volume = useVolume(player, eq);
   useEffect(() => {
@@ -600,16 +601,18 @@ export function App() {
     view.state = state;
     // What the Pay button pays is what this shows, and no more (payOwes).
     view.owes = claim ? Math.max(claim.remaining, 0) : view.owes;
+    // And this device's own figure, as shown: what "Pay mine" pays, at most.
+    const mineShown = loadLedger()[url]?.micros || 0;
     setSheet({ ...unpaidSheet({
       name: entry ? nameOf(entry) : view.name, art: view.art,
-      owes: view.owes, mine: loadLedger()[url]?.micros || 0,
+      owes: view.owes, mine: mineShown,
       state, ...extra,
     }, {
       money,
       go: {
         pay: () => payOwes(url),
         // This device's own count, when it's less than their server's.
-        payMine: () => payOwes(url, loadLedger()[url]?.micros || 0),
+        payMine: () => payOwes(url, mineShown),
         topUp: () => { owesView.current = null; goYou("topup"); },
         you: () => { owesView.current = null; goYou(); },
       },

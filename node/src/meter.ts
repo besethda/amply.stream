@@ -42,19 +42,21 @@ import { addServed, billSent, inOneGo, servedDay, type ServedKey } from "./store
 
 /**
  * What of each track sent isn't billed, in seconds of audio: 60 seconds, or
- * 35% of the track, whichever is more. With the pacing below, a listener who
+ * 35% of the track, whichever is more (70 s: the 30 s burst and 1.25 x 30 s
+ * more, so a skip before a play counts in the app is never billed here). With
+ * the pacing below, a listener who
  * starts a song and plays it without pausing, stopping at any point, has
  * been sent at most PACE.burst + PACE.rate x what they played; less this,
  * that is never more than they played, for a track of any length (the worst
  * case, stopping just as the whole file has gone, is 24 - 0.15 x length
- * seconds, below zero from 160 s; under 160 s the 60 s floor covers it).
+ * seconds, below zero from 160 s; under 160 s the 70 s floor covers it).
  * Starting it again the same day adds only PACE.restart up front, and a
  * paused song isn't downloaded by the app; a listener who restarts one song
  * many times a day can still be counted a little over (each start's 3 s,
  * and a quarter of what they played on top), which the slack covers for a
  * handful of starts.
  */
-export const SLACK = { seconds: 60, share: 0.35 } as const;
+export const SLACK = { seconds: 70, share: 0.35 } as const;
 export const slackFor = (trackSeconds: number) => Math.max(SLACK.seconds, SLACK.share * trackSeconds);
 
 /**
@@ -136,23 +138,16 @@ function paced(id: string, seconds: number, fresh: boolean): Promise<void> {
 export const FALLBACK_BYTES_PER_SECOND = (256 * 1000) / 8;
 
 /**
- * When what's built up is written:
- *
- * - once it reaches 15% of the track or 20 seconds of audio, whichever is
- *   larger (a single response that big is written when it ends);
- * - at most once every few seconds for one (wallet, track, day); one that
- *   comes due sooner is written when the time is up, in the background;
- * - never past DELIVERED_CAP, which with the size above bounds the writes
- *   for one track and day at about twenty, however the requests are cut up.
- *
+ * When what's built up is written: when each response ends, but at most
+ * once every FLUSH.gapMs for one (wallet, track, day) — one that comes due
+ * sooner is written when the gap is up, in the background, with whatever
+ * else came meanwhile. So a whole-file request is one write, and many small
+ * ranged requests share a few. Nothing waits for the app to report anything.
  * What's lost if this copy of the Worker is stopped (Cloudflare does that
- * whenever it likes) is what hadn't reached that size yet: under 15% of a
- * track, or 20 seconds, per track. That's counted short, the listener's way,
- * and the next request for the track adds to it anyway. Writing every piece to be sure of those seconds would spend
- * the artist's write allowance many times over.
+ * whenever it likes) is at most what came in the last gap: counted short,
+ * the listener's way.
  */
-export const FLUSH = { share: 0.15, seconds: 20, gapMs: 3_000 } as const;
-const flushAt = (trackSeconds: number) => Math.max(FLUSH.seconds, FLUSH.share * trackSeconds);
+export const FLUSH = { gapMs: 3_000 } as const;
 
 /** How many (wallet, track, day) this copy keeps count of at once. The oldest
  *  goes first, written if it holds a second or more. */
@@ -162,6 +157,11 @@ interface Tally {
   key: ServedKey;
   /** Seconds sent and not yet written. */
   pending: number;
+  /** What those seconds cost at the price when each was sent (micros), and
+   *  how many of them had a known price then: billed at that price, not at
+   *  whatever it is when they're written. */
+  pendingMicros: number;
+  pendingPriced: number;
   /** Seconds this copy has written for it: past the cap, nothing more is kept. */
   written: number;
   trackSeconds: number;
@@ -210,9 +210,11 @@ export function metered(
   t: {
     pubkey: string; track: string; size: number; duration: number | null; now?: number;
     /** Whether this track has gone to this wallet already today, as the
-     *  database says (read once, on the first piece; true on any doubt is
-     *  false: no burst). */
+     *  database says. Read once, on the first piece; if it can't be read,
+     *  taken as yes (no burst). */
     sentToday?: () => Promise<boolean>;
+    /** Note in the database that it has been sent today (sentToday). */
+    markSent?: () => Promise<unknown>;
   },
   deps: MeterDeps,
 ): ReadableStream<Uint8Array> {
@@ -227,7 +229,14 @@ export function metered(
   const end = () => {
     if (ended) return;
     ended = true;
-    try { add(key, secondsOf(bytes, t.size, t.duration), trackSeconds, deps); } catch { /* never the listener's problem */ }
+    const seconds = secondsOf(bytes, t.size, t.duration);
+    if (!(seconds > 0)) return;
+    // Priced as it was sent. Free to this wallet then (a subscriber, payments
+    // paused): not counted at all. Price unknown: counted, priced when written.
+    deps.later(deps.perMinute(t.pubkey).then((p) => p, () => null).then((perMinute) => {
+      if (perMinute === 0) return;
+      try { add(key, seconds, trackSeconds, deps, Date.now(), perMinute); } catch { /* never the listener's problem */ }
+    }));
   };
   const reader = body.getReader();
   const counting = new ReadableStream<Uint8Array>({
@@ -236,7 +245,15 @@ export function metered(
         const { done, value } = await reader.read();
         if (done) { c.close(); end(); return; }
         // Not sent until it may be (PACE): what's sent follows what's heard.
-        await paced(pace, secondsOf(value.byteLength, t.size, t.duration), await isFresh());
+        const first = bytes === 0, freshNow = await isFresh();
+        // The first piece of a fresh start: the row is made now, so another
+        // copy of the Worker asked for the same song sees it was sent today.
+        if (first && freshNow && t.markSent) {
+          const mark = t.markSent;
+          // Only where it costs something: what's free to a wallet isn't recorded at all.
+          deps.later(deps.perMinute(t.pubkey).then((p) => (p > 0 ? mark() : null)).catch(() => {}));
+        }
+        await paced(pace, secondsOf(value.byteLength, t.size, t.duration), freshNow);
         bytes += value.byteLength;
         c.enqueue(value);
       } catch (e) {
@@ -261,19 +278,29 @@ export function metered(
 }
 
 /** Add seconds sent to a tally, and write it if it's due. */
-export function add(key: ServedKey, seconds: number, trackSeconds: number, deps: MeterDeps, now = Date.now()): void {
+export function add(
+  key: ServedKey, seconds: number, trackSeconds: number, deps: MeterDeps, now = Date.now(), perMinute: number | null = null,
+): void {
   if (!(seconds > 0)) return;
   const id = idOf(key);
   let t = tallies.get(id);
   if (!t) {
     if (tallies.size >= MAX_KEYS) evictOldest(deps);
-    t = { key, pending: 0, written: 0, trackSeconds, lastFlush: 0, waiting: false };
+    t = { key, pending: 0, pendingMicros: 0, pendingPriced: 0, written: 0, trackSeconds, lastFlush: 0, waiting: false };
     tallies.set(id, t);
   }
   const cap = DELIVERED_CAP * trackSeconds;
   // Past the cap nothing more can count, so nothing more is kept or written.
-  t.pending = Math.min(t.pending + seconds, Math.max(0, cap - t.written));
-  if (t.pending < flushAt(trackSeconds)) return;
+  const counted = Math.max(0, Math.min(seconds, cap - t.written - t.pending));
+  if (!(counted > 0)) return;
+  t.pending += counted;
+  if (perMinute !== null && perMinute > 0) {
+    t.pendingMicros += (counted / 60) * perMinute * 1_000_000;
+    t.pendingPriced += counted;
+  }
+  // Written soon, whatever else happens, so what was sent never waits on a
+  // report; writes for one track come at most every FLUSH.gapMs, so many
+  // small requests share one.
   due(t, deps, now);
 }
 
@@ -295,41 +322,30 @@ function evictOldest(deps: MeterDeps): void {
 async function flush(t: Tally, deps: MeterDeps): Promise<void> {
   const seconds = t.pending;
   if (!(seconds > 0)) return;
-  t.pending = 0;
+  const micros = t.pendingMicros, priced = t.pendingPriced;
+  t.pending = 0; t.pendingMicros = 0; t.pendingPriced = 0;
   t.lastFlush = Date.now();
   t.written += seconds;
   try {
-    // Sent while it costs this wallet nothing (a subscriber, payments
-    // paused): not counted, so it can never be billed later at a price. A
-    // price that can't be read right now: counted, and billed at the next
-    // write (or not, at 0), rather than let go.
-    const perMinute = await deps.perMinute(t.key.pubkey).then((p) => p, () => null);
-    if (perMinute === 0) return;
+    // At the price they were sent at (free ones were never counted). Any
+    // whose price wasn't known then: at the price now, or, if that can't be
+    // read either, written and billed with a later write.
+    let perMinute: number | null;
+    if (priced >= seconds) perMinute = (micros / priced) * 60 / 1_000_000;
+    else {
+      const now = await deps.perMinute(t.key.pubkey).then((p) => p, () => null);
+      perMinute = now === null ? null : (micros + ((seconds - priced) / 60) * now * 1_000_000) / seconds * 60 / 1_000_000;
+    }
     deps.onFlush?.();
     await inOneGo(deps.db, [
       addServed(deps.db, t.key, { delivered: seconds, cap: DELIVERED_CAP * t.trackSeconds }),
-      ...(perMinute === null ? [] : billSent(deps.db, t.key, { slack: slackFor(t.trackSeconds), perMinute })),
+      ...(perMinute === null || !(perMinute > 0) ? [] : billSent(deps.db, t.key, { slack: slackFor(t.trackSeconds), perMinute })),
     ]);
     if (deps.tidy && Math.random() < 0.02) await deps.tidy();
   } catch {
     // No `served` table (metering is off there), or the database is busy:
     // these seconds are lost, which errs the listener's way.
   }
-}
-
-/**
- * What this copy has counted for a wallet's track and not yet written, taken
- * out to go with the app's report of it (which is a write anyway), so the
- * two are written together.
- */
-export function takePending(key: ServedKey): { seconds: number; trackSeconds: number } | null {
-  const t = tallies.get(idOf(key));
-  if (!t) return null;
-  // One waiting out its gap is written then, not here.
-  const seconds = t.waiting ? 0 : t.pending;
-  t.pending -= seconds;
-  t.written += seconds;
-  return { seconds, trackSeconds: t.trackSeconds };
 }
 
 /** A wallet asked to be forgotten, or was removed: nothing counted for it
