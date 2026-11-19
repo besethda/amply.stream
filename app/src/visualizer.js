@@ -100,6 +100,45 @@ export function bandsOf(w) {
   return { fps: w.fps, frames: F, env };
 }
 
+/**
+ * How loud the whole song is, moment by moment, all bands together: the shape
+ * the desktop player's progress bar draws, so the quiet intro, the drop and
+ * the fade-out can be seen (and jumped to) before they're heard. Each frame's
+ * bands are put back on one scale (their ceilings) and added as energy, then
+ * the curve is scaled so the song's loud parts reach 1.
+ */
+export function wholeOf(w) {
+  const N = w.bands.length, F = w.frames;
+  const out = new Float32Array(F);
+  for (let i = 0; i < F; i++) {
+    let energy = 0;
+    for (let b = 0; b < N; b++) {
+      const v = w.levels[i * N + b] / 255;
+      const rms = v * v * w.ceilings[b];
+      energy += rms * rms;
+    }
+    out[i] = Math.sqrt(energy);
+  }
+  return { fps: w.fps, frames: F, curve: toCeiling(out) };
+}
+
+/**
+ * The song's shape in `n` columns, each the loudness of its stretch of the
+ * song: mostly its peak, a little of its average, so a single snare doesn't
+ * make a quiet passage look loud.
+ */
+export function columnsOf(whole, n) {
+  const { curve, frames } = whole;
+  const out = new Float32Array(n);
+  for (let c = 0; c < n; c++) {
+    const from = Math.floor((c / n) * frames), to = Math.max(from + 1, Math.floor(((c + 1) / n) * frames));
+    let peak = 0, sum = 0;
+    for (let i = from; i < to && i < frames; i++) { peak = Math.max(peak, curve[i]); sum += curve[i]; }
+    out[c] = 0.7 * peak + 0.3 * (sum / Math.max(1, to - from));
+  }
+  return out;
+}
+
 /** Ribbon `r`'s level (0..1) at `t` seconds into the song, between frames. */
 export function levelAt(s, r, t) {
   const f = t * s.fps - 0.5;   // values sit mid-frame
@@ -121,7 +160,7 @@ export function createVisualizer({ get = (url) => fetch(url, { priority: "low" }
       const bytes = await res.arrayBuffer();
       if (bytes.byteLength > MAX_BYTES) throw new Error("too big to be a waves file");
       const w = readWaves(bytes);
-      return { ribbons: ribbonsOf(w), bands: bandsOf(w) };
+      return { ribbons: ribbonsOf(w), bands: bandsOf(w), whole: wholeOf(w) };
     })().then(
       (s) => { ready.set(url, s); return s; },
       () => { ready.delete(url); return null; },   // shown as the idle motion; tried again next time
@@ -144,6 +183,29 @@ export function createVisualizer({ get = (url) => fetch(url, { priority: "low" }
       if (!s || s instanceof Promise || !main) return null;
       const t = main.currentTime;
       return RIBBONS.map((_, r) => levelAt(s.ribbons, r, t + EASE_S + ((1 - r) * STAGGER_MS) / 1000));
+    },
+    /**
+     * The current song's shape across `n` columns (see columnsOf), or null
+     * while its waves are on their way, or when it has none.
+     */
+    overview(n) {
+      const s = current && ready.get(current);
+      if (!s || s instanceof Promise || !s.whole) return null;
+      if (!s.columns || s.columns.length !== n) s.columns = columnsOf(s.whole, n);
+      return s.columns;
+    },
+    /** How loud the whole song is right now, 0..1; or null. */
+    loudness() {
+      const s = current && ready.get(current);
+      if (!s || s instanceof Promise || !main || !s.whole) return null;
+      const w = s.whole, f = (main.currentTime + EASE_S) * w.fps - 0.5, i = Math.floor(f);
+      const at = (k) => (k < 0 || k >= w.frames ? 0 : w.curve[k]);
+      return at(i) + (at(i + 1) - at(i)) * (f - i);
+    },
+    /** Which song's waves are showing: changes when a new song's arrive. */
+    key() {
+      const s = current && ready.get(current);
+      return s && !(s instanceof Promise) ? current : null;
     },
     /**
      * Every band's level (0..1), low to high, `ago` seconds before now; or

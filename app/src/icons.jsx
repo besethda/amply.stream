@@ -44,6 +44,7 @@ export const Icon = {
   refresh: (p) => <S sw={2} {...p}><path d="M20 11a8 8 0 10-2.3 5.7M20 5v6h-6" /></S>,
   copy: (p) => <S sw={1.9} {...p}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 00-1-1H5a1 1 0 00-1 1v10a1 1 0 001 1h3" /></S>,
   external: (p) => <S sw={2} {...p}><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5" /></S>,
+  clock: (p) => <S sw={1.9} {...p}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></S>,
   note: (p) => <S sw={1.6} {...p}><circle cx="12" cy="17" r="3.4" /><path d="M15.4 17V4l5 1.6" /></S>,
   heartOn: (p) => <S fill="currentColor" {...p}><path d="M12 21s-8-5-8-11a4.5 4.5 0 018-2.8A4.5 4.5 0 0120 10c0 6-8 11-8 11z" /></S>,
   more: (p) => <S fill="currentColor" {...p}><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></S>,

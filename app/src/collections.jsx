@@ -23,6 +23,7 @@ import { trackNumber } from "./tags.js";
 export function Collection({
   kind, title, meta, art, rows, missing = 0, current, playing, onBack, onPlay, onShuffle,
   onShare, onSave, onMore, onMenu, onRemove, artists = [], onFollow, liked = null, onLikeAll, buy = null, onReorder = null, onCover = null,
+  likedArt = false, tint = null,
 }) {
   const [editing, setEditing] = useState(false);
   // Press and hold a song, then drag it into place (a playlist, a local album).
@@ -32,7 +33,7 @@ export function Collection({
   const picture = art ?? rows[0]?.track?.art ?? null;
 
   return (
-    <div class="screen coll">
+    <div class="screen coll" style={tint ? `--coll-tint:${tint}` : likedArt ? "--coll-tint:#b8336a" : undefined}>
       <div class="head">
         <button class="circle-btn" onClick={onBack} aria-label="Back"><Icon.back size={17} /></button>
         {kind === "playlist" && (
@@ -51,7 +52,9 @@ export function Collection({
             <span class="coll-cover-edit"><Icon.edit size={15} /></span>
             <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onCover(f); }} />
           </label>
-        ) : <span class="art coll-art" style={artStyle(picture, title)} />}
+        ) : likedArt ? <span class="art coll-art liked-art"><Icon.heartOn size={64} /></span>
+          : <span class="art coll-art" style={artStyle(picture, title)} />}
+        <span class="coll-kind">{{ album: "Album", playlist: "Playlist", shared: "Shared playlist", liked: "Playlist" }[kind] || ""}</span>
         <h1>{title}</h1>
         {meta && <span class="mono-dim">{meta}</span>}
         <div class="row center">
@@ -93,6 +96,11 @@ export function Collection({
         </div>
       )}
 
+      {rows.length > 0 && (
+        <div class="coll-thead" aria-hidden="true">
+          <span class="n">#</span><span class="t">Title</span><span class="d"><Icon.clock size={15} /></span>
+        </div>
+      )}
       <div class="list coll-list" ref={list}>
         {rows.map(({ track, entry }, i) => (
           <TrackRow key={`${track.from}#${track.id}#${i}`} track={track} entry={entry} n={kind === "album" ? i + 1 : null}

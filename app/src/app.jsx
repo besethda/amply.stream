@@ -40,7 +40,8 @@ import { You } from "./you.jsx";
 import { Onboard } from "./onboard.jsx";
 import { AddScreen } from "./add.jsx";
 import { createVisualizer } from "./visualizer.js";
-import { pageScroll, setPageScroll } from "./scroll.js";
+import { pageScroll, setPageScroll, scrollToTop } from "./scroll.js";
+import { useDesktop, MainPanel, TopBar, Sidebar, PlayerBar, SidePanel, Expanded, useKeys, useVolume } from "./desktop.jsx";
 import {
   LOCAL, localSongs, audioUrl as localAudio, wavesResponse, albums as albumsOf, editSong, removeSong, saveOwned, ownedIndex, setOwned, filesOf,
   cover as coverOf,
@@ -93,6 +94,10 @@ export function App() {
   // it. It's swiped down, or closed with its arrow.
   const [np, setNpOpen] = useState(false);
   const npRef = useRef(np); npRef.current = np;
+  // On a computer: a sidebar, a player bar, and a panel beside the music.
+  const desk = useDesktop();
+  const [panel, setPanelState] = useState(() => { try { const p = localStorage.getItem("amply.panel"); return p === "" ? null : p || "np"; } catch { return "np"; } });
+  const setPanel = (p) => { setPanelState(p); try { localStorage.setItem("amply.panel", p || ""); } catch { /* fine */ } };
   const youView = ui.you;
   const [, bump] = useState(0);                   // redraw after likes/playlists change
   const [shared, setShared] = useState(null);     // a playlist opened from a link
@@ -293,6 +298,9 @@ export function App() {
     },
   ), []);
   try { if (location.hostname === "localhost") window.__amplyPlayer = player; } catch { /* not a browser */ }
+  // A computer's volume slider, and its keys: space, arrows, M, L.
+  const volume = useVolume(player);
+  useKeys({ player, state, volume, onLike: () => { if (state.track) { toggleLike(state.track); bump((n) => n + 1); } } });
 
   // ── listening, banked and paid for ────────────────────────────────────────
 
@@ -1124,7 +1132,7 @@ export function App() {
   const goTab = (t) => {
     // The tab you're already on, at its top level: back to the top of it.
     const u = uiRef.current;
-    if (t === u.tab && !u.open && !u.coll && !u.you && !u.add) { window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+    if (t === u.tab && !u.open && !u.coll && !u.you && !u.add) { scrollToTop(); return; }
     go({ ...BASE, tab: t }, { replace: true });
   };
   const followed = followedOnly(entries);
@@ -1396,7 +1404,7 @@ export function App() {
     const e = byUrl(coll.from);
     const rel = e && (e.manifest.releases || []).find((r) => r.id === coll.rid);
     const rows = rel ? tracksOf(e).filter((t) => t.releaseId === rel.id).map((t) => ({ track: decorate(t), entry: e })) : [];
-    screen = <Collection kind="album" title={rel?.title || "Album"} art={rel?.art || null}
+    screen = <Collection kind="album" title={rel?.title || "Album"} art={rel?.art || null} tint={rel?.colors?.accent || null}
       meta={[rel?.artistName || nameOf(e), rel?.date?.slice(0, 4), `${rows.length} songs`].filter(Boolean).join(" · ")}
       rows={rows} {...collProps}
       liked={rows.length > 0 && rows.every((r) => isLiked(r.track, likedNow))}
@@ -1421,6 +1429,11 @@ export function App() {
       } : null}
       onPlay={(tracks, i) => { player.setShuffle(false); play(tracks, i, rel?.title); }}
       onShuffle={(tracks) => { player.setShuffle(true); play(tracks, 0, rel?.title); }} />;
+  } else if (coll?.kind === "liked") {
+    screen = <Collection kind="liked" title="Liked songs" art={null} likedArt
+      meta={`${liked.length} song${liked.length === 1 ? "" : "s"}`} rows={liked} {...collProps}
+      onPlay={(tracks, i) => { player.setShuffle(false); play(tracks, i, "Liked songs"); }}
+      onShuffle={(tracks) => { player.setShuffle(true); play(tracks, 0, "Liked songs"); }} />;
   } else if (coll?.kind === "playlist") {
     const pl = lists.find((p) => p.id === coll.id);
     const { rows, missing } = found(pl?.tracks || []);
@@ -1488,6 +1501,56 @@ export function App() {
       lists={lists} onOpenPlaylist={(id) => go({ coll: { kind: "playlist", id } })} onNewPlaylist={newPlaylist} />;
   }
 
+  const onTip = () => setSheet({ title: `Tip ${tipsNow.name}`, icon: <Icon.tip size={22} />, body: "Straight to them. Amply takes nothing.", children: <Tips tips={tipsNow} />, secondaryLabel: "Close" });
+  const overlays = <>
+    {handoff && <Handoff link={handoff.link} url={handoff.url} onStay={() => { const l = handoff.link; setHandoff(null); openLink(l); }} />}
+    <Sheet sheet={sheet} onClose={closeSheet} />
+    {onboard && (
+      <Onboard pair={pair} needsMoney={onboard.needsMoney} balance={balance} network={NETWORKS[networkName()]}
+        onPair={(p) => { setPair(p); }}
+        onDone={(p) => { setOnboard(null); refresh(); onboard.done(p); }}
+        onClose={() => { setOnboard(null); onboard.done(null); }} />
+    )}
+    <Toast toast={toast} />
+  </>;
+
+  if (desk) {
+    const t = state.track;
+    const here = entry ? entry.url : coll?.kind === "playlist" ? `pl:${coll.id}` : coll?.kind === "liked" ? "liked" : null;
+    const artistNow = t && !t.local ? byUrl(t.from) : null;
+    const showPanel = panel && !np;
+    return (
+      <div class={`app d-app${showPanel ? " with-panel" : ""}`}>
+        <Sidebar tab={tab} onTab={goTab} here={here} entries={followed} lists={lists} liked={liked.length} localEntry={localEntry}
+          onOpenArtist={setOpen} onOpenPlaylist={(id) => go({ coll: { kind: "playlist", id }, open: null, np: false })}
+          onOpenLiked={() => go({ coll: { kind: "liked" }, open: null, np: false })} onOpenLocal={() => goTab("library")}
+          onNewPlaylist={newPlaylist} onAdd={openAdd} playingFrom={t?.from} playing={state.playing} needsBackup={needsBackup} />
+        <MainPanel screenKey={screenKey}
+          top={<TopBar onAdd={add} depth={ui.depth} themeName={themeName} onTheme={toggleTheme} balance={balance} pair={pair}
+            onYou={() => goYou()} needsBackup={needsBackup} low={lowBalance} />}>
+          <RowSwipe.Provider value={rowActs}>{screen}</RowSwipe.Provider>
+        </MainPanel>
+        {showPanel && (
+          <SidePanel mode={panel} state={state} player={player} artist={artistNow} liked={!!t && isLiked(t)}
+            onLike={() => { toggleLike(t); redraw(); }} onArtist={() => t && toArtist(t)}
+            followed={!!artistNow && isFollowed(artistNow)} onFollow={() => artistNow && follow(artistNow.url, true)}
+            onClose={() => setPanel(null)} onAddTo={() => pickPlaylist(t)} onShare={() => shareSong(t)}
+            onTip={onTip} tips={tipsNow} onPlayAt={(k) => player.jump(k)} />
+        )}
+        <PlayerBar state={state} player={player} viz={viz} cost={cost} liked={!!t && isLiked(t)}
+          onLike={() => { if (t) { toggleLike(t); redraw(); } }} onArtist={() => t && toArtist(t)}
+          onAlbum={() => t && t.releaseId && openAlbum(t.from, t.releaseId)}
+          panel={showPanel ? panel : null} onPanel={(p) => { if (np) setNp(false); setPanel(panel === p && !np ? null : p); }}
+          expanded={np} onExpand={() => setNp(!np)} volume={volume} />
+        {np && t && <Expanded state={state} player={player} viz={viz} cost={cost} wave={wave} onWave={nextWave}
+          onClose={() => setNp(false)} onArtist={() => toArtist(t)} liked={isLiked(t)}
+          onLike={() => { toggleLike(t); redraw(); }} onAddTo={() => pickPlaylist(t)} onShare={() => shareSong(t)}
+          onTip={onTip} tips={tipsNow} session={sessionLabel} onPlayAt={(k) => player.jump(k)} />}
+        {overlays}
+      </div>
+    );
+  }
+
   return (
     <div class="app">
       <RowSwipe.Provider value={rowActs}><main class="content">{screen}</main></RowSwipe.Provider>
@@ -1516,16 +1579,8 @@ export function App() {
         onLike={() => { toggleLike(state.track); redraw(); }}
         onAddTo={() => pickPlaylist(state.track)}
         onShare={() => shareSong(state.track)}
-        onTip={() => setSheet({ title: `Tip ${tipsNow.name}`, icon: <Icon.tip size={22} />, body: "Straight to them. Amply takes nothing.", children: <Tips tips={tipsNow} />, secondaryLabel: "Close" })} viz={viz} tips={tipsNow} wave={wave} onWave={nextWave} />}
-      {handoff && <Handoff link={handoff.link} url={handoff.url} onStay={() => { const l = handoff.link; setHandoff(null); openLink(l); }} />}
-      <Sheet sheet={sheet} onClose={closeSheet} />
-      {onboard && (
-        <Onboard pair={pair} needsMoney={onboard.needsMoney} balance={balance} network={NETWORKS[networkName()]}
-          onPair={(p) => { setPair(p); }}
-          onDone={(p) => { setOnboard(null); refresh(); onboard.done(p); }}
-          onClose={() => { setOnboard(null); onboard.done(null); }} />
-      )}
-      <Toast toast={toast} />
+        onTip={onTip} viz={viz} tips={tipsNow} wave={wave} onWave={nextWave} />}
+      {overlays}
     </div>
   );
 }
