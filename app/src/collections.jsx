@@ -98,7 +98,7 @@ export function Collection({
 
       {rows.length > 0 && (
         <div class="coll-thead" aria-hidden="true">
-          <span class="n">#</span><span class="t">Title</span><span class="d"><Icon.clock size={15} /></span>
+          {kind === "album" ? <span class="n">#</span> : <span class="n art-col" />}<span class="t">Title</span><span class="d"><Icon.clock size={15} /></span>
         </div>
       )}
       <div class="list coll-list" ref={list}>

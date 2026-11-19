@@ -94,6 +94,7 @@ export function Equalizer({ eq }) {
           </span>
         ))}
         <span class="eq-db top" aria-hidden="true">+{RANGE}</span>
+        <span class="eq-db zero" aria-hidden="true">0</span>
         <span class="eq-db bottom" aria-hidden="true">−{RANGE}</span>
       </div>
       <div class="eq-freqs" aria-hidden="true">
@@ -116,8 +117,8 @@ export function Equalizer({ eq }) {
 
 /** A preset's shape, tiny, beside its name. */
 function PresetShape({ gains }) {
-  const w = 22, h = 12;
-  const d = gains.map((g, i) => `${i ? "L" : "M"}${((i / (gains.length - 1)) * w).toFixed(1)},${(h / 2 - (g / RANGE) * (h / 2 - 1)).toFixed(1)}`).join("");
+  const w = 24, h = 14;
+  const d = gains.map((g, i) => `${i ? "L" : "M"}${((i / (gains.length - 1)) * w).toFixed(1)},${(h / 2 - Math.max(-1, Math.min(1, g / 6)) * (h / 2 - 1.5)).toFixed(1)}`).join("");
   return <svg class="eq-mini" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true"><path d={d} /></svg>;
 }
 

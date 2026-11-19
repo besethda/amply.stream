@@ -1505,6 +1505,7 @@ export function App() {
     );
   } else {
     screen = <Home entries={followed.filter(reachable)} recentTracks={recentTracks} onOpenArtist={setOpen} onPlay={play}
+      onOpenAlbum={desk ? openAlbum : null}
       current={state.track} playing={state.playing} onAdd={openAdd} onMore={openMenu}
       lists={lists} onOpenPlaylist={(id) => go({ coll: { kind: "playlist", id } })} onNewPlaylist={newPlaylist} />;
   }
@@ -1526,7 +1527,7 @@ export function App() {
     const t = state.track;
     const here = entry ? entry.url : coll?.kind === "playlist" ? `pl:${coll.id}` : coll?.kind === "liked" ? "liked" : null;
     const artistNow = t && !t.local ? byUrl(t.from) : null;
-    const showPanel = panel && !np;
+    const showPanel = panel && !np && !!t;
     return (
       <div class={`app d-app${showPanel ? " with-panel" : ""}`}>
         <Sidebar tab={tab} onTab={goTab} here={here} entries={followed} lists={lists} liked={liked.length} localEntry={localEntry}

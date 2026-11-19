@@ -172,7 +172,7 @@ export function AddForm({ onAdd, autoFocus = true }) {
 
 // ── home ────────────────────────────────────────────────────────────────────
 
-export function Home({ entries, recentTracks, onOpenArtist, onPlay, current, playing, onAdd, onMore, lists, onOpenPlaylist, onNewPlaylist }) {
+export function Home({ entries, recentTracks, onOpenArtist, onOpenAlbum, onPlay, current, playing, onAdd, onMore, lists, onOpenPlaylist, onNewPlaylist }) {
   // Each followed artist's latest release, newest first.
   const latest = entries.flatMap((e) => {
     const rels = (e.manifest.releases || []).filter((r) => (r.tracks || []).length);
@@ -188,7 +188,7 @@ export function Home({ entries, recentTracks, onOpenArtist, onPlay, current, pla
         <span class="label pad">LATEST</span>
         <div class="hscroll">
           {latest.map(({ entry, release }) => (
-            <button class="card-art" key={`${entry.url}#${release.id}`} onClick={() => onOpenArtist(entry.url)}>
+            <button class="card-art" key={`${entry.url}#${release.id}`} onClick={() => (onOpenAlbum ? onOpenAlbum(entry.url, release.id) : onOpenArtist(entry.url))}>
               <span class="art s152" style={artStyle(release.art, release.title)}>
                 {isNew(release.date) && <span class="new">NEW</span>}
               </span>
@@ -488,7 +488,7 @@ export function ArtistPage({
           ? <button class="pill" onClick={async () => (await ask({ title: `Unfollow ${nameOf(entry)}?`, confirm: "Unfollow", icon: <Icon.artist size={22} /> })) && onUnfollow()}>Following</button>
           : <button class="pill" onClick={onFollow}>Follow</button>}
         <button class="icon-btn dim" onClick={share} aria-label={`Share ${nameOf(entry)}`} title="Share"><Icon.share size={20} /></button>
-        <button class="icon-btn dim" onClick={() => setAbout(true)} aria-label={`About ${nameOf(entry)}`} title="About"><Icon.help size={20} /></button>
+        <button class="d-text-btn" onClick={() => setAbout(true)}>About</button>
         <span class="chips" style="margin:0 0 0 auto">
           {held?.micros > 0 && <span class="chip">owe {money(held.micros / 1e6)}</span>}
           {perMinute(m) && plansOf(m).length > 0 && !isSubscribed(originOf(entry.url)) && <span class="chip">or subscribe</span>}

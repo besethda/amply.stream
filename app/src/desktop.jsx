@@ -366,7 +366,7 @@ export function PlayerBar({
         {t ? <>
           <button class="d-bar-art" onClick={onExpand} aria-label="Open now playing" title="Open now playing">
             <Cover class="art d-bar-cover" track={t} />
-            <span class="d-bar-art-hint"><Icon.down size={16} /></span>
+            {!expanded && <span class="d-bar-art-hint"><Icon.down size={16} /></span>}
           </button>
           <span class="d-bar-text">
             <button class="d-bar-title" onClick={onAlbum} title={t.title}>{t.title}</button>
@@ -412,7 +412,7 @@ export function PlayerBar({
           <input type="range" class="d-range" min="0" max="1" step="0.01" value={level} aria-label="Volume"
             style={`--fill:${level * 100}%`} onInput={(e) => setVol(parseFloat(e.target.value))} />
         </div>
-        <button class={`icon-btn d-ctl${expanded ? " on" : ""}`} onClick={onExpand} disabled={!t} aria-label={expanded ? "Close now playing" : "Open now playing"} title={expanded ? "Close (Esc)" : "Full view"}>
+        <button class="icon-btn d-ctl" onClick={onExpand} disabled={!t} aria-label={expanded ? "Close now playing" : "Open now playing"} title={expanded ? "Close (Esc)" : "Full view"}>
           {expanded ? <Icon.down size={19} /> : <ExpandIcon />}
         </button>
       </div>
@@ -451,7 +451,7 @@ export function SidePanel({
   return (
     <aside class="d-card d-panel" style={accentVars(t?.colors?.accent)} aria-label={mode === "queue" ? "Queue" : "Now playing"}>
       <div class="d-panel-head">
-        <b>{mode === "queue" ? "Queue" : (state.from || "Now playing")}</b>
+        <b>{mode === "queue" ? "Queue" : "Now playing"}{mode !== "queue" && state.from && <span class="d-panel-from"> · {state.from}</span>}</b>
         <button class="d-ghost" onClick={onClose} aria-label="Close" title="Close"><Icon.close size={16} /></button>
       </div>
       <div class="d-panel-body">
@@ -464,10 +464,10 @@ export function SidePanel({
               <button class="d-bar-artist" onClick={onArtist}>{t.artistName}</button>
             </span>
             <span class="d-panel-acts">
-              {!t.local && <button class="icon-btn d-ctl" onClick={onShare} aria-label="Share" title="Share"><Icon.share size={17} /></button>}
-              <button class="icon-btn d-ctl" onClick={onAddTo} aria-label="Add to playlist" title="Add to playlist"><Icon.plus size={18} /></button>
-              <button class={`icon-btn d-ctl${liked ? " on" : ""}`} onClick={onLike} aria-label={liked ? "Unlike" : "Like"} title={liked ? "Unlike" : "Like"}>
-                {liked ? <Icon.heartOn size={18} /> : <Icon.heart size={18} />}
+              {!t.local && <button class="icon-btn d-ctl" onClick={onShare} aria-label="Share" title="Share"><Icon.share size={19} /></button>}
+              <button class="icon-btn d-ctl" onClick={onAddTo} aria-label="Add to playlist" title="Add to playlist"><Icon.plus size={20} /></button>
+              <button class={`icon-btn d-ctl d-like${liked ? " on" : ""}`} onClick={onLike} aria-label={liked ? "Unlike" : "Like"} title={liked ? "Unlike" : "Like"}>
+                {liked ? <Icon.heartOn size={20} /> : <Icon.heart size={20} />}
               </button>
             </span>
           </div>
@@ -481,7 +481,7 @@ export function SidePanel({
                   <span class="art round s44" style={artStyle(imageOf(artist), nameOf(artist))} />
                   <button class="d-about-name" onClick={onArtist}>{nameOf(artist)}</button>
                   {followed
-                    ? <span class="chip">Following</span>
+                    ? <span class="d-following">Following</span>
                     : <button class="pill sm" onClick={onFollow}>Follow</button>}
                 </div>
                 {artist.manifest?.artist?.bio && <p class="d-about-bio">{artist.manifest.artist.bio}</p>}

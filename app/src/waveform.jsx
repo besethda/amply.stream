@@ -295,7 +295,8 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
       LOOK.forEach((look, i) => {
         const amp = h * 0.46 * (0.04 + shown[i]);
         const phase = still ? 0 : t * look.speed;
-        const k = (look.cycles * Math.PI * 2) / w;
+        // Across a desktop window, more waves, so it doesn't stretch into a few long swells.
+        const k = (look.cycles * (live.current.wide ? Math.min(2.4, Math.max(1, w / dpr / 520)) : 1) * Math.PI * 2) / w;
         const shape = P.shape[i];
         g.beginPath();
         P.xs.forEach((x, j) => {
@@ -402,7 +403,7 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
       // Still to come: dim the ribbons after the playhead. Not the boxes: across,
       // they're frequencies, and cutting them at the playhead only confuses.
       if (live.current.style === "ribbons") {
-        g.fillStyle = "rgba(0,0,0,0.55)";
+        g.fillStyle = light ? "rgba(0,0,0,0.4)" : "rgba(0,0,0,0.55)";
         g.fillRect(head, 0, w - head, h);
       }
 
