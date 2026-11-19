@@ -112,7 +112,11 @@ const { forget, listeners: listed } = await import("./src/store.ts");
 const row = (await listed(DB)).find((r) => r.pubkey === wallet);
 ok("the editor sees what's owed beside the plays", row?.owed_micros === 20_000 && row?.plays >= 2, JSON.stringify(row));
 await forget(DB, wallet);
-ok("forgotten: the cost goes with the rest", owed().micros === 0 && !sqlite.prepare("SELECT 1 FROM owed WHERE pubkey = ?").get(wallet));
+const kept = sqlite.prepare("SELECT * FROM listeners WHERE pubkey = ?").get(wallet);
+ok("forgotten while owing 2c: the listening goes, what's owed stays", owed().micros === 20_000 && kept?.plays === 0 && kept?.seconds === 0 && kept?.first_seen === 0, JSON.stringify([owed(), kept]));
+sqlite.prepare("INSERT INTO paid (pubkey, micros) VALUES (?, 20000) ON CONFLICT(pubkey) DO UPDATE SET micros = 20000").run(wallet);
+await forget(DB, wallet);
+ok("  paid up and forgotten again: the cost goes with the rest", owed().micros === 0 && !sqlite.prepare("SELECT 1 FROM owed WHERE pubkey = ?").get(wallet) && !sqlite.prepare("SELECT 1 FROM listeners WHERE pubkey = ?").get(wallet));
 
 // ── just below the line ──
 later(6);

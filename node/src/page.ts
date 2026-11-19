@@ -434,6 +434,9 @@ record is yours by signing for it with your wallet, and the answer comes straigh
 <p>If ${name} has stopped serving your wallet, erasing removes everything but the address
 and that decision, which ${name} keeps so that it stands. You can object to that by
 contacting them.</p>
+<p>If you owe ${name} for listening, erasing removes everything about the listening, but keeps
+what you owe and what you've paid until it's settled, as any seller keeps an unpaid bill. Once
+it's paid, erasing again removes that too.</p>
 ${contactLine}
 <p>You can also complain to the data protection authority where you live.</p>
 ` : `

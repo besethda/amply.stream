@@ -411,7 +411,7 @@ function WhatTheyKeep({ entry, pair, toast }) {
     try { setHeld(await whatTheyHold(pair, origin)); } catch (e) { toast({ bad: true, text: e.message }); } finally { setBusy(false); }
   }
   async function erase() {
-    if (!(await ask({ title: `Erase your data at ${name}?`, body: "Their play totals for your wallet are deleted.", confirm: "Erase", danger: true }))) return;
+    if (!(await ask({ title: `Erase your data at ${name}?`, body: "Your listening record is deleted. Anything you still owe them is kept until it's paid.", confirm: "Erase", danger: true }))) return;
     setBusy(true);
     try { await askToBeForgotten(pair, origin); setHeld(null); toast({ text: "Erased" }); }
     catch (e) { toast({ bad: true, text: e.message }); } finally { setBusy(false); }

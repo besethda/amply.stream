@@ -350,42 +350,57 @@ export async function setBlocked(db: D1Database, pubkey: string, blocked: boolea
  * textbook one. A wallet nobody has blocked is deleted outright.
  */
 export async function forget(db: D1Database, pubkey: string): Promise<void> {
+  // An unpaid balance stays, with only what it needs (see forgetOwed).
+  const unpaid = await unpaidOfWallet(db, pubkey);
   await db.prepare(
-    `UPDATE listeners SET plays = 0, seconds = 0, first_seen = 0, last_seen = 0
-     WHERE pubkey = ? AND blocked = 1`,
-  ).bind(pubkey).run();
-  await db.prepare("DELETE FROM listeners WHERE pubkey = ? AND blocked = 0").bind(pubkey).run();
-  await forgetOwed(db, pubkey);
+    `UPDATE listeners SET plays = 0, seconds = 0, first_seen = 0, last_seen = ?
+     WHERE pubkey = ? AND (blocked = 1 OR ? > 0)`,
+  ).bind(unpaid > 0 ? Date.now() : 0, pubkey, unpaid).run();
+  await db.prepare("DELETE FROM listeners WHERE pubkey = ? AND blocked = 0 AND ? <= 0").bind(pubkey, unpaid).run();
+  await forgetOwed(db, pubkey, unpaid > 0);
+}
+
+/** What a wallet owes here and hasn't paid, in micros: 0 without the tables. */
+async function unpaidOfWallet(db: D1Database, pubkey: string): Promise<number> {
+  try {
+    const owed = await db.prepare("SELECT micros FROM owed WHERE pubkey = ?").bind(pubkey).first<{ micros: number }>();
+    const paid = await db.prepare("SELECT micros FROM paid WHERE pubkey = ?").bind(pubkey).first<{ micros: number }>();
+    return Math.max(0, (Number(owed?.micros) || 0) - (Number(paid?.micros) || 0));
+  } catch {
+    return 0;
+  }
 }
 
 /**
  * What a wallet's listening cost, and what it has paid, go with the rest of
- * what's held about it. The two go together: one without the other would
- * leave a wallet owing for listening nobody remembers, or credited for
- * payments against listening that's gone.
+ * what's held about it — unless it still owes something.
  *
- * Erasing does wipe what an auto-blocked wallet owes, and so lifts it. That
- * is deliberate: a wallet costs nothing to make, so anyone dodging payment
- * could start again with a new one just as easily, and the right to be
- * forgotten is not something to bargain over a few cents. A block the artist
- * made by hand survives (see forget).
+ * Erasing wipes everything about the listening: which songs went to it, how
+ * much, how often, when. But a wallet that hasn't paid for what it took keeps
+ * its money record (what it owes, what it paid, and the payments' signatures,
+ * so none can be counted twice), and an empty row in `listeners`, last seen
+ * now, so Auto-block still knows it. That's the record any seller keeps of an
+ * unpaid bill; without it, erasing would be a way not to pay. Once it's paid,
+ * erasing again takes the rest. A block the artist made by hand survives
+ * either way.
  */
-async function forgetOwed(db: D1Database, pubkey?: string): Promise<void> {
+async function forgetOwed(db: D1Database, pubkey?: string, keepMoney = false): Promise<void> {
   // Each on its own: a database from before one of these tables still has
   // the others cleared.
-  for (const table of ["owed", "paid", "paid_sigs"]) {
-    try {
-      await (pubkey
-        ? db.prepare(`DELETE FROM ${table} WHERE pubkey = ?`).bind(pubkey)
-        : db.prepare(`DELETE FROM ${table} WHERE pubkey NOT IN (SELECT pubkey FROM listeners)`)
-      ).run();
-    } catch { /* no such table yet */ }
+  if (!keepMoney) {
+    for (const table of ["owed", "paid", "paid_sigs"]) {
+      try {
+        await (pubkey
+          ? db.prepare(`DELETE FROM ${table} WHERE pubkey = ?`).bind(pubkey)
+          : db.prepare(`DELETE FROM ${table} WHERE pubkey NOT IN (SELECT pubkey FROM listeners)`)
+        ).run();
+      } catch { /* no such table yet */ }
+    }
   }
-  // What was sent to this wallet in the last three days goes too. Not swept
-  // with the others below: a wallet whose listening hasn't cost anything yet
-  // (still within the metering's slack) has rows here and no record in
-  // listeners, and those rows are what lets it be charged. They go by age
-  // instead (pruneStale).
+  // What was sent to this wallet goes, owing or not: the money record above
+  // is all an unpaid bill needs. Not swept with the others below: a wallet
+  // whose listening hasn't cost anything yet has rows here and no record in
+  // listeners. They go by age instead (pruneStale).
   if (pubkey) {
     try { await db.prepare("DELETE FROM served WHERE pubkey = ?").bind(pubkey).run(); } catch { /* no such table yet */ }
   }

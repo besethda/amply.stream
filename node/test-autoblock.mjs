@@ -433,15 +433,22 @@ const report = async (signature, ip = nextIp()) => {
   ok("a listener's own record shows what they've paid", mine.held?.paidMicros === 1_000_000, JSON.stringify(mine.held));
   ok("  an auto-blocked wallet can still see it", (await passFor(w)).status === 403 && mine.wallet === w.address);
   const erased = await listen("/forget", await signed(w));
-  ok("  and erase it", erased.status === 204 && (await listener(DB, w.address)) === null);
-  ok("  taking what it paid, and the payments' references, with it",
-    !sqlite.prepare("SELECT 1 FROM paid WHERE pubkey = ?").get(w.address) && !sqlite.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(w.address));
+  const left = await listener(DB, w.address);
+  ok("  and erase it: the listening goes", erased.status === 204 && left?.plays === 0 && left?.seconds === 0 && left?.first_seen === 0, JSON.stringify(left));
+  ok("  but owing $2, what it owes and what it paid stay, until it's settled",
+    sqlite.prepare("SELECT micros FROM owed WHERE pubkey = ?").get(w.address)?.micros === 3_000_000 && (await paidOf(DB, w.address)) === 1_000_000
+    && !!sqlite.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(w.address));
+  ok("  so erasing isn't a way not to pay: still auto-blocked, told what it owes", (await passFor(w)).status === 403);
+  await recordPaid(DB, w.address, 2_000_000, newSig());
+  const again = await listen("/forget", await signed(w));
+  ok("  paid up and erased again: everything goes, money record and all", again.status === 204 && (await listener(DB, w.address)) === null
+    && !sqlite.prepare("SELECT 1 FROM paid WHERE pubkey = ?").get(w.address) && !sqlite.prepare("SELECT 1 FROM paid_sigs WHERE pubkey = ?").get(w.address));
 
   const kept = await makeWallet();
   known(kept, { owed: 3_000_000, blocked: 1 });
-  await recordPaid(DB, kept.address, 1_000_000, newSig());
+  await recordPaid(DB, kept.address, 3_000_000, newSig());
   await forget(DB, kept.address);
-  ok("a blocked wallet erased keeps only its block: what it paid goes too", (await listener(DB, kept.address))?.blocked === 1 && (await paidOf(DB, kept.address)) === 0);
+  ok("a blocked wallet, paid up, erased keeps only its block: what it paid goes too", (await listener(DB, kept.address))?.blocked === 1 && (await paidOf(DB, kept.address)) === 0);
 
   const gone = await makeWallet();
   known(gone, { owed: 3_000_000 });
