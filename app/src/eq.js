@@ -49,7 +49,7 @@ export function loadEq() {
   return { on: false, preset: "flat", gains: BANDS.map(() => 0) };
 }
 export function saveEq(s) {
-  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { /* fine */ }
+  try { localStorage.setItem(KEY, JSON.stringify({ on: s.on, preset: s.preset, gains: s.gains })); } catch { /* fine */ }
 }
 export { clamp as clampGain };
 
@@ -103,8 +103,8 @@ function magnitude(type, f0, gain, f, rate) {
 /** Headroom taken off when bands are raised, so a boost doesn't clip. */
 const preampFor = (gains) => -Math.max(0, ...gains) * 0.6;
 
-export function createEq(audio) {
-  let ctx = null, filters = null, pre = null;
+export function createEq(audio, { onTrouble = () => {} } = {}) {
+  let ctx = null, filters = null, pre = null, out = null, volume = 1;
   let state = loadEq();
 
   // Fetch with CORS from the start if it was left on, so the first song
@@ -129,6 +129,15 @@ export function createEq(audio) {
         }
       }
       ctx = new AC();
+      // A song from a server that doesn't allow CORS can't be shaped — the
+      // browser hands Web Audio silence, or refuses to load it. Say so once
+      // per song rather than leave the listener wondering.
+      let told = null;
+      audio.addEventListener("error", () => {
+        const src = audio.currentSrc || audio.src || "";
+        // Code 4 is what a refused CORS fetch looks like; a dropped connection isn't this.
+        if (audio.error?.code === 4 && src && !src.startsWith("blob:") && told !== src) { told = src; onTrouble(); }
+      });
       const source = ctx.createMediaElementSource(audio);
       pre = ctx.createGain();
       filters = BANDS.map((f, i) => {
@@ -138,7 +147,12 @@ export function createEq(audio) {
         if (b.type === "peaking") b.Q.value = Q;
         return b;
       });
-      [source, pre, ...filters].reduce((a, b) => (a.connect(b), b)).connect(ctx.destination);
+      // Volume after the filters, in Web Audio: browsers differ on whether an
+      // element's own volume still applies once it's routed here.
+      out = ctx.createGain();
+      out.gain.value = volume;
+      audio.volume = 1;
+      [source, pre, ...filters, out].reduce((a, b) => (a.connect(b), b)).connect(ctx.destination);
       // A context made outside a tap starts suspended; any play wakes it.
       audio.addEventListener("play", () => ctx.state !== "running" && ctx.resume().catch(() => {}));
       document.addEventListener("visibilitychange", () => {
@@ -167,14 +181,27 @@ export function createEq(audio) {
     get: () => state,
     /** Change any of on / preset / gains. Turning it on builds the graph. */
     set(patch) {
-      state = { ...state, ...patch };
+      state = { ...state, ...patch, unavailable: false };
       if (patch.gains) state.gains = patch.gains.map(clamp);
+      if (state.on && !build()) {
+        // No Web Audio here (or it refused): say so, and don't pretend it's on.
+        state = { ...state, on: false, unavailable: true };
+      }
       saveEq(state);
-      if (state.on && build()) apply();
-      else if (filters) apply();
+      if (filters) apply();
       return state;
     },
+    /** The volume slider: on the element, or on the graph once there is one. */
+    setVolume(v) {
+      volume = Math.max(0, Math.min(1, v));
+      if (out) { audio.volume = 1; out.gain.setTargetAtTime(volume, ctx.currentTime, 0.02); }
+      else if (audio) audio.volume = volume;
+    },
     /** If it was left on, connect on the first play (a tap), not before. */
-    wake() { if (state.on && !filters && build()) apply(false); },
+    wake() {
+      if (!state.on || filters) return;
+      if (build()) apply(false);
+      else { state = { ...state, on: false, unavailable: true }; saveEq(state); }
+    },
   };
 }

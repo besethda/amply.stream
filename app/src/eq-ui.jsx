@@ -55,6 +55,7 @@ export function Equalizer({ eq }) {
         </button>
       </div>
 
+      {s.unavailable && <p class="eq-note warn-ink" role="status">Not available in this browser.</p>}
       <div class="eq-graph">
         <svg ref={svg} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" class="eq-svg"
           onPointerDown={(e) => {

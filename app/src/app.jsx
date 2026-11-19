@@ -64,6 +64,14 @@ import {
   behindSplash, showSplash, fontsLoaded, imagesInView, laidOut, START_MS as SPLASH_START_MS, RESUME_MS as SPLASH_RESUME_MS,
 } from "./splash.js";
 
+/** How long some songs last together: "23 min", or "1 hr 4 min". */
+function totalTime(rows) {
+  const s = rows.reduce((n, r) => n + (Number(r.track?.duration) || 0), 0);
+  if (!s) return "";
+  const m = Math.round(s / 60);
+  return m < 60 ? `${Math.max(1, m)} min` : `${Math.floor(m / 60)} hr ${m % 60} min`;
+}
+
 /** A refusal the player can show: it carries a `kind` (see sheets.jsx). */
 function refuse(kind, message = kind, data = {}) {
   const e = new Error(message);
@@ -202,6 +210,8 @@ export function App() {
       // artist's songs are free, and they must be charged for once they aren't.
       if (track?.from) heardFrom.current.add(track.from);
       if (!track?.from || !track.needsWallet) return;
+      // Muted isn't listening: nothing is charged while the volume is off.
+      if (silent.current) return;
       // A subscriber has paid by card; charging by the minute too would be twice.
       if (isSubscribed(originOf(track.url))) return;
       pending.current[track.from] = (pending.current[track.from] || 0) + seconds;
@@ -300,9 +310,13 @@ export function App() {
   ), []);
   try { if (location.hostname === "localhost") window.__amplyPlayer = player; } catch { /* not a browser */ }
   // A computer's volume slider, and its keys: space, arrows, M, L.
-  const volume = useVolume(player);
   // The equaliser: nothing routed through it until it's first switched on.
-  const eq = useMemo(() => (typeof window !== "undefined" ? createEq(player.element()) : null), []);
+  const eq = useMemo(() => (typeof window !== "undefined" ? createEq(player.element(), {
+    onTrouble: () => flash({ bad: true, text: "This song can't play through the EQ. Reload to hear it without." }),
+  }) : null), []);
+  const volume = useVolume(player, eq);
+  const silent = useRef(false);
+  silent.current = volume.muted || volume.vol === 0;
   useEffect(() => {
     const a = player.element(), wake = () => eq?.wake();
     a.addEventListener("play", wake);
@@ -1116,7 +1130,7 @@ export function App() {
     const e = byUrl(r.from);
     const t = e && tracksOf(e).find((x) => x.id === r.id);
     return t ? [{ track: decorate(t), entry: e }] : [];
-  }).slice(0, 5);
+  }).slice(0, desk ? 6 : 5);
 
   /** The current song's cost, for the mini player and Now playing. */
   const cost = (() => {
@@ -1413,7 +1427,7 @@ export function App() {
     const rel = e && (e.manifest.releases || []).find((r) => r.id === coll.rid);
     const rows = rel ? tracksOf(e).filter((t) => t.releaseId === rel.id).map((t) => ({ track: decorate(t), entry: e })) : [];
     screen = <Collection kind="album" title={rel?.title || "Album"} art={rel?.art || null} tint={rel?.colors?.accent || null}
-      meta={[rel?.artistName || nameOf(e), rel?.date?.slice(0, 4), `${rows.length} songs`].filter(Boolean).join(" · ")}
+      meta={[rel?.artistName || nameOf(e), rel?.date?.slice(0, 4), `${rows.length} songs`, totalTime(rows)].filter(Boolean).join(" · ")}
       rows={rows} {...collProps}
       liked={rows.length > 0 && rows.every((r) => isLiked(r.track, likedNow))}
       buy={(() => {
@@ -1452,7 +1466,7 @@ export function App() {
         if (!setPlaylistArt(pl.id, art)) flash({ bad: true, text: "There isn't room to keep that picture" });
         redraw();
       } : null}
-      meta={`${rows.length} song${rows.length === 1 ? "" : "s"}`} rows={rows} missing={missing} {...collProps}
+      meta={[`${rows.length} song${rows.length === 1 ? "" : "s"}`, totalTime(rows)].filter(Boolean).join(" · ")} rows={rows} missing={missing} {...collProps}
       onPlay={(tracks, i) => { player.setShuffle(false); play(tracks, i, pl?.name); }}
       onShuffle={(tracks) => { player.setShuffle(true); play(tracks, 0, pl?.name); }}
       onShare={() => pl && shareList(pl.name, pl.tracks)}

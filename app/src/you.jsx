@@ -3,6 +3,7 @@
  */
 import { useState } from "preact/hooks";
 import { Icon } from "./icons.jsx";
+import { artStyle } from "./looks.js";
 import { money, TopUp, SendBack, SaveBackup } from "./wallet-ui.jsx";
 import { backupSaved, machinery, passkeyWallet } from "./paying.js";
 import { NETWORKS, networkName, useNetwork } from "./networks.js";
@@ -11,6 +12,49 @@ import { nameOf } from "./screens.jsx";
 import { charges } from "../../spec/pricing.mjs";
 import { ask } from "./sheets.jsx";
 import { Equalizer, Appearance } from "./eq-ui.jsx";
+import { receipts, forgetReceipts } from "./receipts.js";
+
+const KINDS = { listen: "Listening", tip: "Tip", purchase: "Purchase", owed: "Listening" };
+const dayOf = (t) => {
+  const d = new Date(t), today = new Date();
+  const y = new Date(); y.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === y.toDateString()) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+};
+
+/** Every payment this device sent, newest first, by day. */
+function History({ entries, onOpenArtist }) {
+  const all = receipts();
+  if (!all.length) return <p class="dim">No payments yet.</p>;
+  const byOrigin = (o) => entries.find((e) => { try { return new URL(e.url).origin === o; } catch { return false; } });
+  const days = [];
+  for (const r of all) {
+    const d = dayOf(r.at);
+    if (!days.length || days[days.length - 1].d !== d) days.push({ d, rows: [] });
+    days[days.length - 1].rows.push(r);
+  }
+  return (
+    <div class="history">
+      {days.map(({ d, rows }) => (
+        <section key={d}>
+          <span class="label">{d.toUpperCase()}</span>
+          {rows.map((r, i) => {
+            const e = r.origin && byOrigin(r.origin);
+            const img = e?.manifest?.artist?.image;
+            return (
+              <button class="tx" key={r.signature || `${r.at}${i}`} onClick={() => e && onOpenArtist(e.url)} disabled={!e}>
+                <span class="art round s40" style={artStyle(img, r.artist || "?")} />
+                <span class="t"><b>{r.artist || "Artist"}</b><span>{KINDS[r.kind] || "Payment"} · {new Date(r.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span></span>
+                <span class="tx-amt">−{money(r.micros / 1e6)}</span>
+              </button>
+            );
+          })}
+        </section>
+      ))}
+    </div>
+  );
+}
 
 const TABS = [["wallet", "Wallet"], ["general", "General"]];
 const TAB_KEY = "amply.you.tab";
@@ -54,6 +98,7 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
     if (!ok) return;
     const { wallet } = await machinery();
     wallet.forgetWallet();
+    forgetReceipts();
     setPair(null);
     back();
   }
@@ -80,6 +125,7 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
       </Sub>
     );
   }
+  if (view === "history") return <Sub title="Payments" onBack={back}><History entries={entries || []} onOpenArtist={onOpenArtist} /></Sub>;
   if (view === "purchases") return <Sub title="Purchases" onBack={back}>{purchases}</Sub>;
   if (view === "network") {
     return (
@@ -136,12 +182,15 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
             </button>
           )}
           <div class="balance-card">
-            <span class="label">TO SPEND{!network.real ? " · TEST" : ""}</span>
-            <div class="bal">
-              <b>{balance ? money(Math.max(0, balance.usdc - owed)) : "…"}</b>
-              {owed > 0 && <span class="mono-dim">{money(owed)} owed</span>}
-              <button class="icon-btn dim" onClick={onRefresh} aria-label="Refresh"><Icon.refresh size={16} /></button>
-            </div>
+            <button class="bal-open" onClick={() => setView("history")} aria-label="Payments">
+              <span class="label">TO SPEND{!network.real ? " · TEST" : ""}</span>
+              <span class="bal">
+                <b>{balance ? money(Math.max(0, balance.usdc - owed)) : "…"}</b>
+                {owed > 0 && <span class="mono-dim">{money(owed)} owed</span>}
+                <span class="bal-more">Payments <Icon.chevron size={14} /></span>
+              </span>
+            </button>
+            <button class="icon-btn dim bal-refresh" onClick={onRefresh} aria-label="Refresh"><Icon.refresh size={16} /></button>
             <div class="row">
               <button class="btn-primary sm" onClick={() => setView("topup")}><Icon.plus size={15} /> Top up</button>
               <button class="pill" onClick={() => setView("send")}><Icon.send size={15} /> Send back</button>

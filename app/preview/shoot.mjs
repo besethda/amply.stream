@@ -149,6 +149,13 @@ const SCENARIOS = {
   you: async (page) => { await S.goHome(page); await S.tab(page, "You"); await clickText(page, "Wallet", { exact: true }).catch(() => {}); },
   general: async (page) => { await S.goHome(page); await S.tab(page, "You"); await clickText(page, "General", { exact: true }); await clickText(page, "Bass boost", { exact: true }); await page.waitForTimeout(300); },
   artist: async (page) => { await toArtist(page); },
+  // Not a picture: checks the EQ really carries sound (prints a line).
+  "eq-check": async (page) => {
+    await toAlbum(page); await S.playFirstTrack(page); await page.waitForTimeout(1500);
+    await S.tab(page, "You"); await clickText(page, "General", { exact: true }); await clickText(page, "Bass boost", { exact: true });
+    await page.waitForTimeout(3000);
+    console.log("EQ", JSON.stringify(await page.evaluate(() => { const a = window.__amplyPlayer.element(); return { t: a.currentTime, paused: a.paused, cors: a.crossOrigin, err: a.error && a.error.code, vol: a.volume }; })));
+  },
   album: async (page) => { await toAlbum(page); },
   playlist: async (page) => { await S.goHome(page); await S.tab(page, "Library"); await clickText(page, "Late night drive"); },
   "home-playing": async (page) => { await toAlbum(page); await S.playFirstTrack(page); await S.tab(page, "Home"); },

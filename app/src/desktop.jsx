@@ -341,13 +341,13 @@ const REFUSED = {
   subscribe: "Subscribers only", offline: "Artist offline", unpaid: "Pay what's owed to play",
 };
 
-function useVolume(player) {
+function useVolume(player, eq) {
   const read = () => { try { const v = parseFloat(localStorage.getItem("amply.volume")); return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1; } catch { return 1; } };
   const [vol, setVol] = useState(read);
   const [muted, setMuted] = useState(false);
   useEffect(() => {
-    const a = player.element();
-    a.volume = muted ? 0 : vol;
+    if (eq) eq.setVolume(muted ? 0 : vol);
+    else player.element().volume = muted ? 0 : vol;
     try { localStorage.setItem("amply.volume", String(vol)); } catch { /* fine */ }
   }, [vol, muted]);
   return { vol, muted, setVol: (v) => { setVol(v); if (v > 0) setMuted(false); }, toggleMute: () => setMuted((m) => !m) };
@@ -544,7 +544,8 @@ const WAVE_NAMES = { ribbons: "Ribbons", boxes: "Boxes", hills: "Hills" };
 export function Expanded({ state, player, viz, cost, wave, onWave, onClose, onArtist, liked, onLike, onAddTo, onShare, onTip, tips, session, onPlayAt }) {
   const t = state.track;
   useEffect(() => {
-    const esc = (e) => { if (e.key === "Escape") onClose(); };
+    // A sheet over it closes first; Escape again closes this.
+    const esc = (e) => { if (e.key === "Escape" && !document.querySelector(".sheet-wrap")) onClose(); };
     addEventListener("keydown", esc);
     return () => removeEventListener("keydown", esc);
   }, []);
@@ -632,7 +633,11 @@ export function useKeys({ player, state, volume, onLike }) {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const { player: p, state: s, volume: v, onLike: like } = live.current;
       if (document.querySelector(".sheet-wrap")) return;
-      if (e.key === " " && !(tag === "BUTTON" && e.target.closest?.(".d-controls"))) { e.preventDefault(); if (s.track) p.toggle(); }
+      // Space plays and pauses from anywhere — except on a control that space
+      // itself works (a switch, a tab, a choice), and never twice: a focused
+      // button would otherwise take the same press as a click.
+      const own = e.target?.closest?.('[role="switch"],[role="radio"],[role="tab"],[role="checkbox"],[role="slider"],summary');
+      if (e.key === " " && !own) { e.preventDefault(); if (s.track) p.toggle(); }
       else if (e.key === "ArrowRight" && e.shiftKey) { e.preventDefault(); p.next(); }
       else if (e.key === "ArrowLeft" && e.shiftKey) { e.preventDefault(); p.prev(); }
       else if (e.key === "ArrowRight" && s.duration && !e.target?.closest?.("[role=slider]")) { e.preventDefault(); p.seek(Math.min(s.duration, (s.at || 0) + 5)); }

@@ -1281,3 +1281,57 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 .desk .recent-list .badge, .desk .recent-list .more-btn { display: none; }
 .desk .recent-list .t span, .desk .recent-list .t b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .desk .recent-list .track-main { padding-right: 14px; }
+
+/* ── round 3 ── */
+.d-only { display: none !important; }
+.desk .d-only { display: block !important; }
+.desk .artist .label.d-only { padding-top: 34px; padding-bottom: 0; }
+.desk .artist .release:first-of-type { margin-top: 18px; }
+.no-site { color: var(--ink3); display: inline-flex; align-items: center; gap: 4px; }
+.desk .screen:not(.artist):not(.coll) > .list:not(.recent-list) { max-width: 920px; }
+.desk .row-item .art.s50, .desk .track-main > .art.s44 { width: 48px; height: 48px; }
+.desk .coll-thead { margin: 8px 16px 8px; padding: 0 16px 8px; }
+.desk .coll-thead .art-col { width: 48px; }
+.desk .coll { --coll-fade: 440px; }
+.desk .coll::before {
+  content: ""; position: absolute; left: 0; right: 0; top: -76px; height: var(--coll-fade); pointer-events: none; z-index: 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--coll-tint, var(--bg3)) 50%, transparent), transparent);
+}
+.desk .coll-top { background: none; position: relative; z-index: 1; }
+.desk .coll > * { position: relative; z-index: 1; }
+.desk .coll .head { position: absolute; }
+.desk .coll-cover-edit { opacity: 0; transition: opacity .15s; }
+.desk .coll-cover:hover .coll-cover-edit { opacity: 1; }
+:root[data-theme="light"].desk .coll-art { box-shadow: 0 12px 32px rgba(19, 17, 16, .18); }
+.eq-db { font-size: 11px; }
+.d-panel-body { padding-bottom: 28px; }
+.d-about-banner::after { background: linear-gradient(180deg, rgba(0, 0, 0, .72), rgba(0, 0, 0, .15) 65%); }
+.d-bar { padding-left: 14px; }
+.d-time { font-size: 12px; }
+.d-range { background: linear-gradient(to right, var(--orange) var(--fill), color-mix(in srgb, var(--ink3) 35%, transparent) var(--fill)); }
+.d-range:hover { background: linear-gradient(to right, var(--orange) var(--fill), color-mix(in srgb, var(--ink3) 50%, transparent) var(--fill)); }
+.desk .you .head { padding-bottom: 16px; }
+.desk .you .foot-note { color: var(--ink2); }
+.d-text-btn { display: inline-flex; align-items: center; gap: 7px; }
+.eq-note { font-size: 13px; margin: -2px 2px 4px; }
+.track .d-wide { display: none; }
+.desk .track .d-wide { display: block; }
+.desk .recent-list .d-wide { display: none; }
+
+/* ── payments, from To spend ── */
+.balance-card { position: relative; }
+.bal-open { display: grid; gap: 8px; text-align: left; border-radius: 10px; margin: -6px; padding: 6px; }
+.bal-open:hover { background: var(--d-hover, rgba(255, 255, 255, .05)); }
+.bal-more { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--ink3); padding-right: 30px; }
+.bal-open:hover .bal-more { color: var(--ink); }
+.bal-refresh { position: absolute; top: 12px; right: 10px; }
+.history { display: grid; gap: 18px; }
+.history section { display: grid; gap: 2px; }
+.history .label { margin-bottom: 6px; }
+.tx { display: flex; align-items: center; gap: 12px; padding: 8px 6px; border-radius: 10px; text-align: left; width: 100%; }
+.tx:hover:not(:disabled) { background: var(--d-hover, var(--bg2)); }
+.tx:disabled { opacity: 1; cursor: default; }
+.tx .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tx .t b { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tx .t span { font-size: 13px; color: var(--ink3); }
+.tx-amt { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; }

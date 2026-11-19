@@ -427,8 +427,14 @@ export function Waveform({ viz, playing, progress = 0, accent = null, inset = 20
       g.fillStyle = halo;
       g.beginPath(); g.arc(head, mid, 18 * dpr, 0, Math.PI * 2); g.fill();
       g.globalCompositeOperation = "source-over";
-      g.fillStyle = light ? "#131110" : "#fff7ef";
-      g.beginPath(); g.arc(head, mid, 6.5 * dpr, 0, Math.PI * 2); g.fill();
+      if (light) {
+        // On a light screen: the cover's colour with a white ring, not a black dot.
+        g.fillStyle = "#fff"; g.beginPath(); g.arc(head, mid, 8 * dpr, 0, Math.PI * 2); g.fill();
+        g.fillStyle = `rgb(${P.line})`; g.beginPath(); g.arc(head, mid, 5.5 * dpr, 0, Math.PI * 2); g.fill();
+      } else {
+        g.fillStyle = "#fff7ef";
+        g.beginPath(); g.arc(head, mid, 6.5 * dpr, 0, Math.PI * 2); g.fill();
+      }
       next(now, real, settled);
     };
     const next = (now, real, settled) => {

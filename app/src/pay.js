@@ -24,6 +24,7 @@ import { rpc, network, networkName } from "./wallet.js";
 import { networkFor } from "./networks.js";
 import { MEMO_PROGRAM } from "../../spec/chains.mjs";
 import { toMicros, toUsd } from "./money.js";
+import { recordReceipt } from "./receipts.js";
 import { SETTLE_WITHIN_DAYS as SETTLE_AFTER_DAYS, shareOut, LISTEN_MIN_MICROS, LISTEN_MAX_MICROS } from "../../spec/pricing.mjs";
 
 export { MICROS, toMicros, toUsd } from "./money.js";
@@ -211,7 +212,12 @@ export { MEMO_PROGRAM };
  * open it. That falls to the payer, costs a fraction of a cent in rent, and is
  * done idempotently so two listeners paying at once cannot collide.
  */
-export async function payArtist(pair, recipients, micros, { artistName = "This artist", mint: mintAddress, memo, node } = {}) {
+export async function payArtist(pair, recipients, micros, { artistName = "This artist", mint: mintAddress, memo, node, kind } = {}) {
+  /** A receipt on this device, for the listener's own record (receipts.js). */
+  const keep = (signature) => recordReceipt({
+    micros, signature, origin: node?.origin || null, artist: artistName, network: networkName(),
+    kind: kind || (node?.item !== undefined ? "purchase" : node?.tip ? "tip" : "listen"),
+  });
   const shares = shareOut(micros, recipients);
   if (!shares.length) throw new PaymentError("nothing", "There was nothing to pay.");
 
@@ -274,6 +280,7 @@ export async function payArtist(pair, recipients, micros, { artistName = "This a
       unsure.signature = sent;
       throw unsure;
     }
+    keep(sent);
     // `nodeConfirmed`: whether the artist's server saw it land before it
     // answered. If not, it may not have counted it yet (paying.js tells it).
     return { signature: sent, shares, micros, feePaidBy: "artist", nodeConfirmed: answer.confirmed };
@@ -282,6 +289,7 @@ export async function payArtist(pair, recipients, micros, { artistName = "This a
   try {
     const signature = await conn.sendTransaction(await build(pair.publicKey), [pair], { preflightCommitment: "confirmed" });
     await confirmed(conn, signature);
+    keep(signature);
     return { signature, shares, micros, feePaidBy: "listener" };
   } catch (e) {
     throw paymentProblem(e);

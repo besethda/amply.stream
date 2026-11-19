@@ -92,7 +92,7 @@ export function TrackRow({ track, n, entry, current, playing, onPlay, showArtist
           {showArtist && <span>{track.artistName || nameOf(entry)}</span>}
         </span>
         {!edit && <Badge badge={badgeOf(entry, track)} />}
-        {!edit && n != null && <span class="d">{mmss(track.duration)}</span>}
+        {!edit && <span class={`d${n == null ? " d-wide" : ""}`}>{mmss(track.duration)}</span>}
       </button>
       {edit ? (
         <span class="track-edit">
@@ -307,9 +307,9 @@ export function Library({ entries, localEntry, onOpenArtist, onAdd, lists, liked
                   ? <span class="mono dim">{seemsGone(e) ? "seems to be gone" : "offline right now"}</span>
                   : e.domain
                   ? <span class="mono good-ink"><Icon.check size={11} /> {e.domain}</span>
-                  : <span class="mono warn-ink"><Icon.warn size={11} /> no website</span>}
+                  : <span class="mono no-site"><Icon.warn size={11} /> no website</span>}
               </span>
-              <span class="mono-dim">{priceShort(e)}</span>
+              <span class={`badge${priceShort(e) === "Free" ? " good" : ""}`}>{priceShort(e)}</span>
             </button>
           ))}
         </div>
@@ -487,8 +487,8 @@ export function ArtistPage({
         {followed
           ? <button class="pill" onClick={async () => (await ask({ title: `Unfollow ${nameOf(entry)}?`, confirm: "Unfollow", icon: <Icon.artist size={22} /> })) && onUnfollow()}>Following</button>
           : <button class="pill" onClick={onFollow}>Follow</button>}
-        <button class="icon-btn dim" onClick={share} aria-label={`Share ${nameOf(entry)}`} title="Share"><Icon.share size={20} /></button>
-        <button class="d-text-btn" onClick={() => setAbout(true)}>About</button>
+        <button class="d-text-btn" onClick={share}><Icon.share size={16} /> Share</button>
+        <button class="d-text-btn" onClick={() => setAbout(true)}><Icon.artist size={16} /> About</button>
         <span class="chips" style="margin:0 0 0 auto">
           {held?.micros > 0 && <span class="chip">owe {money(held.micros / 1e6)}</span>}
           {perMinute(m) && plansOf(m).length > 0 && !isSubscribed(originOf(entry.url)) && <span class="chip">or subscribe</span>}
@@ -541,6 +541,7 @@ export function ArtistPage({
         </div>
       )}
 
+      {reachable(entry) && (m.releases || []).length > 0 && <span class="label pad d-only">DISCOGRAPHY</span>}
       {reachable(entry) && (m.releases || []).map((release) => {
         const tracks = all.filter((t) => t.releaseId === release.id);
         return (

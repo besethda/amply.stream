@@ -20,6 +20,7 @@ import {
   claimOf, noteClaim, clearClaim, paidTowards, backOff, claimDue, noteCredit, pieces,
 } from "./owes.js";
 import { toUsd } from "./money.js";
+import { recordReceipt } from "./receipts.js";
 
 // ── payments that may have gone out ────────────────────────────────────────
 //
@@ -257,6 +258,7 @@ async function lookAgain(pair, entry, recipients, pay, { report = noReport } = {
   if (landed === null) return { wait: true };          // can't tell yet: wait
   forgetUnsure(entry.url);
   if (landed > 0) {
+    recordReceipt({ micros: landed, signature: unsure.signature || null, origin: originOf(entry.url), artist: entry.manifest?.artist?.name, network: networkName() });
     recordSpend(landed);
     settled(loadLedger(), entry.url, landed);
     paidTowards(entry.url, landed);
