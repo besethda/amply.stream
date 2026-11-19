@@ -69,6 +69,8 @@ export function createPlayer(onChange, onListened, {
   random = Math.random,
   /** Milliseconds, for the watchdog; injectable for tests. */
   clock = () => Date.now(),
+  /** Whether the listener has the sound off: then nothing is heard. */
+  silent = () => false,
 } = {}) {
   const audio = new Audio();
   audio.preload = "auto";
@@ -86,7 +88,6 @@ export function createPlayer(onChange, onListened, {
   let played = 0;           // seconds of this play counted (and not yet reported)
   let heard = 0;            // seconds of this play heard, whether or not it counts yet
   let held = 0;             // heard before the play counted: counted when it does
-  let fetched = false;      // its audio was asked for (a paid song's server counts what it sends)
   let loading = 0;          // guards against a slow resolve landing out of order
   let wanted = false;       // the listener means it to be playing
   let recovering = false;   // fetching the song again after losing signal
@@ -129,19 +130,13 @@ export function createPlayer(onChange, onListened, {
   };
 
   /** Tell whoever is counting that the track we were on is finished with. */
-  /**
-   * Tell whoever is counting that the track we were on is finished with —
-   * also when it was fetched and skipped before a second played, so a paid
-   * song's server hears "0 s" rather than nothing, and doesn't bill what the
-   * browser had already read ahead (node/src/meter.ts).
-   */
+  /** Tell whoever is counting that the track we were on is finished with. */
   function finish() {
     const track = now();
-    if (track && (played > 0 || fetched)) onFinished(track, played, { partial: false });
+    if (track && played > 0) onFinished(track, played);
     played = 0;
     heard = 0;
     held = 0;
-    fetched = false;
   }
 
   async function load(p, autoplay = true) {
@@ -171,7 +166,6 @@ export function createPlayer(onChange, onListened, {
     }
     if (mine !== loading) return;   // a later track won the race
 
-    fetched = true;
     audio.src = url;
     if (autoplay) audio.play().catch(() => tell());
     tell();
@@ -181,9 +175,7 @@ export function createPlayer(onChange, onListened, {
   function advance() {
     if (repeat === REPEAT.ONE) {
       finish();
-      // The same song again: a new play, counted afresh (a loop skipped at
-      // once is reported as 0 s, like any other).
-      fetched = true;
+      // The same song again: a new play, counted afresh.
       last = 0;
       advancing = false;
       audio.currentTime = 0;
@@ -226,7 +218,8 @@ export function createPlayer(onChange, onListened, {
     // pocket reports less often. A seek moves further than the clock did.
     const rate = audio.playbackRate || 1;
     const real = step > 0 && (step <= MAX_STEP || step <= since * rate + 0.5);
-    if (real && !audio.paused) {
+    // Muted isn't heard: nothing counts toward the play, nor is charged.
+    if (real && !audio.paused && !silent()) {
       heard += step;
       if (heard >= countsAfter(lengthNow())) {
         // Counts now: what was held is counted with this step, once.
@@ -426,16 +419,6 @@ export function createPlayer(onChange, onListened, {
       tell();
     },
     stop() { finish(); wanted = false; audio.pause(); audio.removeAttribute("src"); list = []; order = []; pos = -1; refused = null; tell(); },
-    /**
-     * The app is closing: report what's been heard of this song so far, as
-     * it is, without ending it. If it plays on (the page wasn't closed after
-     * all), the rest is reported when it ends.
-     */
-    checkpoint() {
-      const track = now();
-      if (track && played > 0) onFinished(track, played, { partial: true });
-      played = 0;
-    },
     /** The playing element — read by the waveform, never rerouted. */
     element: () => audio,
     current: now,

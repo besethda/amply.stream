@@ -81,8 +81,11 @@ const played = async () => {
     method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ seconds: 120 }),
   }), env);
-  return (await listener(DB, wallet))?.seconds || 0;
+  return (await listener(DB, wallet))?.plays || 0;
 };
+// What a wallet owes here comes only from what this server sent it
+// (test-meter.mjs); a report of a play is never money.
+const owedNow = () => sqlite.prepare("SELECT micros FROM owed WHERE pubkey = ?").get(wallet)?.micros || 0;
 
 // ── an empty fees account ──
 lamports = 0;
@@ -90,25 +93,24 @@ ok("an empty fees account: the price is served paused", (await served()).paused 
 ok("  the artist's own copy is untouched", (await setting(DB, "manifest")) === stored);
 const audio = await get("/audio/song.mp3");
 ok("  a paid song isn't kept behind a wallet", audio.status !== 401, `status ${audio.status}`);
-ok("  listening isn't counted as owed", (await played()) === 0);
+await played();
+ok("  a reported play owes nothing", owedNow() === 0);
 
 // ── a funded one ──
 later(6);
 lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
 ok("a funded fees account: the price is live", (await served()).paused === undefined);
 ok("  a paid song needs a wallet again", (await get("/audio/song.mp3")).status === 401);
-ok("  and listening is counted", (await played()) === 120);
+const playsBefore = (await listener(DB, wallet))?.plays || 0;
+ok("  and a reported play is in the artist's record", (await played()) === playsBefore + 1);
+ok("  as a play, never money: the app's word owes nothing", owedNow() === 0);
 
-// ── what listening cost, priced when it was heard ──
+// ── what's owed, as this server counted it ──
 const owed = () => sqlite.prepare("SELECT micros, seconds FROM owed WHERE pubkey = ?").get(wallet) || { micros: 0, seconds: 0 };
-ok("  priced as heard: 2 minutes at a cent a minute is 2 cents", owed().micros === 20_000 && owed().seconds === 120, JSON.stringify(owed()));
-sqlite.prepare("INSERT INTO subscriptions (wallet, subscription, customer, until, updated) VALUES (?, 'sub_1', 'cus_1', ?, ?)").run(wallet, clock + 86400_000, clock);
-await played();
-ok("a subscriber's listening costs nothing by the minute", owed().micros === 20_000 && owed().seconds === 240, JSON.stringify(owed()));
-sqlite.prepare("DELETE FROM subscriptions").run();
+sqlite.prepare("INSERT INTO owed (pubkey, micros, seconds) VALUES (?, 20000, 120)").run(wallet);
 const { forget, listeners: listed } = await import("./src/store.ts");
 const row = (await listed(DB)).find((r) => r.pubkey === wallet);
-ok("the editor sees the cost beside the listening", row?.owed_micros === 20_000 && row?.owed_seconds === 240, JSON.stringify(row));
+ok("the editor sees what's owed beside the plays", row?.owed_micros === 20_000 && row?.plays >= 2, JSON.stringify(row));
 await forget(DB, wallet);
 ok("forgotten: the cost goes with the rest", owed().micros === 0 && !sqlite.prepare("SELECT 1 FROM owed WHERE pubkey = ?").get(wallet));
 
@@ -152,7 +154,7 @@ rpcDown = false;
   const res = await worker.fetch(new Request(`${ORIGIN}/listen/played?t=${encodeURIComponent(token)}`, {
     method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": "192.0.2.77" }, body: JSON.stringify({ seconds: 90 }),
   }), env);
-  ok("a play reported with ?t= is counted", res.status === 204 && (await listener(DB, who))?.seconds === 90, String((await listener(DB, who))?.seconds));
+  ok("a play reported with ?t= is counted", res.status === 204 && (await listener(DB, who))?.plays === 1, String((await listener(DB, who))?.plays));
   const allowed = String((await worker.fetch(new Request(`${ORIGIN}/listen/played`, { method: "OPTIONS" }), env)).headers.get("Access-Control-Allow-Headers") || "").toLowerCase();
   ok("  and the only header it sends (Content-Type) is one other sites may send", allowed.includes("content-type"), allowed);
 }

@@ -1,10 +1,9 @@
 /**
  * Metering: the node counts the paid audio it sends to each wallet, per track
- * and day (src/meter.ts). What's billed is what the listener's app reports.
- * What was sent is billed (less SLACK) only for a wallet that reported
- * nothing at all that day, a day after it ended (store.ts billUnreported), so
- * an app that never reports still pays for most of what it took, and an
- * honest one is never billed for what its browser read ahead.
+ * and day, and bills what was sent less SLACK (src/meter.ts, store.ts
+ * billSent). It relies on nothing the listener's app says: reports are plays
+ * for the record, never money. Paid audio is paced (PACE), so what's sent
+ * follows what's heard and a skip early in a song is inside the slack.
  *
  * Wrong one way, an honest listener pays twice or for what they skipped; the
  * other, a copier takes the catalogue for nothing; and either way it mustn't
@@ -18,11 +17,11 @@ import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import worker, { meterHooks } from "./src/index.ts";
-import { SCHEMA, putSetting, recordPaid, pruneStale, pruneHourly, setAutoBlock, servedDay, SERVED_KEEP_DAYS, UNREPORTED_GRACE_MS, billUnreported } from "./src/store.ts";
+import { SCHEMA, putSetting, recordPaid, pruneStale, pruneHourly, setAutoBlock, servedDay, SERVED_KEEP_DAYS } from "./src/store.ts";
 import { feeAddress, feeBalance, OFFER_ABOVE_LAMPORTS } from "./src/settle.ts";
 import { issueToken } from "./src/listen.ts";
 import { parseRange } from "./src/media.ts";
-import { SLACK, slackFor, DELIVERED_CAP, FLUSH, FALLBACK_BYTES_PER_SECOND, resetTallies } from "./src/meter.ts";
+import { SLACK, slackFor, DELIVERED_CAP, FLUSH, FALLBACK_BYTES_PER_SECOND, PACE, paceHooks, resetTallies } from "./src/meter.ts";
 import { renderPrivacy } from "./src/page.ts";
 import { base58 } from "./src/solana-tx.ts";
 
@@ -186,19 +185,14 @@ const owed = (w) => sqlite.prepare("SELECT micros, seconds FROM owed WHERE pubke
 const tally = (w) => sqlite.prepare("SELECT plays, seconds FROM listeners WHERE pubkey = ?").get(w.address);
 const near = (a, b, within = 1) => Math.abs(a - b) <= within;
 const SLACK_S = slackFor(LEN);   // 84 s for a four-minute song
-/** A day on (past the end of the day plus UNREPORTED_GRACE_MS), and the
- *  wallet asks for a pass: what it took and never reported is billed then,
- *  if it's due. */
-const later = async (w, ms = 2 * DAY) => {
-  tick(ms);
-  w.token = await issueToken(DB, w.address);
-  const r = await listen("/token", await signed(w));
-  return { status: r.status, body: await r.json() };
-};
+// Pacing waits, by default, without the clock moving: most of what's tested
+// here is what's counted, not how fast. The pacing tests move it themselves.
+paceHooks.now = () => clock;
+paceHooks.sleep = async () => {};
 
 ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds === 60 && SLACK.share === 0.35 && SLACK_S === 84 && slackFor(100) === 60);
 
-// ── a full listen, reported and sent: billed once ───────────────────────────
+// ── what was sent, less the slack: the server's own count ───────────────────
 {
   const w = await makeWallet();
   const before = { flushes, batches };
@@ -206,177 +200,99 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   ok("a paid song is served whole to a listener with a pass", got.res.status === 200 && got.bytes === LEN * 1000 && got.res.headers.get("Content-Length") === String(LEN * 1000));
   ok("  a whole-file request is exactly one write", flushes - before.flushes === 1 && batches - before.batches === 1, `${flushes - before.flushes} flushes, ${batches - before.batches} batches`);
   ok("  counted as the song's 240 s sent", near(row(w).delivered, LEN), JSON.stringify(row(w)));
-  ok("  and nothing billed for it: bytes sent aren't listening", row(w).billed === 0 && owed(w).micros === 0, JSON.stringify([row(w), owed(w)]));
+  ok("  billed what was sent less the slack (240 - 84 = 156 s), as it's sent", row(w).billed === LEN - SLACK_S && owed(w).micros === (LEN - SLACK_S) * 1000 && owed(w).seconds === LEN - SLACK_S, JSON.stringify([row(w), owed(w)]));
   const r = await played(w, LEN, "s");
-  ok("the app reports the play, by song id", r.status === 204);
-  ok("  billed what it reports: 240 s, 24 cents, once", owed(w).micros === LEN * 1000 && owed(w).seconds === LEN && row(w).billed === LEN, JSON.stringify([row(w), owed(w)]));
-  ok("  one play in the wallet's totals, 240 s", tally(w)?.plays === 1 && tally(w)?.seconds === LEN, JSON.stringify(tally(w)));
-  ok("  a typical play (the audio, then the report) is two writes", batches - before.batches === 2, `${batches - before.batches}`);
+  ok("the app's report of the play is taken", r.status === 204 && Math.round(row(w).reported) === LEN);
+  ok("  and changes nothing owed: the server doesn't bill the app's word", owed(w).micros === (LEN - SLACK_S) * 1000, JSON.stringify(owed(w)));
+  ok("  it's one play in the artist's record", tally(w)?.plays === 1, JSON.stringify(tally(w)));
+  const liar = await makeWallet();
+  await played(liar, 3 * 3600, "s");
+  ok("a report of three hours with nothing sent: a play, nothing owed", owed(liar).micros === 0 && tally(liar)?.plays === 1, JSON.stringify(owed(liar)));
+  const zero = await makeWallet();
+  await played(zero, 0, "s");
+  await audio(zero, "two.mp3");
+  ok("an app that reported 0 s is still billed what it was sent", owed(zero).micros === (LEN - SLACK_S) * 1000, JSON.stringify(owed(zero)));
 
-  // The other order: the report first (the audio came from the browser's
-  // cache, say), then the audio.
+  // A song the browser had cached isn't sent again: nothing more is owed.
   const v = await makeWallet();
-  await played(v, LEN, "two");
   await audio(v, "two.mp3");
-  ok("reported first, sent after: still billed once", owed(v).micros === LEN * 1000 && row(v, "two.mp3").billed === LEN, JSON.stringify([row(v, "two.mp3"), owed(v)]));
   await played(v, LEN, "two");
-  ok("  a replay from the cache (nothing sent) is billed by its report", owed(v).micros === 2 * LEN * 1000, JSON.stringify(owed(v)));
+  await played(v, LEN, "two");
+  ok("a replay from the browser's cache (nothing sent) costs nothing more here", owed(v).micros === (LEN - SLACK_S) * 1000, JSON.stringify(owed(v)));
 }
 
-// ── taken whole, never reported: about two thirds, a day later ─────────────
+// ── a skip: inside the slack, nothing billed ────────────────────────────────
 {
-  const w = await makeWallet();
-  await audio(w, "song.mp3");
-  ok("a copy taken whole with no report: nothing billed on the day", owed(w).micros === 0, JSON.stringify(owed(w)));
-  // Noon now: an hour short of the grace past midnight, then an hour past it.
-  tick(DAY / 2 + UNREPORTED_GRACE_MS - 3_600_000);
-  w.token = await issueToken(DB, w.address);
-  await listen("/token", await signed(w));
-  ok("  nor the next day: a late report can still come", owed(w).micros === 0, JSON.stringify(owed(w)));
-  const r = await later(w, 2 * 3_600_000);
-  ok("  thirty hours after that day ends, billed at what was sent less the slack (156 of 240 s)", owed(w).micros === 156_000 && owed(w).seconds === 156, JSON.stringify(owed(w)));
-  ok("  and the pass says so", r.body.owes === 156_000, JSON.stringify(r.body));
-  ok("  and the wallet is in the listeners table, so Auto-block can see it", tally(w)?.seconds === 156 && tally(w)?.plays === 0, JSON.stringify(tally(w)));
-  await listen("/token", await signed(w));
-  ok("  billed once, however often it asks", owed(w).micros === 156_000, JSON.stringify(owed(w)));
-
   const skip = await makeWallet();
   await audio(skip, "two.mp3", { Range: "bytes=0-59999" });
-  ok("a song skipped after a minute's download: nothing billed", owed(skip).micros === 0 && !tally(skip), JSON.stringify(owed(skip)));
+  ok("a minute sent and abandoned: within the slack, nothing billed", owed(skip).micros === 0, JSON.stringify(owed(skip)));
   await played(skip, 20, "two");
-  ok("  its 20 s report is what's billed", owed(skip).micros === 20_000, JSON.stringify(owed(skip)));
+  ok("  and its 20 s report changes nothing", owed(skip).micros === 0, JSON.stringify(owed(skip)));
 }
 
-// ── honest listeners: billed what they heard, whatever the browser read ahead ─
+// ── paced: what's sent follows what's heard ─────────────────────────────────
 {
-  // The browser read the whole song ahead; the listener skipped at 10 s.
+  // The clock moves while it waits, as it would.
+  paceHooks.sleep = async (ms) => { tick(Math.ceil(ms)); };
+  const reading = async (w, file, seconds) => {
+    // A player reading as fast as it's allowed, for `seconds` of wall time.
+    const res = await call(`/audio/${file}?t=${encodeURIComponent(w.token)}`, { headers: { Range: "bytes=0-" } });
+    const reader = res.body.getReader();
+    const start = clock;
+    let got = 0;
+    while (clock - start < seconds * 1000) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      got += value.byteLength;
+    }
+    await reader.cancel();
+    await settled();
+    return got / 1000;   // seconds of audio
+  };
   const a = await makeWallet();
-  await audio(a, "song.mp3");
-  await played(a, 10, "s");
-  ok("a song read ahead whole and skipped at 10 s: 10 s billed", owed(a).micros === 10_000, JSON.stringify(owed(a)));
-  await later(a);
-  ok("  and still 10 s a day on, not what was sent", owed(a).micros === 10_000, JSON.stringify(owed(a)));
-
-  // Skipped before a second played: the app reports 0 s.
+  const got10 = await reading(a, "song.mp3", 10);
+  // (Give or take one piece read from storage: 16 KB, which here is 16 s of
+  // audio; a real song's piece is a second or two.)
+  ok(`a player reading as fast as it may for 10 s gets at most ${PACE.burst} + ${PACE.rate} x 10 s, and one piece`, got10 <= PACE.burst + PACE.rate * 10 + PIECE / 1000, `${got10}`);
+  ok("  so a skip at 10 s, with the browser reading ahead all it can, owes nothing", owed(a).micros === 0, JSON.stringify(owed(a)));
   const b = await makeWallet();
-  await audio(b, "song.mp3");
-  await played(b, 0, "s");
-  ok("a song fetched and skipped at 0 s: nothing billed", owed(b).micros === 0, JSON.stringify(owed(b)));
-  await later(b);
-  ok("  then, or a day on", owed(b).micros === 0, JSON.stringify(owed(b)));
-
-  // One song's report lost (the app closed, a rate limit, no signal), but
-  // the app reported another that day: its app reports, so nothing sent is billed.
+  const got120 = await reading(b, "two.mp3", 120);
+  ok("  stopped at 2:00: sent less the slack is no more than the 120 s played", got120 - SLACK_S <= 120 && owed(b).seconds <= 120, `${got120} sent, ${owed(b).seconds} billed`);
+  // Every point a listener could stop, for songs short and long: the
+  // server's count never exceeds what was played.
+  let worst = -Infinity;
+  for (const L of [45, 90, 160, 240, 400, 900, 2400]) {
+    for (let T = 1; T <= L; T += 1) {
+      const sent = Math.min(L, PACE.burst + PACE.rate * T);
+      worst = Math.max(worst, Math.max(0, sent - slackFor(L)) - T);
+    }
+  }
+  ok("for any length of song and any moment stopped, sent less the slack never exceeds what was played", worst <= 0, `${worst}`);
+  // Seeking around doesn't start a new burst each time.
   const c = await makeWallet();
-  await audio(c, "song.mp3");
-  await played(c, LEN, "s");
-  await audio(c, "two.mp3");
-  await later(c);
-  ok("a song whose report was lost, from an app that reported others that day: not billed", owed(c).micros === LEN * 1000 && row(c, "two.mp3").billed === 0, JSON.stringify([rows(c), owed(c)]));
-
-  // An app that reported yesterday, and today was killed mid-song before it
-  // could report anything at all: it's a reporting app, so nothing is billed.
-  const e = await makeWallet();
-  await audio(e, "song.mp3");
-  await played(e, LEN, "s");
-  tick(DAY);
-  e.token = await issueToken(DB, e.address);
-  await audio(e, "two.mp3");
-  await later(e);
-  ok("a day with no report at all, from an app that has reported before: not billed", owed(e).micros === LEN * 1000, JSON.stringify([rows(e), owed(e)]));
-
-  // Seeking around one song all evening, reported honestly.
-  const d = await makeWallet();
-  for (let i = 0; i < 4; i++) { tick(FLUSH.gapMs); await audio(d, "song.mp3"); }
-  await played(d, 300, "s");
-  await later(d);
-  ok("a listener seeking around one song (720 s sent) is billed the 300 s heard", owed(d).micros === 300_000, JSON.stringify(owed(d)));
-}
-
-// ── what's due is looked at before it's pruned ──────────────────────────────
-{
-  const today = servedDay(clock);
-  const w = await makeWallet();
-  sqlite.prepare("INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?, 'song.mp3', ?, ?, 0, 0)").run(w.address, today - SERVED_KEEP_DAYS, LEN);
-  let seen = null;
-  await pruneStale(DB, clock, async () => { seen = rows(w).length; await billUnreported(DB, { slackOf: () => SLACK_S, perMinute: async () => RATE, now: clock }); });
-  ok("a wallet's unreported day is billed before its rows are pruned", seen === 1 && owed(w).micros === 156_000 && rows(w).length === 0, JSON.stringify([seen, owed(w), rows(w)]));
-  const gone = await makeWallet();
-  sqlite.prepare("INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?, 'removed.mp3', ?, ?, 0, 0)").run(gone.address, today - 2, LEN);
-  await billUnreported(DB, { slackOf: () => Infinity, perMinute: async () => RATE, now: clock });
-  ok("a track no longer published isn't billed (its length can't be known)", owed(gone).micros === 0, JSON.stringify(owed(gone)));
-
-  // Two runs at once (a pass asked for while the hourly prune runs): billed once.
-  const twice = await makeWallet();
-  sqlite.prepare("INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?, 'song.mp3', ?, ?, 0, 0)").run(twice.address, today - 2, LEN);
-  sqlite.prepare("INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?, 'two.mp3', ?, ?, 0, 0)").run(twice.address, today - 2, LEN);
-  const opts = { slackOf: () => SLACK_S, perMinute: async () => RATE, now: clock };
-  await Promise.all([billUnreported(DB, opts), billUnreported(DB, opts), billUnreported(DB, { ...opts, pubkey: twice.address })]);
-  ok("billing run three times at once bills each song once (2 x 156 s)", owed(twice).micros === 312_000 && tally(twice)?.seconds === 312, JSON.stringify([owed(twice), tally(twice)]));
-
-  // Free to this wallet at billing time (a subscriber now, payments paused): waits.
-  const free = await makeWallet();
-  sqlite.prepare("INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?, 'song.mp3', ?, ?, 0, 0)").run(free.address, today - 2, LEN);
-  await billUnreported(DB, { ...opts, perMinute: async () => 0 });
-  ok("nothing billed while the wallet's price is 0, and it isn't marked billed either", owed(free).micros === 0 && row(free).billed === 0, JSON.stringify([owed(free), row(free)]));
-
-  // The page couldn't be read: nothing is billed, and the rows aren't pruned unlooked-at.
-  const kept = await makeWallet();
-  sqlite.prepare("INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?, 'song.mp3', ?, ?, 0, 0)").run(kept.address, today - SERVED_KEEP_DAYS, LEN);
-  await pruneStale(DB, clock, async () => { throw new Error("no page"); });
-  ok("a prune that couldn't bill first keeps the rows for next time", rows(kept).length === 1, JSON.stringify(rows(kept)));
-  ok("the grace is inside the days kept, and longer than the app resends for", UNREPORTED_GRACE_MS < (SERVED_KEEP_DAYS - 1) * DAY && UNREPORTED_GRACE_MS > DAY);
-
-  // Reports sent again: for the day they were played, and never added twice.
-  const r = await makeWallet();
-  await audio(r, "song.mp3");
-  const day0 = servedDay(clock);
-  const again = (seconds) => call(`/listen/played?t=${encodeURIComponent(r.token)}`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ seconds, track: "s", again: true, day: day0 }),
-  }).then(settled);
-  await played(r, 100, "s");
-  await again(100);
-  await again(100);
-  ok("a report that arrived and was then sent again twice is billed once (100 s)", owed(r).micros === 100_000, JSON.stringify([rows(r), owed(r)]));
-  tick(DAY);
-  r.token = await issueToken(DB, r.address);
-  await again(150);
-  ok("  one sent again the next day goes with the day it was played, as at least its seconds", owed(r).micros === 150_000 && rows(r).length === 1, JSON.stringify([rows(r), owed(r)]));
-  const stale = await call(`/listen/played?t=${encodeURIComponent(r.token)}`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ seconds: 99, track: "s", again: true, day: day0 - SERVED_KEEP_DAYS }),
-  });
+  let total = 0;
+  const t0 = clock;
+  for (let i = 0; i < 10; i++) {
+    const res = await call(`/audio/three.mp3?t=${encodeURIComponent(c.token)}`, { headers: { Range: `bytes=${i * 20_000}-` } });
+    const reader = res.body.getReader();
+    const { value } = await reader.read();
+    total += value.byteLength;
+    await reader.cancel();
+  }
   await settled();
-  ok("  one for a day no longer kept is dropped", stale.status === 204 && owed(r).micros === 150_000, JSON.stringify(owed(r)));
-
-  // A new wallet whose report couldn't be sent, sent again almost a day
-  // later: the grace outlasts the app's resend window, so it lands first.
-  const n = await makeWallet();
-  await audio(n, "two.mp3");
-  const d = servedDay(clock);
-  tick(DAY - 1_000);   // within a day of playing: the app sends it again
-  n.token = await issueToken(DB, n.address);
-  await listen("/token", await signed(n));
-  await call(`/listen/played?t=${encodeURIComponent(n.token)}`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ seconds: 30, track: "two", again: true, day: d }),
-  }).then(settled);
-  await later(n);
-  ok("a new wallet's report sent again within a day lands before anything unreported is billed: 30 s", owed(n).micros === 30_000, JSON.stringify([rows(n), owed(n)]));
+  ok("ten seeks in a row share one allowance, not ten bursts", total / 1000 <= PACE.burst + PACE.rate * ((clock - t0) / 1000) + 20, `${total / 1000} s sent in ${(clock - t0) / 1000} s`);
+  paceHooks.sleep = async () => {};
 }
 
 // ── ranges that add up to the whole file ────────────────────────────────────
 {
   const w = await makeWallet();
   const before = flushes;
-  // As a player asks for them: one after another, faster than the gap.
   for (let at = 0; at < LEN * 1000; at += 24_000) await audio(w, "song.mp3", { Range: `bytes=${at}-${at + 23_999}` }, { settle: false });
   await settled();
   ok("ten ranges of 24 s: all 240 s counted", near(row(w)?.delivered ?? 0, LEN), JSON.stringify(row(w)));
   ok("  in a couple of writes, not ten", flushes - before <= 3, `${flushes - before}`);
-  await later(w);
-  ok("  never reported: billed like a whole file (156 s), a day later", owed(w).micros === 156_000, JSON.stringify(owed(w)));
+  ok("  billed like a whole file (156 s)", owed(w).micros === 156_000, JSON.stringify(owed(w)));
 
   // A response abandoned early counts what was sent, not what was asked for.
   const a = await makeWallet();
@@ -389,7 +305,7 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   await played(a, 30, "s");
   const got = row(a);
   ok("a request abandoned after a few pieces counts those, not the whole range", got && got.delivered > 0 && got.delivered < 60, JSON.stringify(got));
-  ok("  and the report, carrying them, bills the 30 s heard", owed(a).micros === 30_000, JSON.stringify(owed(a)));
+  ok("  inside the slack: nothing owed", owed(a).micros === 0, JSON.stringify(owed(a)));
 }
 
 // ── seeking back: sent again is counted again, up to three plays' worth ─────
@@ -401,11 +317,10 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   ok("the same first half fetched twice counts twice (240 s sent)", near(row(w).delivered, LEN), JSON.stringify(row(w)));
   for (let i = 0; i < 5; i++) { tick(FLUSH.gapMs); await audio(w, "song.mp3"); }
   ok(`  but never more than ${DELIVERED_CAP}x the song a day (720 s)`, row(w).delivered === DELIVERED_CAP * LEN, JSON.stringify(row(w)));
+  ok("  so it's billed at most 3x less the slack", owed(w).micros === (DELIVERED_CAP * LEN - SLACK_S) * 1000, JSON.stringify(owed(w)));
   const writes = flushes;
   for (let i = 0; i < 3; i++) { tick(FLUSH.gapMs); await audio(w, "song.mp3"); }
   ok("  and past the cap, nothing more is written", flushes === writes, `${flushes - writes}`);
-  await later(w);
-  ok("  never reported, it's billed at most 3x less the slack", owed(w).micros === (DELIVERED_CAP * LEN - SLACK_S) * 1000, JSON.stringify(owed(w)));
 }
 
 // ── what's never metered ────────────────────────────────────────────────────
@@ -423,11 +338,10 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   const sub = await makeWallet();
   sqlite.prepare("INSERT INTO subscriptions (wallet, subscription, customer, until, updated) VALUES (?, 'sub_x', 'cus_x', ?, ?)").run(sub.address, clock + 30 * DAY, clock);
   await audio(sub, "song.mp3");
-  ok("a subscriber's paid songs: nothing counted, so never billed later at a price", !rows(sub).length, JSON.stringify(rows(sub)));
+  ok("a subscriber's paid songs: nothing counted, so never billed later at a price", !rows(sub).length && owed(sub).micros === 0, JSON.stringify(rows(sub)));
   const unsatisfiable = await audio(w, "song.mp3", { Range: `bytes=${LEN * 1000 + 5}-` });
   ok("an unsatisfiable range (416): nothing counted", unsatisfiable.res.status === 416 && !rows(w).length, `${unsatisfiable.res.status}`);
 
-  // The artist's own route, signed in.
   const { PREVIEW_KEY, hashKey } = await import("./src/preview-key.ts");
   const KEY = "Q".repeat(43);
   await putSetting(DB, PREVIEW_KEY, JSON.stringify({ hash: await hashKey(KEY), until: clock + 3_600_000 }));
@@ -444,8 +358,6 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
 {
   const w = await makeWallet();
   await audio(w, "nolength.mp3");
-  // 100 s at 256 kbps; slack 60 s; 40 s billed.
-  await later(w);
   ok("a song with no published length is counted at 256 kbps", near(row(w, "nolength.mp3")?.delivered ?? 0, 100) && owed(w).micros === 40_000, JSON.stringify([row(w, "nolength.mp3"), owed(w)]));
 }
 
@@ -453,7 +365,6 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
 {
   const w = await makeWallet();
   const before = flushes;
-  // 200 tiny requests, 4 s each, as fast as they come: 800 s asked for.
   for (let i = 0; i < 200; i++) {
     const at = (i * 4000) % (LEN * 1000);
     await call(`/audio/song.mp3?t=${encodeURIComponent(w.token)}`, { headers: { Range: `bytes=${at}-${at + 3999}` } }).then((r) => r.arrayBuffer());
@@ -471,8 +382,6 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   await settled();
   ok("  200 more past the cap: no more writes at all", flushes === more, `${flushes - more}`);
 
-  // Ranges coming faster than the gap allows are written once the gap is up,
-  // not dropped.
   const q = await makeWallet();
   const b2 = flushes;
   await audio(q, "two.mp3", { Range: "bytes=0-49999" });
@@ -484,38 +393,32 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
 {
   const w = await makeWallet();
   await audio(w, "three.mp3");
-  const first = await (await listen("/token", await signed(w))).json();
-  ok("a pass carries what's still owed, in micros (nothing yet: the day's not over)", first.token && first.owes === 0, JSON.stringify(first));
-  const pass = (await later(w)).body;
-  ok("  a day on, the metered 156 s of a wallet that never reported", pass.token && pass.owes === 156_000, JSON.stringify(pass));
+  const pass = await (await listen("/token", await signed(w))).json();
+  ok("a pass carries what's still owed, in micros (the metered 156 s)", pass.token && pass.owes === 156_000, JSON.stringify(pass));
   await recordPaid(DB, w.address, 100_000, "sig-paid-1");
   ok("  less what's been paid", (await (await listen("/token", await signed(w))).json()).owes === 56_000);
   const stranger = await makeWallet();
   ok("  and 0 for a wallet with nothing owed", (await (await listen("/token", await signed(stranger))).json()).owes === 0);
 
-  // A copier with no reports, with Auto-block on: refused once what it took,
-  // less the slack, is billed (a day after) and past the line (1.5 x 10c).
   await setAutoBlock(DB, true);
   const ripper = await makeWallet();
   ok("(Auto-block on: a new wallet gets a pass)", (await listen("/token", await signed(ripper))).status === 200);
+  await played(ripper, 0, "s");   // a report proves nothing here
   await audio(ripper, "song.mp3");
   tick(FLUSH.gapMs);
   await audio(ripper, "two.mp3");
-  ok("  songs taken: still served that day", (await listen("/token", await signed(ripper))).status === 200);
-  const billed = await later(ripper);
-  ok("  a day on: billed for them (2 x 156 s), told so with its pass", billed.status === 200 && billed.body.owes === 312_000, JSON.stringify(billed));
   const refused = await listen("/token", await signed(ripper));
   const body = await refused.json();
-  ok("  and auto-blocked at its next pass", refused.status === 403 && body.code === "unpaid" && body.owes === 312_000, JSON.stringify(body));
+  ok("a copier taking whole songs is auto-blocked at its next pass, whatever it reports", refused.status === 403 && body.code === "unpaid" && body.owes === 312_000, JSON.stringify(body));
   await recordPaid(DB, ripper.address, body.owes, "sig-ripper");
   ok("  paying it lifts it, as for any listener", (await listen("/token", await signed(ripper))).status === 200);
 
-  // An honest listener with Auto-block on: skips read ahead whole never block them.
+  // An honest listener who skips songs early: nothing sent past the slack, still served.
   const fan = await makeWallet();
   await listen("/token", await signed(fan));
-  for (const f of ["song.mp3", "two.mp3", "three.mp3"]) { tick(FLUSH.gapMs); await audio(fan, f); await played(fan, 5, f === "song.mp3" ? "s" : f.split(".")[0]); }
-  const fine = await later(fan);
-  ok("an honest listener who skipped three songs read ahead whole: owes 15 s, still served", fine.status === 200 && fine.body.owes === 15_000, JSON.stringify(fine));
+  for (const f of ["song.mp3", "two.mp3", "three.mp3"]) { tick(FLUSH.gapMs); await audio(fan, f, { Range: "bytes=0-39999" }); }
+  const fine = await listen("/token", await signed(fan));
+  ok("an honest listener who skipped three songs early owes nothing, still served", fine.status === 200 && (await fine.json()).owes === 0);
   await setAutoBlock(DB, false);
 }
 
@@ -524,7 +427,7 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   const w = await makeWallet();
   lamports = 0;
   await feeBalance(async () => ({ value: 0 }), FEES, { fresh: true });
-  tick(6_000);   // past the isolate's copy of the manifest
+  tick(6_000);
   const got = await audio(w, "song.mp3");
   ok("payments paused: a paid song plays free, and nothing is counted", got.res.status === 200 && !rows(w).length, JSON.stringify(rows(w)));
   lamports = OFFER_ABOVE_LAMPORTS + 1_000_000;
@@ -537,20 +440,10 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   const w = await makeWallet();
   await audio(w, "two.mp3");
   await played(w, LEN);
-  ok("an old app's report goes with the song just sent: billed once", owed(w).micros === LEN * 1000 && Math.floor(row(w, "two.mp3").reported) === LEN, JSON.stringify([rows(w), owed(w)]));
+  ok("an old app's report goes with the song just sent; billed once, by what was sent", owed(w).micros === (LEN - SLACK_S) * 1000 && Math.round(row(w, "two.mp3").reported) === LEN, JSON.stringify([rows(w), owed(w)]));
   const x = await makeWallet();
   await played(x, 90);
-  ok("  with nothing sent, it stands on its own and is billed as reported", owed(x).micros === 90_000 && rows(x).length === 1 && rows(x)[0].track === "", JSON.stringify(rows(x)));
-}
-
-// ── a play that runs past midnight ──────────────────────────────────────────
-{
-  const w = await makeWallet();
-  await audio(w, "three.mp3");
-  tick(DAY);
-  w.token = await issueToken(DB, w.address);
-  await played(w, LEN, "three");
-  ok("reported the next day: goes with yesterday's row, billed once", owed(w).micros === LEN * 1000 && rows(w).length === 1, JSON.stringify(rows(w)));
+  ok("  with nothing sent, it stands on its own: a play, nothing owed", owed(x).micros === 0 && rows(x).length === 1 && rows(x)[0].track === "", JSON.stringify(rows(x)));
 }
 
 // ── kept three days; erased on request; shown to the listener ───────────────
@@ -602,7 +495,7 @@ ok("the slack is 60 s or 35% of the track, whichever is more", SLACK.seconds ===
   ok("no served table: the paid song is served whole all the same", got.res.status === 200 && got.bytes === LEN * 1000);
   const r = await played(w, 200, "s", bareEnv);
   const o = bare.prepare("SELECT micros, seconds FROM owed WHERE pubkey = ?").get(w.address);
-  ok("  and a report is billed as it always was", r.status === 204 && o?.micros === 200_000 && o?.seconds === 200, JSON.stringify(o));
+  ok("  and a report is a play, never money", r.status === 204 && !(o?.micros > 0), JSON.stringify(o));
   const mine = await (await listen("/mine", await signed(w), bareEnv)).json();
   ok("  /listen/mine still answers", mine.held?.plays === 1 && mine.held?.servedTracks === 0, JSON.stringify(mine.held));
   tick(6_000);

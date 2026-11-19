@@ -20,8 +20,7 @@ const read = () => {
 export const receipts = () => read();
 
 /**
- * Record one payment. `kind` is "listen", "tip", "purchase" or "owed" (what
- * an artist's server said was owed). A signature already recorded isn't
+ * Record one payment. `kind` is "listen", "tip" or "purchase". A signature already recorded isn't
  * recorded again, so a payment found twice is still one receipt.
  */
 export function recordReceipt({ micros, origin = null, artist = "", kind = "listen", signature = null, network = null, at = Date.now() }) {

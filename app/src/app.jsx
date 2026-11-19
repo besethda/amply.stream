@@ -20,7 +20,7 @@ import {
 import { agreeRate } from "./spend.js";
 import { claimOf, noteClaim, claimDue, wakeClaims, claimFromPass, passOwesDue } from "./owes.js";
 import {
-  tokenFor, reportPlayed, reportHeard, resendReports, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
+  tokenFor, reportPlayed, reportHeard, originOf, nodePaysFees, audioUrl, isSubscribed, subscriptionUntil, forgetToken,
   manageSubscription, claimSubscription, reportPaid, takePassOwes,
 } from "./identify.js";
 import { perMinute, subscriptionOnly, plans as plansOf } from "../../spec/pricing.mjs";
@@ -210,8 +210,6 @@ export function App() {
       // artist's songs are free, and they must be charged for once they aren't.
       if (track?.from) heardFrom.current.add(track.from);
       if (!track?.from || !track.needsWallet) return;
-      // Muted isn't listening: nothing is charged while the volume is off.
-      if (silent.current) return;
       // A subscriber has paid by card; charging by the minute too would be twice.
       if (isSubscribed(originOf(track.url))) return;
       pending.current[track.from] = (pending.current[track.from] || 0) + seconds;
@@ -296,12 +294,11 @@ export function App() {
         }
         return audioUrl(track.url, token);
       },
-      onFinished(track, seconds, { partial = false } = {}) {
+      onFinished(track, seconds) {
         // The song's own count, for the artist's "most played": nothing about
         // who is kept, so free tracks count too. A paid one is counted only
-        // with this wallet's pass. Songs on this phone aren't anyone's. Not
-        // for a skip before anything played, nor for the app closing mid-song.
-        if (!partial && seconds >= 1 && track.id && /^https:/.test(track.url || "") && originOf(track.url) === originOf(track.from)) {
+        // with this wallet's pass. Songs on this phone aren't anyone's.
+        if (seconds >= 1 && track.id && /^https:/.test(track.url || "") && originOf(track.url) === originOf(track.from)) {
           const origin = originOf(track.url);
           if (!track.needsWallet) reportHeard(origin, track.id, seconds);
           else if (holder.current) {
@@ -313,11 +310,12 @@ export function App() {
         // Listening that costs nothing isn't reported as listening owed for.
         const artist = library.current.find((e) => e.url === track.from);
         if (!isSubscribed(originOf(track.url)) && !(artist && rateOf(artist.manifest) && feesCovered(artist))) return;
-        // Every paid song fetched is reported, even at 0 s: its server bills
-        // what this app reports, and only bills what it sent to a wallet that
-        // never reports anything (node/src/meter.ts).
+        if (!(seconds > 0)) return;
         reportPlayed(holder.current, originOf(track.url), seconds, track.id);
       },
+      // Muted (the volume slider at 0, or M): nothing is heard, so nothing
+      // counts toward a play or is charged (player.js).
+      silent: () => !!silent.current,
     },
   ), []);
   try { if (location.hostname === "localhost") window.__amplyPlayer = player; } catch { /* not a browser */ }
@@ -335,24 +333,6 @@ export function App() {
     return () => a.removeEventListener("play", wake);
   }, []);
   useKeys({ player, state, volume, onLike: () => { if (state.track) { toggleLike(state.track); bump((n) => n + 1); } } });
-
-  // Play reports that didn't arrive last time: sent again once there's a
-  // wallet, and when the network comes back.
-  useEffect(() => {
-    if (!pair) return;
-    resendReports(pair);
-    const online = () => resendReports(pair);
-    window.addEventListener("online", online);
-    return () => window.removeEventListener("online", online);
-  }, [pair]);
-
-  // Closing the app mid-song: what's been heard of it is reported now, not
-  // lost, so the artist's server has this app's word for it.
-  useEffect(() => {
-    const gone = () => player.checkpoint();
-    window.addEventListener("pagehide", gone);
-    return () => window.removeEventListener("pagehide", gone);
-  }, []);
 
   // ── listening, banked and paid for ────────────────────────────────────────
 
@@ -633,6 +613,8 @@ export function App() {
       money,
       go: {
         pay: () => payOwes(url),
+        // This device's own count, when it's less than their server's.
+        payMine: () => payOwes(url, loadLedger()[url]?.micros || 0),
         topUp: () => { owesView.current = null; goYou("topup"); },
         you: () => { owesView.current = null; goYou(); },
       },
@@ -659,7 +641,7 @@ export function App() {
     showOwes(entry.url, f.kind === "paused" ? "paused" : f.kind === "unconfirmed" ? "unsure" : f.kind === "funds" ? "funds" : "error", { message: f.message });
   }
   /** The Pay button: the listener's own yes to this amount. */
-  async function payOwes(url) {
+  async function payOwes(url, upTo = null) {
     const entry = library.current.find((e) => e.url === url);
     if (!pair || !entry) return;
     showOwes(url, "paying");
@@ -668,7 +650,8 @@ export function App() {
       // At most what the sheet showed: a server can't raise it between the
       // listener reading the amount and tapping Pay.
       const shown = owesView.current?.url === url ? owesView.current.owes : claimOf(url)?.remaining;
-      r = await payWith(() => payClaim(pair, entry, { ...claimOptions(), explicit: true, max: shown ?? 0 }));
+      const max = Math.min(shown ?? 0, upTo ?? Infinity);
+      r = await payWith(() => payClaim(pair, entry, { ...claimOptions(), explicit: true, max }));
     } catch (e) {
       setLedger(loadLedger());
       if (e.kind === "paused") noteFees([url], [false]);

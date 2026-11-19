@@ -27,7 +27,7 @@ import {
   setting, putSetting, listeners, listener, setBlocked, counted, MAX_REPORT_S, forget, remove, pruneStale, pruneHourly,
   subscribedUntil, pruneSubscriptions, heard, songTotals, playsToday,
   paidOf, recordPaid, paidSigKnown, mergePaid, MAX_PAID_WALLETS, autoBlockSetting, setAutoBlock, owedRowOf,
-  addServed, billServed, billUnreported, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay, SERVED_KEEP_DAYS,
+  addServed, billSent, aPlay, inOneGo, servedDayFor, unreportedServed, servedCount, servedDay,
   type Listener,
 } from "./store";
 import { autoBlock, owedOf, unpaidOf } from "../../spec/standing.mjs";
@@ -731,7 +731,7 @@ async function handleManage(request: Request, env: Env, path: string): Promise<R
   if (request.method === "GET" && path === "/listeners") {
     // Whenever the artist looks, anything past its keeping date goes first,
     // so what they see is what they are entitled to hold.
-    await pruneStale(env.DB, Date.now(), () => billLate(env, undefined));
+    await pruneStale(env.DB);
     await pruneSubscriptions(env.DB);
     const rows = await listeners(env.DB);
     return json(await withStanding(env, rows));
@@ -934,7 +934,7 @@ function meterAudio(
       pubkey: who, track: key, size, duration: tracksOf(view).byKey.get(key)?.duration ?? null,
     }, {
       db: env.DB, perMinute: (p) => perMinuteFor(env, ctx, p), later: laterOf(ctx),
-      onFlush: () => meterHooks.onFlush?.(), tidy: () => pruneHourly(env.DB, Date.now(), () => billLate(env, ctx)),
+      onFlush: () => meterHooks.onFlush?.(), tidy: () => pruneHourly(env.DB),
     });
     return new Response(body, { status: res.status, headers: res.headers });
   } catch {
@@ -1083,74 +1083,44 @@ const REPORT_WITHIN_MS = SETTLE_WITHIN_DAYS * 86_400_000;
 const stripeTrouble = () => fail(502, "Couldn't confirm that with Stripe; try again");
 
 /**
- * The app's report of a play (/listen/played), added to what the node sent
- * for that track today (meter.ts) and billed once between them: the larger
- * of the two, less what's been billed already.
+ * The app's report of a play (/listen/played): a play in the artist's record
+ * of who listens, and the song's row in `served` (what its app says it heard,
+ * beside what this server sent). Never money: what's owed is this server's
+ * own count of what it sent (meter.ts, store.ts billSent), so the artist
+ * relies on nothing the listener's app says.
  *
- * Which track: the app says, by the song's id (`track`). An app from before
- * it did sends only seconds, and the report then goes with the track sent to
- * this wallet in the last day that is furthest ahead of what's been reported
- * for it — almost always the one that just ended — or, with none, stands on
- * its own (a track of "" for the day), billed as reported, as it always was.
- * A report for a track sent yesterday and not today (a play that ran past
- * midnight) goes with yesterday's.
- *
- * False when there's no table to meter with: the caller bills it as before.
+ * Which track: the app says, by the song's id (`track`); an older app's
+ * report goes with the track sent furthest ahead of what's been reported.
+ * What this copy of the Worker had sent of it and not yet written goes in the
+ * same write. False when there's no table: the caller records the play alone.
  */
-async function reportServed(
-  env: Env, who: string, trackId: string, seconds: number, perMinute: number, again: { day: number } | null = null,
-): Promise<boolean> {
+async function reportServed(env: Env, ctx: ExecutionContext | undefined, who: string, trackId: string, seconds: number): Promise<boolean> {
   const text = await manifestText(env).catch(() => null);
   const tracks = text ? tracksOf(derive(text)) : null;
   const now = Date.now();
   let found = trackId ? tracks?.byId.get(trackId) ?? null : null;
-  // A report sent again goes with the day it was played, and only as "at
-  // least this" (addServed atLeast): it may have arrived the first time.
-  if (again && !found) return true;
   let k;
   try {
-    // Placed as it would have been on that day: that day's row, or the day
-    // before's for a play that ran past midnight (servedDayFor).
-    if (found && again) k = { pubkey: who, track: found.key, day: await servedDayFor(env.DB, who, found.key, again.day * 86_400_000 + 1) };
-    else if (found) k = { pubkey: who, track: found.key, day: await servedDayFor(env.DB, who, found.key, now) };
+    if (found) k = { pubkey: who, track: found.key, day: await servedDayFor(env.DB, who, found.key, now) };
     else {
       const guess = await unreportedServed(env.DB, who, now);
       found = guess ? tracks?.byKey.get(guess.track) ?? null : null;
       k = guess && found ? { pubkey: who, ...guess } : { pubkey: who, track: "", day: servedDay(now) };
     }
-    // Sent by this copy of the Worker and not yet written: written now, with this.
     const pending = found ? takePending(k) : null;
     const length = pending?.trackSeconds ?? (found ? lengthOf(0, found.duration) : 0);
-    // A song whose length can't be known here gets no cap, which only
-    // matters for what's sent: none is added without one.
+    const perMinute = pending?.seconds ? await perMinuteFor(env, ctx, who).then((p) => p, () => null) : null;
     await inOneGo(env.DB, [
-      addServed(env.DB, k, { delivered: pending?.seconds ?? 0, reported: seconds, cap: DELIVERED_CAP * length, report: true, atLeast: !!again }),
-      ...billServed(env.DB, k, { perMinute, plays: 1, now }),
+      addServed(env.DB, k, { delivered: pending?.seconds ?? 0, reported: seconds, cap: DELIVERED_CAP * length }),
+      // What was sent and not yet written is billed with it, as any write of it is.
+      ...(pending?.seconds && perMinute ? billSent(env.DB, k, { slack: slackFor(length), perMinute, now }) : []),
+      aPlay(env.DB, who, now),
     ]);
     return true;
   } catch (e) {
     if (/no such table/i.test(String((e as Error)?.message ?? e))) return false;
     throw e;
   }
-}
-
-/**
- * Bill what was sent to wallets whose app reported nothing at all
- * (store.ts, billUnreported): every one that's due, or just `pubkey`. Each
- * track's allowance is from the page as published; a track no longer on it
- * isn't billed, since its length can't be known.
- */
-async function billLate(env: Env, ctx: ExecutionContext | undefined, pubkey: string | null = null): Promise<number> {
-  // Without the page, a track's length can't be known: thrown, so a prune
-  // keeps the rows for next time rather than delete what wasn't looked at.
-  const text = await manifestText(env);
-  if (!text) throw new Error("no page to bill against");
-  const tracks = tracksOf(derive(text));
-  return billUnreported(env.DB, {
-    pubkey,
-    slackOf: (key) => { const t = tracks.byKey.get(key); return t ? slackFor(lengthOf(0, t.duration)) : Infinity; },
-    perMinute: (p) => perMinuteFor(env, ctx, p),
-  });
 }
 
 /** Everything a listener can do without being the artist. */
@@ -1173,14 +1143,9 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     // Auto-block asks first or not.
     let asked: Promise<number | null> | null = null;
     const untilOf = () => (asked ??= refresh(env.DB, address).catch(() => subscribedUntil(env.DB, address)));
-    // A wallet that has taken audio and reported none of it is billed for it
-    // here, once its grace is up, so Auto-block and `owes` see it. Only once
-    // the wallet has proved it's theirs (introduce calls this after).
-    let late = false;
-    const billedLate = () => { if (late) return Promise.resolve(); late = true; return billLate(env, ctx, address).catch(() => 0); };
     const result = await introduce(env.DB, host, body as never, Date.now(),
       () => allow(env as never, RULES.newListener, host),
-      async (known) => { await billedLate(); return owingFor(env, ctx, known, untilOf); });
+      (known) => owingFor(env, ctx, known, untilOf));
     if (!result.ok) {
       if (result.busy) return tooMany(withCors(new Headers()));
       // Auto-block: told what's owed, in micros, so their app can pay it and
@@ -1206,7 +1171,6 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     // subscriber, payments paused). The app pays it when it's past the
     // artist's payment point, even if its own ledger says less; below that,
     // the usual settling applies.
-    if (!subscribed) await billedLate();
     const owes = subscribed ? 0 : await owesNow(env, ctx, address).catch(() => 0);
     return json({ token: result.token, subscribedUntil: subscribed ? until : null, owes });
   }
@@ -1505,31 +1469,16 @@ async function handleListen(request: Request, env: Env, path: string, ctx?: Exec
     if (!(await listener(env.DB, who)) && !(await allow(env as never, RULES.newListener, host))) {
       return new Response(null, { status: 204, headers: noStore() });
     }
-    // While fans can't pay (the fees account is empty), listening is free,
-    // so it isn't counted as listening anyone owes for.
-    if (!(await takingPayments(env, ctx))) return new Response(null, { status: 204, headers: noStore() });
     const body = await jsonBody(request);
-    // Priced now, as it's heard: a later change of price doesn't reprice it.
-    // A subscriber pays by card, so their listening costs nothing here.
-    const perMinute = await perMinuteFor(env, ctx, who);
     const seconds = Math.max(0, Math.min(Math.round(Number(body?.seconds) || 0), MAX_REPORT_S));
-    // A report the app is sending again, for the day it was played. Only for
-    // a day still kept, and never added on top of what may have arrived:
-    // without the metering table it can't be told apart, so it's dropped.
-    const day = Number(body?.day), today = servedDay();
-    const again = body?.again === true
-      ? (Number.isInteger(day) && day <= today && day > today - SERVED_KEEP_DAYS ? { day } : "stale")
-      : null;
-    if (again === "stale") return new Response(null, { status: 204, headers: noStore() });
-    // Beside what the node itself sent (meter.ts), so the two are billed once
-    // between them; on a database without that table, as it always was.
-    if (!(await reportServed(env, who, String(body?.track ?? ""), seconds, perMinute, again))) {
-      if (!again) await counted(env.DB, who, seconds, Date.now(), perMinute);
+    // A play for the record, never money (reportServed).
+    if (!(await reportServed(env, ctx, who, String(body?.track ?? ""), seconds))) {
+      await counted(env.DB, who, seconds, Date.now());
     }
     // Now and then, clear out wallets not heard from in a year. Here rather
     // than on a timer, so there is nothing for an artist to set up; and at
     // most hourly, since it reads the whole table (pruneHourly).
-    if (Math.random() < 0.02) await pruneHourly(env.DB, Date.now(), () => billLate(env, ctx)).catch(() => {});
+    if (Math.random() < 0.02) await pruneHourly(env.DB).catch(() => {});
     return new Response(null, { status: 204, headers: noStore() });
   }
 

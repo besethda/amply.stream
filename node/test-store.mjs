@@ -59,14 +59,14 @@ ok("hello from a known wallet updates when they were last here",
 
 // ── what a play records ─────────────────────────────────────────────────────
 
+const secondsBefore = (await listener(DB, A)).seconds;
 await counted(DB, A, 300);
 const twice = await listener(DB, A);
 ok("plays add up", twice.plays === 2);
-ok("so do seconds", twice.seconds === 500);
+ok("a play's reported seconds aren't taken: the app's word is no measure", twice.seconds === secondsBefore);
 await counted(DB, A, 99999);
-ok("an absurd claim is clamped to three hours (a long mix, not a day)", (await listener(DB, A)).seconds === 500 + 3 * 3600);
 await counted(DB, A, -50);
-ok("a negative one counts as nothing", (await listener(DB, A)).seconds === 500 + 3 * 3600);
+ok("  however absurd", (await listener(DB, A)).seconds === secondsBefore && (await listener(DB, A)).plays === 4);
 
 // ── the ban, and the hole that used to be in it ─────────────────────────────
 
@@ -81,7 +81,7 @@ ok("  and everything about their listening is erased",
 
 await counted(DB, A, 100);
 ok("if they come back, counting starts again from nothing",
-  (await listener(DB, A)).seconds === 100 && (await listener(DB, A)).blocked === 1);
+  (await listener(DB, A)).plays === 1 && (await listener(DB, A)).blocked === 1);
 
 // ── erasure for everybody else is a deletion, as it says ────────────────────
 

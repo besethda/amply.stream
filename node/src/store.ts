@@ -256,24 +256,21 @@ export async function counted(
   pubkey: string,
   seconds: number,
   now = Date.now(),
-  /** The price per minute while it was heard, in dollars: 0 when it was free. */
-  perMinute = 0,
 ): Promise<void> {
-  const clean = Math.max(0, Math.min(Math.round(seconds), MAX_REPORT_S));
-  await db.prepare(
-    `INSERT INTO listeners (pubkey, plays, seconds, first_seen, last_seen) VALUES (?, 1, ?, ?, ?)
-     ON CONFLICT(pubkey) DO UPDATE SET
-       plays = plays + 1,
-       seconds = seconds + excluded.seconds,
-       last_seen = excluded.last_seen`,
-  ).bind(pubkey, clean, now, now).run();
-  const micros = perMinute > 0 ? Math.round((clean / 60) * perMinute * 1_000_000) : 0;
-  // A database from before this table has no record of cost; the editor
-  // then estimates, as it always did. Nothing here is worth failing a play for.
-  await db.prepare(
-    `INSERT INTO owed (pubkey, micros, seconds) VALUES (?, ?, ?)
-     ON CONFLICT(pubkey) DO UPDATE SET micros = micros + excluded.micros, seconds = seconds + excluded.seconds`,
-  ).bind(pubkey, micros, clean).run().catch(() => {});
+  void seconds;
+  await aPlay(db, pubkey, now).run();
+}
+
+/**
+ * A play, as the listener's app says: for the artist's record of who listens,
+ * never for what anyone owes (billSent counts that, from what this server
+ * sent). Its seconds aren't taken either. A statement, to batch with others.
+ */
+export function aPlay(db: D1Database, pubkey: string, now = Date.now()): D1PreparedStatement {
+  return db.prepare(
+    `INSERT INTO listeners (pubkey, plays, seconds, first_seen, last_seen) VALUES (?, 1, 0, ?, ?)
+     ON CONFLICT(pubkey) DO UPDATE SET plays = plays + 1, last_seen = excluded.last_seen`,
+  ).bind(pubkey, now, now);
 }
 
 /** The longest one report of listening can be: a long mix, not a day. */
@@ -406,163 +403,62 @@ export const servedDay = (now = Date.now()) => Math.floor(now / 86_400_000);
 export interface ServedKey { pubkey: string; track: string; day: number }
 
 /**
- * Bring a `served` row's billing up to date from what the listener's app
- * reported, as statements to run after the one that changed it, in the same
- * batch (one transaction).
+ * Bring a `served` row's billing up to date from what this server itself
+ * sent, as statements to run after the one that changed it, in the same batch
+ * (one transaction).
  *
- * **Only the report is billed here.** What the node sent is not: a browser
- * reads ahead, and a song skipped ten seconds in may already be mostly
- * downloaded, so bytes sent say nothing about what was heard. A wallet whose
- * app reports is billed exactly what it reported. What was sent counts only
- * for a wallet that reported nothing at all that day, and only after a day's
- * grace (billUnreported, below).
+ * **The server's own count, never the app's word.** What the listener's app
+ * reports is not billed: the artist doesn't rely on the listener for what
+ * they owe, just as the listener's app pays only what it measured itself
+ * (app/src/paying.js). What's billable here is what was sent, less the slack
+ * (meter.ts): the audio this server let go, minus what a player reads ahead
+ * of what it plays. Paid audio is paced (meter.ts), so a song skipped early
+ * was only ever sent a little past where it stopped, inside the slack.
  *
- * Whatever of the report hasn't been billed yet is added to `owed` exactly as
- * a reported play always was (counted(), below: the same upsert, priced at
- * `perMinute` now), and to the wallet's totals in `listeners`. `plays` is 1
- * for a report from the app. Then `billed` catches up. Written so nothing is
- * written when nothing is due.
+ * Whatever of it hasn't been billed yet is added to `owed` at `perMinute` now
+ * and to the wallet's totals in `listeners` (seconds, not plays: a play is the
+ * app's to report, and counts nothing). Then `billed` catches up. Read inside
+ * the batch, so two at once bill it once.
  */
-export function billServed(
-  db: D1Database, k: ServedKey, { perMinute, plays = 0, now = Date.now() }: { perMinute: number; plays?: number; now?: number },
+export function billSent(
+  db: D1Database, k: ServedKey, { slack, perMinute, now = Date.now() }: { slack: number; perMinute: number; now?: number },
 ): D1PreparedStatement[] {
-  // The mark a report leaves (REPORT_MARK) is a fraction of a second: whole seconds only.
-  const B = "CAST(reported AS INTEGER)";
+  const B = "CAST(MAX(0, delivered - ?4) AS INTEGER)";
   const row = "pubkey = ?1 AND track = ?2 AND day = ?3";
   const perSecond = perMinute > 0 ? (perMinute * 1_000_000) / 60 : 0;
+  const slackS = Math.max(0, Number(slack) || 0);
   return [
     db.prepare(
       `INSERT INTO owed (pubkey, micros, seconds)
-         SELECT pubkey, CAST(ROUND((${B} - billed) * ?4) AS INTEGER), ${B} - billed FROM served
+         SELECT pubkey, CAST(ROUND((${B} - billed) * ?5) AS INTEGER), ${B} - billed FROM served
           WHERE ${row} AND ${B} > billed
        ON CONFLICT(pubkey) DO UPDATE SET micros = micros + excluded.micros, seconds = seconds + excluded.seconds`,
-    ).bind(k.pubkey, k.track, k.day, perSecond),
+    ).bind(k.pubkey, k.track, k.day, slackS, perSecond),
     db.prepare(
       `INSERT INTO listeners (pubkey, plays, seconds, first_seen, last_seen)
-         SELECT pubkey, ?4, MAX(0, ${B} - billed), ?5, ?5 FROM served
-          WHERE ${row} AND (${B} > billed OR ?4 > 0)
-       ON CONFLICT(pubkey) DO UPDATE SET
-         plays = plays + excluded.plays, seconds = seconds + excluded.seconds, last_seen = excluded.last_seen`,
-    ).bind(k.pubkey, k.track, k.day, plays, now),
+         SELECT pubkey, 0, ${B} - billed, ?5, ?5 FROM served
+          WHERE ${row} AND ${B} > billed
+       ON CONFLICT(pubkey) DO UPDATE SET seconds = seconds + excluded.seconds, last_seen = excluded.last_seen`,
+    ).bind(k.pubkey, k.track, k.day, slackS, now),
     db.prepare(`UPDATE served SET billed = ${B} WHERE ${row} AND ${B} > billed`)
-      .bind(k.pubkey, k.track, k.day),
+      .bind(k.pubkey, k.track, k.day, slackS),
   ];
-}
-
-/**
- * Added to `reported` by every report, whatever its seconds, so that "this
- * wallet's app reported this track" is known even for a song skipped at 0 s.
- * A ten-thousandth of a second: billing counts whole seconds, and a day has
- * far fewer reports than it would take to make one.
- */
-export const REPORT_MARK = 0.0001;
-
-/**
- * How long after a UTC day ends what was sent that day, unreported, may be
- * billed: thirty hours. A report can arrive late — a play that ran past
- * midnight, or one the app couldn't send and sends again, which it does for
- * up to a day (app/src/identify.js, REPORT_KEEP_MS) — and the reported row is
- * the one that's billed, so every late report lands before this. Still inside
- * SERVED_KEEP_DAYS, so rows are billed before they're pruned.
- */
-export const UNREPORTED_GRACE_MS = 30 * 3_600_000;
-
-/** The last UTC day whose unreported sends may be billed at `now`. */
-export const lastBillableDay = (now = Date.now()) => servedDay(now - UNREPORTED_GRACE_MS) - 1;
-
-/**
- * Bill what was sent to wallets that reported nothing at all.
- *
- * The one case metering is for: an app that takes paid audio and never says
- * it played anything (a copier). For a wallet that has never reported a play
- * here, each UTC day that ended at least UNREPORTED_GRACE_MS ago with no
- * report of any kind has every track sent billed at what was sent less the
- * slack (meter.ts), once.
- *
- * A wallet whose app has ever reported a play (`listeners.plays`), or that
- * reported anything that day — even a single song, even 0 s — is billed only
- * what it reports. So an honest listener whose report is lost (an app closed
- * mid-song, a rate limit, a dropped connection, a phone that killed the app)
- * is never billed for what their browser read ahead.
- *
- * Nothing is billed while the wallet's price is 0 (a subscriber, or payments
- * paused): it waits, and what was sent while it was free was never counted
- * (meter.ts). `slackOf(track)` is the allowance for a track (Infinity for one
- * no longer published: its length can't be known, so nothing is billed for
- * it); `perMinute(pubkey)` the price for that wallet now. `pubkey` limits it
- * to one wallet (its pass being asked for).
- *
- * Safe to run twice at once (a pass asked for while the hourly prune runs):
- * each track's increment is worked out inside its own transaction from the
- * row as it stands, so a second run finds it billed and adds nothing.
- */
-export async function billUnreported(
-  db: D1Database,
-  { slackOf, perMinute, pubkey = null, now = Date.now() }:
-    { slackOf: (track: string) => number; perMinute: (pubkey: string) => Promise<number>; pubkey?: string | null; now?: number },
-): Promise<number> {
-  const last = lastBillableDay(now);
-  const { results } = await db.prepare(
-    `SELECT pubkey, day FROM served WHERE day <= ?1 ${pubkey ? "AND pubkey = ?2" : ""}
-        AND pubkey NOT IN (SELECT pubkey FROM listeners WHERE plays > 0)
-      GROUP BY pubkey, day HAVING MAX(reported) = 0 AND SUM(delivered) > SUM(billed)`,
-  ).bind(...(pubkey ? [last, pubkey] : [last])).all<{ pubkey: string; day: number }>();
-  let rows = 0;
-  for (const g of results || []) {
-    const rate = await perMinute(String(g.pubkey)).catch(() => 0);
-    if (!(rate > 0)) continue;
-    const perSecond = (rate * 1_000_000) / 60;
-    const { results: tracks } = await db.prepare(
-      "SELECT track, delivered FROM served WHERE pubkey = ? AND day = ? AND reported = 0 AND delivered > billed",
-    ).bind(g.pubkey, g.day).all<{ track: string; delivered: number }>();
-    for (const t of tracks || []) {
-      const slack = Math.max(0, Number(slackOf(String(t.track))));
-      const due = Math.floor(Math.max(0, Number(t.delivered) - slack));
-      if (!Number.isFinite(due) || due <= 0) continue;
-      // Read and moved on in one transaction: the increment comes from the
-      // row as it is inside it, so a run that got here first leaves nothing.
-      const row = "pubkey = ?1 AND track = ?2 AND day = ?3 AND reported = 0 AND billed < ?4";
-      await inOneGo(db, [
-        db.prepare(
-          `INSERT INTO owed (pubkey, micros, seconds)
-             SELECT pubkey, CAST(ROUND((?4 - billed) * ?5) AS INTEGER), ?4 - billed FROM served WHERE ${row}
-           ON CONFLICT(pubkey) DO UPDATE SET micros = micros + excluded.micros, seconds = seconds + excluded.seconds`,
-        ).bind(g.pubkey, t.track, g.day, due, perSecond),
-        db.prepare(
-          `INSERT INTO listeners (pubkey, plays, seconds, first_seen, last_seen)
-             SELECT pubkey, 0, ?4 - billed, ?5, ?5 FROM served WHERE ${row}
-           ON CONFLICT(pubkey) DO UPDATE SET seconds = seconds + excluded.seconds`,
-        ).bind(g.pubkey, t.track, g.day, due, now),
-        db.prepare(`UPDATE served SET billed = ?4 WHERE ${row}`).bind(g.pubkey, t.track, g.day, due),
-      ]);
-      rows++;
-    }
-  }
-  return rows;
 }
 
 /**
  * Add to a `served` row: seconds sent (`delivered`, never past `cap`, see
  * meter.ts) and seconds the app reported (`reported`). A statement, so it can
- * go in one batch with billServed's.
+ * go in one batch with billSent's.
  */
 export function addServed(
-  db: D1Database, k: ServedKey,
-  { delivered = 0, reported = 0, cap, report = false, atLeast = false }:
-    { delivered?: number; reported?: number; cap: number; report?: boolean; atLeast?: boolean },
+  db: D1Database, k: ServedKey, { delivered = 0, reported = 0, cap }: { delivered?: number; reported?: number; cap: number },
 ): D1PreparedStatement {
-  // A report, of any length, leaves its mark (REPORT_MARK).
-  const add = Math.max(0, reported) + (report ? REPORT_MARK : 0);
-  // A report sent again (`atLeast`) may have arrived the first time: it
-  // raises the row to at least its seconds, never adds to them, so sending
-  // it twice — or three times — bills it once.
-  const merge = atLeast ? "MAX(reported, excluded.reported)" : "reported + excluded.reported";
   return db.prepare(
     `INSERT INTO served (pubkey, track, day, delivered, reported, billed) VALUES (?1, ?2, ?3, MIN(?4, ?6), ?5, 0)
      ON CONFLICT(pubkey, track, day) DO UPDATE SET
        delivered = MAX(delivered, MIN(?6, delivered + excluded.delivered)),
-       reported = ${merge}`,
-  ).bind(k.pubkey, k.track, k.day, Math.max(0, delivered), add, Math.max(0, cap));
+       reported = reported + excluded.reported`,
+  ).bind(k.pubkey, k.track, k.day, Math.max(0, delivered), Math.max(0, reported), Math.max(0, cap));
 }
 
 /** Run statements as one transaction: D1's batch. A stand-in database
@@ -739,18 +635,12 @@ const KEEP_FOR = 365 * 86400_000;
  * and then as music is played. A table of one artist's listeners is small, and
  * one delete against it costs next to nothing.
  */
-export async function pruneStale(db: D1Database, now = Date.now(), beforeServed: (() => Promise<unknown>) | null = null): Promise<void> {
+export async function pruneStale(db: D1Database, now = Date.now()): Promise<void> {
   await db.prepare("DELETE FROM listeners WHERE blocked = 0 AND last_seen < ?")
     .bind(now - KEEP_FOR).run();
   await forgetOwed(db);
-  // What was sent, after three days (SERVED_KEEP_DAYS) — billed first if it's
-  // due (billUnreported), so nothing is deleted before it's been looked at.
-  // If that couldn't be done (the page couldn't be read), the rows wait for
-  // the next prune rather than go unlooked-at.
-  if (beforeServed) {
-    const looked = await beforeServed().then(() => true, () => false);
-    if (!looked) return;
-  }
+  // What was sent, after three days (SERVED_KEEP_DAYS). Billed as it was
+  // sent (billSent), so nothing waits on these rows.
   try {
     await db.prepare("DELETE FROM served WHERE day <= ?").bind(servedDay(now) - SERVED_KEEP_DAYS).run();
   } catch { /* no such table yet */ }
@@ -777,12 +667,12 @@ export async function owedRowOf(db: D1Database, pubkey: string): Promise<{ owed_
  * again and again: the time it last ran is kept in settings, and under an
  * hour since, it does nothing. Returns whether it ran.
  */
-export async function pruneHourly(db: D1Database, now = Date.now(), beforeServed: (() => Promise<unknown>) | null = null): Promise<boolean> {
+export async function pruneHourly(db: D1Database, now = Date.now()): Promise<boolean> {
   const last = Number(await setting(db, PRUNED_AT).catch(() => null)) || 0;
   // A time in the future (a clock that jumped) doesn't stop it for ever.
   if (last <= now && now - last < PRUNE_EVERY) return false;
   await putSetting(db, PRUNED_AT, String(now));
-  await pruneStale(db, now, beforeServed);
+  await pruneStale(db, now);
   return true;
 }
 

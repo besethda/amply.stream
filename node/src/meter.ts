@@ -10,40 +10,45 @@
  * `served`), as seconds: bytes over the file's size, times the track's
  * duration.
  *
- * **What's billed is what the app reports.** Bytes sent say little about
- * what was heard: a browser reads ahead, so a song skipped ten seconds in may
- * be mostly downloaded already. So a wallet whose app reports is billed what
- * it reported, never what was sent (store.ts, billServed).
+ * **What's billed is this server's own count, never the app's word.** The
+ * artist doesn't rely on the listener's reports for what they're owed, just
+ * as the listener's app pays only what it measured itself (app/src/paying.js).
+ * Each side keeps its own books. Here, for each (wallet, track, day):
  *
- * What was sent is billed only for a wallet that reported nothing at all that
- * UTC day — not one song, not a 0 s skip — and only a day after it ended
- * (store.ts, billUnreported), at what was sent less SLACK per track. That's
- * the copier this exists for. An honest listener whose report for one song
- * goes missing is never billed for what their browser read ahead, because
- * their other reports show their app reports.
+ *     billed = what was sent, less SLACK
+ *
+ * as it's sent (store.ts, billSent), at the price then.
+ *
+ * **Paid audio is paced** so that what was sent tracks what was heard: no
+ * more than PACE.burst seconds ahead at first, then PACE.rate times as fast
+ * as it plays. A browser reads ahead as far as it's allowed, so without this
+ * a song skipped ten seconds in would have been sent whole. With it, what's
+ * sent by the time a listener stops is at most the burst plus a quarter more
+ * than they played, and SLACK is sized so that, less SLACK, it is never more
+ * than they played (see PACE). A copier gets the files no faster than about
+ * real time, and pays for them less the slack.
  *
  * **Writes are few.** The artist's database has a daily allowance shared
  * with everything else (limits.ts), and audio arrives in many ranged
  * requests. So what's sent is added up here, in this copy of the Worker, and
  * written in one transaction (a "flush") only once enough has built up; see
- * FLUSH. A typical play is one write for the audio and one for the app's
- * report; a whole-file request, one.
+ * FLUSH. A typical play is a few writes for the audio and one for the app's
+ * report of the play (a play for the artist's record, never money).
  *
  * Nothing here may fail a request: every error is swallowed and the listener
  * gets their audio. Nothing is logged.
  */
-import { addServed, inOneGo, servedDay, type ServedKey } from "./store";
+import { addServed, billSent, inOneGo, servedDay, type ServedKey } from "./store";
 
 /**
- * For a wallet that reported nothing at all (billUnreported): how much of
- * each track sent isn't billed, in seconds of audio: 60 seconds, or 35% of
- * the track, whichever is more.
- *
- * Only a wallet that has never reported a play is billed this way, so this
- * is the copier's discount, not an honest listener's: someone taking whole
- * files without reporting pays for about two thirds of each, which makes not
- * reporting no bargain. It also covers what any player reads ahead, in case
- * an app that does report is ever mistaken for one that doesn't.
+ * What of each track sent isn't billed, in seconds of audio: 60 seconds, or
+ * 35% of the track, whichever is more. With the pacing below, a listener who
+ * plays continuously and stops at any point has been sent at most
+ * PACE.burst + PACE.rate x what they played; less this, that is never more
+ * than they played, for a track of any length (the worst case, stopping just
+ * as the whole file has gone, is 24 - 0.15 x length seconds, below zero from
+ * 160 s; under 160 s the 60 s floor covers it). So the server's count of an
+ * honest listener is at most what they heard, usually less.
  */
 export const SLACK = { seconds: 60, share: 0.35 } as const;
 export const slackFor = (trackSeconds: number) => Math.max(SLACK.seconds, SLACK.share * trackSeconds);
@@ -53,10 +58,56 @@ export const slackFor = (trackSeconds: number) => Math.max(SLACK.seconds, SLACK.
  * times its length. Bytes sent are counted even when they were sent before
  * (seeking back re-fetches, and a re-fetch is what a copier would do too),
  * but a listener seeking around one song all evening mustn't be billed for it
- * many times over. Past three plays' worth, the app's reports are what count.
+ * many times over. Past three plays' worth, nothing more is counted that day.
  * It also bounds how many writes one track can cause (FLUSH).
  */
 export const DELIVERED_CAP = 3;
+
+/**
+ * How fast paid audio goes to a wallet, per track: a burst of 30 seconds'
+ * worth to start (enough to begin playing, and to seek within), then 1.25
+ * seconds of audio per second. Faster than anyone listens, so playback never
+ * waits once started; slow enough that what's sent follows what's heard.
+ * Kept per wallet and track in this copy of the Worker, across requests, so
+ * seeking around doesn't start a new burst each time.
+ */
+export const PACE = { burst: 30, rate: 1.25 } as const;
+
+/** The clock and the wait the pacing uses: stood in for by tests. */
+export const paceHooks = {
+  now: () => Date.now(),
+  sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
+};
+
+interface Bucket { tokens: number; at: number; queue: Promise<void> }
+const buckets = new Map<string, Bucket>();
+
+/** Wait until `seconds` of audio may go to this wallet for this track. One
+ *  at a time per wallet and track, so two requests share the allowance. */
+function paced(id: string, seconds: number): Promise<void> {
+  let b = buckets.get(id);
+  if (!b) {
+    if (buckets.size >= MAX_KEYS) buckets.delete(buckets.keys().next().value as string);
+    b = { tokens: PACE.burst, at: paceHooks.now(), queue: Promise.resolve() };
+    buckets.set(id, b);
+  }
+  const bucket = b;
+  const turn = bucket.queue.then(async () => {
+    const now = paceHooks.now();
+    bucket.tokens = Math.min(PACE.burst, bucket.tokens + ((now - bucket.at) / 1000) * PACE.rate);
+    bucket.at = now;
+    if (bucket.tokens < seconds) {
+      const wait = ((seconds - bucket.tokens) / PACE.rate) * 1000;
+      await paceHooks.sleep(wait);
+      bucket.at = paceHooks.now();
+      bucket.tokens = 0;
+    } else {
+      bucket.tokens -= seconds;
+    }
+  });
+  bucket.queue = turn.catch(() => {});
+  return turn;
+}
 
 /**
  * Seconds per byte when the manifest gives no duration (the validator
@@ -79,9 +130,8 @@ export const FALLBACK_BYTES_PER_SECOND = (256 * 1000) / 8;
  *
  * What's lost if this copy of the Worker is stopped (Cloudflare does that
  * whenever it likes) is what hadn't reached that size yet: under 15% of a
- * track, or 20 seconds, per track. That's well inside SLACK, the app's report
- * covers it for an honest listener, and the next request for the track adds
- * to it anyway. Writing every piece to be sure of those seconds would spend
+ * track, or 20 seconds, per track. That's counted short, the listener's way,
+ * and the next request for the track adds to it anyway. Writing every piece to be sure of those seconds would spend
  * the artist's write allowance many times over.
  */
 export const FLUSH = { share: 0.15, seconds: 20, gapMs: 3_000 } as const;
@@ -147,6 +197,7 @@ export function metered(
 ): ReadableStream<Uint8Array> {
   const key: ServedKey = { pubkey: t.pubkey, track: t.track, day: servedDay(t.now ?? Date.now()) };
   const trackSeconds = lengthOf(t.size, t.duration);
+  const pace = `${t.pubkey}|${t.track}`;
   let bytes = 0, ended = false;
   const end = () => {
     if (ended) return;
@@ -159,6 +210,8 @@ export function metered(
       try {
         const { done, value } = await reader.read();
         if (done) { c.close(); end(); return; }
+        // Not sent until it may be (PACE): what's sent follows what's heard.
+        await paced(pace, secondsOf(value.byteLength, t.size, t.duration));
         bytes += value.byteLength;
         c.enqueue(value);
       } catch (e) {
@@ -221,14 +274,16 @@ async function flush(t: Tally, deps: MeterDeps): Promise<void> {
   t.lastFlush = Date.now();
   t.written += seconds;
   try {
-    // Only counted here. Billing follows the app's report (billServed), or,
-    // for a wallet that never reports, comes later (billUnreported). Sent
-    // while it costs this wallet nothing (a subscriber, payments paused):
-    // not counted at all, so it can never be billed later at a price.
-    if (!((await deps.perMinute(t.key.pubkey).catch(() => 0)) > 0)) return;
+    // Sent while it costs this wallet nothing (a subscriber, payments
+    // paused): not counted, so it can never be billed later at a price. A
+    // price that can't be read right now: counted, and billed at the next
+    // write (or not, at 0), rather than let go.
+    const perMinute = await deps.perMinute(t.key.pubkey).then((p) => p, () => null);
+    if (perMinute === 0) return;
     deps.onFlush?.();
     await inOneGo(deps.db, [
       addServed(deps.db, t.key, { delivered: seconds, cap: DELIVERED_CAP * t.trackSeconds }),
+      ...(perMinute === null ? [] : billSent(deps.db, t.key, { slack: slackFor(t.trackSeconds), perMinute })),
     ]);
     if (deps.tidy && Math.random() < 0.02) await deps.tidy();
   } catch {
@@ -260,4 +315,4 @@ export function forgetTallies(pubkey: string): void {
 }
 
 /** For tests: start again with nothing counted. */
-export function resetTallies(): void { tallies.clear(); }
+export function resetTallies(): void { tallies.clear(); buckets.clear(); }

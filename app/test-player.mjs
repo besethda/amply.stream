@@ -196,7 +196,7 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   for (let t = 1; t <= 29; t++) at(t);
   ok("29 s heard: nothing counted yet", sum("a") === 0, sum("a"));
   pl.next(); await tick();
-  ok("  skipped there: free, and reported as 0 s", sum("a") === 0 && told.at(-1)?.[0] === "a" && told.at(-1)?.[1] === 0, JSON.stringify(told));
+  ok("  skipped there: free, and nothing reported", sum("a") === 0 && !told.length, JSON.stringify(told));
 
   // Reaching 30 s: all 30 counted at once, then each second as it comes.
   await start(tracks.slice(0, 3));
@@ -260,34 +260,32 @@ ok("shuffle is a permutation", shuffled([1, 2, 3, 4, 5], seq).sort().join("") ==
   pl.cycleRepeat();
 }
 
-// ── what's reported: every song fetched, even one skipped at 0 s ────────────
+// ── muted isn't heard ───────────────────────────────────────────────────────
 {
-  const told = [];
-  const q = createPlayer(() => {}, () => {}, { onFinished: (t, seconds, o) => told.push([t.id, seconds, !!o?.partial]) });
-  q.play(tracks.slice(0, 3), 0);
+  let wall = 0, mute = false;
+  const counted = [], told = [];
+  const pm = createPlayer(() => {}, (t, step) => counted.push(step), {
+    clock: () => wall, silent: () => mute, onFinished: (t, seconds) => told.push(seconds),
+  });
+  const a = pm.element();
+  const on = (e) => (a.handlers[e] || []).forEach((f) => f());
+  pm.play(tracks.slice(0, 2), 0);
   await tick();
-  q.next();          // skipped before a second played
-  await tick();
-  ok("a song fetched and skipped at once is reported, as 0 s", told.length === 1 && told[0][0] === "a" && told[0][1] === 0 && !told[0][2], JSON.stringify(told));
-  const a = q.element();
-  a.paused = false;
-  for (let t = 1; t <= 32; t++) { a.currentTime = t; a.handlers.timeupdate.forEach((f) => f()); }
-  q.checkpoint();    // the app closing mid-song
-  ok("closing mid-song reports what's been heard, marked partial", told.length === 2 && told[1][0] === "b" && told[1][1] > 0 && told[1][2], JSON.stringify(told));
-  q.checkpoint();
-  ok("  and not twice", told.length === 2, JSON.stringify(told));
-  q.next();
-  await tick();
-  ok("  if it plays on, the song's end still reports it (0 s more here)", told.length === 3 && told[2][0] === "b" && told[2][1] === 0 && !told[2][2], JSON.stringify(told));
-
-  // A song refused (no pass, no money) was never fetched: nothing to report.
-  const said = [];
-  const r = createPlayer(() => {}, () => {}, { resolve: async () => { const e = new Error("no"); e.kind = "nowallet"; throw e; }, onFinished: (t, s) => said.push([t.id, s]) });
-  r.play(tracks.slice(0, 2), 0);
-  await tick();
-  r.next();
-  await tick();
-  ok("a song refused before any audio was fetched isn't reported", said.length === 0, JSON.stringify(said));
+  a.paused = false; on("play");
+  const at = (t) => { wall += 1000; a.currentTime = t; on("timeupdate"); };
+  mute = true;
+  for (let t = 1; t <= 60; t++) at(t);
+  ok("a minute played muted: nothing heard, nothing counted", counted.length === 0);
+  mute = false;
+  for (let t = 61; t <= 89; t++) at(t);
+  ok("  unmuted for 29 s: still short of a play", counted.length === 0);
+  at(90);
+  ok("  at 30 s heard it counts: those 30 s, not the muted minute", Math.abs(counted.reduce((n, x) => n + x, 0) - 30) < 0.01, JSON.stringify(counted));
+  pm.next(); await tick();
+  ok("  and the play is reported as 30 s", told.length === 1 && Math.abs(told[0] - 30) < 0.01, JSON.stringify(told));
+  // Skipped with nothing heard: nothing reported at all.
+  pm.next(); await tick();
+  ok("a song skipped before it counted isn't reported", told.length === 1, JSON.stringify(told));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

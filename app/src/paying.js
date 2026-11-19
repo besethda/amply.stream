@@ -355,17 +355,18 @@ export async function settleClaim(pair, entry, { explicit = false, max = null, b
   let left = claimOf(url)?.remaining ?? 0;
   if (left <= 0) return { state: paid.length ? "paid" : "counting", paid };
 
-  // The server's number is a stranger's. Without a tap, only as much of it
-  // is paid as this device's own listening backs up — what the ledger says is
-  // owed to them, and a little for rounding — and no more than a dollar a day
-  // to any one artist. Anything beyond that is put to the listener, with both
+  // The server's number is a stranger's, and this app relies on nothing an
+  // artist's server says about what's owed. Without a tap, only as much of it
+  // is paid as this device itself counted — what its ledger says is owed to
+  // them, which every payment takes down — and no more than a dollar a day to
+  // any one artist. Anything beyond that is the listener's call, shown both
   // figures. With a tap, never more than the amount the tap was for, however
   // the server's number has changed since.
   let more = false;
   if (explicit && max != null) {
     if (left > max) { left = Math.max(0, max); more = true; }
   } else if (!explicit) {
-    const vouched = (loadLedger()[url]?.micros || 0) + CLAIM_SLACK_MICROS;
+    const vouched = loadLedger()[url]?.micros || 0;
     const room = Math.min(vouched, UNATTENDED_DAY_MICROS - autoPaidToday(url, now));
     if (room < LISTEN_MIN_MICROS) return { state: "ask", why: "claim", paid };
     if (left > room) { left = room; more = true; }
@@ -397,8 +398,6 @@ export async function settleClaim(pair, entry, { explicit = false, max = null, b
   return more ? { state: "ask", why: "claim", paid } : { state: "paid", paid };
 }
 
-/** A little over the device's own figure, for rounding between the two books. */
-export const CLAIM_SLACK_MICROS = 250_000;
 /** The most a server's claim draws from one artist in a day without a tap. */
 export const UNATTENDED_DAY_MICROS = 1_000_000;
 const AUTO = "amply.claimauto.v1";
