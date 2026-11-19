@@ -307,7 +307,7 @@ export function Library({ entries, localEntry, onOpenArtist, onAdd, lists, liked
                   ? <span class="mono dim">{seemsGone(e) ? "seems to be gone" : "offline right now"}</span>
                   : e.domain
                   ? <span class="mono good-ink"><Icon.check size={11} /> {e.domain}</span>
-                  : <span class="mono no-site"><Icon.warn size={11} /> no website</span>}
+                  : <span class="mono no-site">no website</span>}
               </span>
               <span class={`badge${priceShort(e) === "Free" ? " good" : ""}`}>{priceShort(e)}</span>
             </button>

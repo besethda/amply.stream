@@ -34,8 +34,16 @@ function History({ entries, onOpenArtist }) {
     if (!days.length || days[days.length - 1].d !== d) days.push({ d, rows: [] });
     days[days.length - 1].rows.push(r);
   }
+  const month = new Date(); month.setDate(1); month.setHours(0, 0, 0, 0);
+  const spent = all.filter((r) => r.at >= month.getTime()).reduce((n, r) => n + r.micros, 0);
+  const KIND_ICON = { tip: <Icon.tip size={12} />, purchase: <Icon.card size={12} />, listen: <Icon.note size={12} />, owed: <Icon.note size={12} /> };
   return (
     <div class="history">
+      <div class="tx-sum">
+        <span class="label">THIS MONTH</span>
+        <b>{money(spent / 1e6)}</b>
+        <span class="dim small">{all.filter((r) => r.at >= month.getTime()).length} payments, straight to artists</span>
+      </div>
       {days.map(({ d, rows }) => (
         <section key={d}>
           <span class="label">{d.toUpperCase()}</span>
@@ -45,8 +53,8 @@ function History({ entries, onOpenArtist }) {
             return (
               <button class="tx" key={r.signature || `${r.at}${i}`} onClick={() => e && onOpenArtist(e.url)} disabled={!e}>
                 <span class="art round s40" style={artStyle(img, r.artist || "?")} />
-                <span class="t"><b>{r.artist || "Artist"}</b><span>{KINDS[r.kind] || "Payment"} · {new Date(r.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span></span>
-                <span class="tx-amt">−{money(r.micros / 1e6)}</span>
+                <span class="t"><b>{r.artist || "Artist"}</b><span class="tx-meta"><i class={`tx-kind ${r.kind || "listen"}`}>{KIND_ICON[r.kind] || KIND_ICON.listen}</i>{KINDS[r.kind] || "Payment"} · {new Date(r.at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}</span></span>
+                <span class="tx-amt"><i>−</i>{money(r.micros / 1e6)}</span>
               </button>
             );
           })}
@@ -72,7 +80,7 @@ function Row({ icon, label, meta, onClick, tone }) {
 
 function Sub({ title, onBack, children }) {
   return (
-    <div class="screen">
+    <div class="screen you sub">
       <div class="head">
         <button class="circle-btn" onClick={onBack} aria-label="Back"><Icon.back size={17} /></button>
         <h1 class="h-sub">{title}</h1>
@@ -171,7 +179,10 @@ export function You({ pair, setPair, balance, owed, onRefresh, entries, onOpenAr
       {tabs}
       <div class="pad stack">
         {!pair ? (
-          <button class="btn-primary wide" onClick={() => onSetUp?.()}><Icon.key size={18} /> Save your ID</button>
+          <div class="id-card">
+            <button class="btn-primary wide" onClick={() => onSetUp?.()}><Icon.key size={18} /> Save your ID</button>
+            <span class="dim small">Needed for paid songs. No account, no email.</span>
+          </div>
         ) : <>
           {passkeyWallet(pair.publicKey.toBase58()) ? (
             <p class="note-line good-ink small"><Icon.check size={14} /> Protected by your passkey. Use it to open this

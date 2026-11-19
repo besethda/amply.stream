@@ -149,6 +149,28 @@ const SCENARIOS = {
   you: async (page) => { await S.goHome(page); await S.tab(page, "You"); await clickText(page, "Wallet", { exact: true }).catch(() => {}); },
   general: async (page) => { await S.goHome(page); await S.tab(page, "You"); await clickText(page, "General", { exact: true }); await clickText(page, "Bass boost", { exact: true }); await page.waitForTimeout(300); },
   artist: async (page) => { await toArtist(page); },
+  // A throwaway test wallet and a few receipts, then You → To spend → Payments.
+  payments: async (page) => {
+    await S.goHome(page);
+    await page.evaluate((key) => {
+      localStorage.setItem("amply.wallet.v1", key);
+      localStorage.setItem("amply.backup.saved.v1", "x");
+      const now = Date.now(), H = 3600e3;
+      const r = [
+        { at: now - 0.4 * H, micros: 1000000, origin: "https://hollowcoast.example", artist: "Hollow Coast", kind: "listen", signature: "a1" },
+        { at: now - 2 * H, micros: 3000000, origin: "https://the-quiet-hours.example", artist: "The Quiet Hours", kind: "tip", signature: "a2" },
+        { at: now - 26 * H, micros: 1000000, origin: "https://the-quiet-hours.example", artist: "The Quiet Hours", kind: "listen", signature: "a3" },
+        { at: now - 28 * H, micros: 7000000, origin: "https://hollowcoast.example", artist: "Hollow Coast", kind: "purchase", signature: "a4" },
+        { at: now - 5 * 24 * H, micros: 1000000, origin: "https://hollowcoast.example", artist: "Hollow Coast", kind: "listen", signature: "a5" },
+      ];
+      localStorage.setItem("amply.receipts.v1", JSON.stringify(r));
+    }, '[175,195,238,99,208,182,48,248,232,19,232,80,184,116,188,216,13,242,25,164,246,59,47,80,74,34,239,24,169,3,24,218,37,189,238,44,40,19,119,175,148,175,60,170,158,189,159,135,254,46,90,147,252,29,225,222,222,229,112,67,224,36,87,56]');
+    await page.reload(); await page.waitForTimeout(1500);
+    await S.tab(page, "You"); await clickText(page, "Wallet", { exact: true }).catch(() => {});
+    await page.waitForTimeout(800);
+    await page.locator(".bal-open").first().click({ timeout: 6000 });
+    await page.waitForTimeout(500);
+  },
   // Not a picture: checks the EQ really carries sound (prints a line).
   "eq-check": async (page) => {
     await toAlbum(page); await S.playFirstTrack(page); await page.waitForTimeout(1500);

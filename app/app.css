@@ -1326,7 +1326,7 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 .bal-open:hover .bal-more { color: var(--ink); }
 .bal-refresh { position: absolute; top: 12px; right: 10px; }
 .history { display: grid; gap: 18px; }
-.history section { display: grid; gap: 2px; }
+.history section { display: grid; gap: 2px; padding: 0; }
 .history .label { margin-bottom: 6px; }
 .tx { display: flex; align-items: center; gap: 12px; padding: 8px 6px; border-radius: 10px; text-align: left; width: 100%; }
 .tx:hover:not(:disabled) { background: var(--d-hover, var(--bg2)); }
@@ -1335,3 +1335,27 @@ ol.setup > li > div { flex: 1 1 auto; min-width: 0; display: grid; gap: 4px; }
 .tx .t b { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tx .t span { font-size: 13px; color: var(--ink3); }
 .tx-amt { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px; }
+
+/* ── round 4 ── */
+.desk .screen:not(.artist):not(.coll) > .list:not(.recent-list) { max-width: none; }
+.desk .coll-thead { margin: 8px 32px; padding: 0 0 8px; }
+.desk .coll .head .circle-btn[aria-label="Edit"], .desk .coll .head .circle-btn[aria-label="Done"] { display: none; }
+.id-card { display: grid; gap: 8px; justify-items: start; }
+.you .foot-note { font-family: inherit; font-size: 12.5px; letter-spacing: 0; }
+.you-tabs .seg, .you-tabs .seg.on { box-shadow: none; background-image: none; }
+.you-tabs .seg.on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.eq-presets { flex-wrap: wrap; overflow: visible; -webkit-mask-image: none; mask-image: none; }
+.d-about-banner { height: 112px; }
+.desk .badge { font-size: 11.5px; }
+.tx-sum { display: grid; gap: 4px; padding: 16px 18px; border-radius: 15px; background: var(--bg2); border: 1px solid var(--line); }
+.tx-sum b { font-size: 30px; font-weight: 800; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.tx-meta { display: inline-flex; align-items: center; gap: 6px; }
+.tx-kind { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 999px; font-style: normal; background: var(--bg3); color: var(--ink2); }
+.tx-kind.tip { background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--orange); }
+.tx-kind.purchase { background: color-mix(in srgb, var(--good) 18%, transparent); color: var(--good); }
+.tx-amt { font-weight: 600; }
+.tx-amt i { font-style: normal; color: var(--ink3); margin-right: 1px; }
+.history { gap: 22px; }
+.tx { padding: 8px 0; }
+.desk .tx { padding: 8px 10px; margin: 0 -10px; width: calc(100% + 20px); }
+.desk .coll-thead .d { margin-right: 38px; }
