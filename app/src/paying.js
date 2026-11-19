@@ -279,6 +279,10 @@ async function lookAgain(pair, entry, recipients, pay, { report = noReport } = {
  */
 async function sendPiece(pair, entry, recipients, micros, pay, { report = noReport } = {}) {
   let result;
+  // Remembered before it goes, not after: if the app is closed while the
+  // payment is in flight, the next start looks for it on the network
+  // (lookAgain) before sending anything, instead of sending it again.
+  noteUnsure(entry.url, { micros, signature: null });
   try {
     result = await pay.payArtist(pair, recipients, micros, {
       artistName: entry.manifest.artist?.name,
@@ -286,9 +290,13 @@ async function sendPiece(pair, entry, recipients, micros, pay, { report = noRepo
       node: { origin: originOf(entry.url) },
     });
   } catch (e) {
+    // Maybe sent: kept, with its signature to look it up by. Anything else
+    // is a definite no — nothing went out.
     if (e?.kind === "unconfirmed") noteUnsure(entry.url, { micros, signature: e.signature || null });
+    else forgetUnsure(entry.url);
     throw e;
   }
+  forgetUnsure(entry.url);
   recordSpend(micros);
   settled(loadLedger(), entry.url, micros);
   paidTowards(entry.url, micros);
@@ -331,7 +339,7 @@ const originOf = (url) => { try { return new URL(url).origin; } catch { return n
  * throws, with the payment error's `kind` ("paused" when the artist's fees
  * account can't pay, "network", …), and leaves the claim to be tried again.
  */
-export async function settleClaim(pair, entry, { explicit = false, balanceMicros = null, report = noReport, agreed = agreements() } = {}) {
+export async function settleClaim(pair, entry, { explicit = false, max = null, balanceMicros = null, report = noReport, agreed = agreements(), now = Date.now() } = {}) {
   const url = entry.url;
   if (!claimOf(url)) return { state: "none", paid: [] };
   const where = payees(entry, loadLedger());
@@ -344,8 +352,24 @@ export async function settleClaim(pair, entry, { explicit = false, balanceMicros
   if (before.wait) return { state: "unsure", paid };
   if (before.landed > 0) paid.push(before.landed);
 
-  const left = claimOf(url)?.remaining ?? 0;
+  let left = claimOf(url)?.remaining ?? 0;
   if (left <= 0) return { state: paid.length ? "paid" : "counting", paid };
+
+  // The server's number is a stranger's. Without a tap, only as much of it
+  // is paid as this device's own listening backs up — what the ledger says is
+  // owed to them, and a little for rounding — and no more than a dollar a day
+  // to any one artist. Anything beyond that is put to the listener, with both
+  // figures. With a tap, never more than the amount the tap was for, however
+  // the server's number has changed since.
+  let more = false;
+  if (explicit && max != null) {
+    if (left > max) { left = Math.max(0, max); more = true; }
+  } else if (!explicit) {
+    const vouched = (loadLedger()[url]?.micros || 0) + CLAIM_SLACK_MICROS;
+    const room = Math.min(vouched, UNATTENDED_DAY_MICROS - autoPaidToday(url, now));
+    if (room < LISTEN_MIN_MICROS) return { state: "ask", why: "claim", paid };
+    if (left > room) { left = room; more = true; }
+  }
 
   let wallet = balanceMicros;
   for (const piece of pieces(left)) {
@@ -364,12 +388,31 @@ export async function settleClaim(pair, entry, { explicit = false, balanceMicros
       throw e;
     }
     paid.push(micros);
+    if (!explicit) noteAutoPaid(url, micros, now);
     if (wallet != null) {
       wallet -= micros;
       if (micros < piece) return { state: "funds", paid };
     }
   }
-  return { state: "paid", paid };
+  return more ? { state: "ask", why: "claim", paid } : { state: "paid", paid };
+}
+
+/** A little over the device's own figure, for rounding between the two books. */
+export const CLAIM_SLACK_MICROS = 250_000;
+/** The most a server's claim draws from one artist in a day without a tap. */
+export const UNATTENDED_DAY_MICROS = 1_000_000;
+const AUTO = "amply.claimauto.v1";
+const dayOf = (now) => new Date(now).toISOString().slice(0, 10);
+function autoPaidToday(url, now) {
+  try { const a = JSON.parse(localStorage.getItem(AUTO) || "{}"); return a.day === dayOf(now) ? a.paid?.[url] || 0 : 0; } catch { return 0; }
+}
+function noteAutoPaid(url, micros, now) {
+  try {
+    const a = JSON.parse(localStorage.getItem(AUTO) || "{}");
+    const today = a.day === dayOf(now) ? a : { day: dayOf(now), paid: {} };
+    today.paid[url] = (today.paid[url] || 0) + micros;
+    localStorage.setItem(AUTO, JSON.stringify(today));
+  } catch { /* fine: the daily limit still holds */ }
 }
 
 /**
@@ -383,11 +426,11 @@ export async function settleClaim(pair, entry, { explicit = false, balanceMicros
  * the device: every try is followed by another, sooner or later, until the
  * server says it's paid. Nothing here gives up.
  */
-export async function payClaim(pair, entry, { explicit = false, balanceMicros = null, report = noReport, token = null, now = () => Date.now() } = {}) {
+export async function payClaim(pair, entry, { explicit = false, max = null, balanceMicros = null, report = noReport, token = null, now = () => Date.now() } = {}) {
   const url = entry.url;
   let r;
   try {
-    r = await settleClaim(pair, entry, { explicit, balanceMicros, report });
+    r = await settleClaim(pair, entry, { explicit, max, balanceMicros, report, now: now() });
   } catch (e) {
     backOff(url, e.kind || "unknown", e.message, now());
     throw e;

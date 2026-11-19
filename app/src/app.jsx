@@ -242,6 +242,10 @@ export function App() {
           return (localBlob.current = url);
         }
         if (!track.needsWallet) return track.url;
+        // A paid song's pass identifies this wallet to whoever serves it, so
+        // it's only ever asked of the artist's own server — never another
+        // host a manifest happens to name.
+        if (originOf(track.url) !== originOf(track.from)) throw refuse("refused", "This song isn't served by the artist's own service.");
         const artist = library.current.find((e) => e.url === track.from);
         const data = {
           url: track.from, name: nameOf(artist), art: artist?.manifest?.artist?.image || track.art || null,
@@ -292,7 +296,7 @@ export function App() {
         // The song's own count, for the artist's "most played": nothing about
         // who is kept, so free tracks count too. A paid one is counted only
         // with this wallet's pass. Songs on this phone aren't anyone's.
-        if (track.id && /^https:/.test(track.url || "")) {
+        if (track.id && /^https:/.test(track.url || "") && originOf(track.url) === originOf(track.from)) {
           const origin = originOf(track.url);
           if (!track.needsWallet) reportHeard(origin, track.id, seconds);
           else if (holder.current) {
@@ -584,9 +588,11 @@ export function App() {
     const claim = claimOf(url);
     const entry = library.current.find((e) => e.url === url);
     view.state = state;
+    // What the Pay button pays is what this shows, and no more (payOwes).
+    view.owes = claim ? Math.max(claim.remaining, 0) : view.owes;
     setSheet({ ...unpaidSheet({
       name: entry ? nameOf(entry) : view.name, art: view.art,
-      owes: claim ? Math.max(claim.remaining, 0) : view.owes,
+      owes: view.owes, mine: loadLedger()[url]?.micros || 0,
       state, ...extra,
     }, {
       money,
@@ -624,7 +630,10 @@ export function App() {
     showOwes(url, "paying");
     let r;
     try {
-      r = await payWith(() => payClaim(pair, entry, { ...claimOptions(), explicit: true }));
+      // At most what the sheet showed: a server can't raise it between the
+      // listener reading the amount and tapping Pay.
+      const shown = owesView.current?.url === url ? owesView.current.owes : claimOf(url)?.remaining;
+      r = await payWith(() => payClaim(pair, entry, { ...claimOptions(), explicit: true, max: shown ?? 0 }));
     } catch (e) {
       setLedger(loadLedger());
       if (e.kind === "paused") noteFees([url], [false]);
@@ -1067,6 +1076,8 @@ export function App() {
     (async () => {
       try {
         const e = await knownArtist(url);
+        // Opening it tells their server this wallet's ID: asked first.
+        if (!(await ask({ title: `Open a gift from ${nameOf(e)}?`, body: "Your wallet ID is shared with them.", confirm: "Open", icon: <Icon.heart size={22} /> }))) return;
         const who = await ensureWallet();
         setSheet({ title: "Opening your gift…", body: `From ${nameOf(e)}'s streaming service`, icon: <Icon.heart size={22} />, secondaryLabel: "Hide" });
         const r = await redeemGift(who, originOf(e.url), code);

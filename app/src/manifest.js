@@ -69,6 +69,24 @@ export async function verifiedDomain(url, manifest, alreadyShown = null) {
   return (await confirms(claimed, url).catch(() => false)) ? claimed : null;
 }
 
+/** The body as text, or null once it passes `max` bytes. */
+async function readCapped(res, max) {
+  if (!res.body?.getReader) { const t = await res.text(); return t.length > max ? null : t; }
+  const reader = res.body.getReader(), parts = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) { reader.cancel().catch(() => {}); return null; }
+    parts.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) { all.set(p, at); at += p.byteLength; }
+  return new TextDecoder().decode(all);
+}
+
 async function fetchAt(url) {
   let res;
   try {
@@ -82,8 +100,10 @@ async function fetchAt(url) {
   if (!res.ok) throw new Error(`That address answered with an error (${res.status}).`);
   if (Number(res.headers.get("Content-Length") || 0) > MAX_BYTES) throw new Error("That manifest is too large to be genuine.");
 
-  const text = await res.text();
-  if (text.length > MAX_BYTES) throw new Error("That manifest is too large to be genuine.");
+  // Read in pieces and stopped at the limit: a server that leaves out its
+  // length, or lies about it, can't make the app take in gigabytes.
+  const text = await readCapped(res, MAX_BYTES);
+  if (text == null) throw new Error("That manifest is too large to be genuine.");
 
   let parsed;
   try {

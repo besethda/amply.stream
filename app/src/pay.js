@@ -418,7 +418,8 @@ async function withdrawOffer(origin) {
   if (!o?.feePayer || networkFor(o.network) !== networkName() || !o.withdraw?.to) return null;
   const fee = Number(o.withdraw.fee), newAccountFee = Number(o.withdraw.newAccountFee);
   // A node can't ask more than this, whatever it says.
-  if (!(fee >= 0 && fee <= 100_000 && newAccountFee >= 0 && newAccountFee <= 1_000_000)) return null;
+  // (Their own figures are 5¢, and 50¢ more to open an account: a little room over that.)
+  if (!(fee >= 0 && fee <= 100_000 && newAccountFee >= 0 && newAccountFee <= 700_000)) return null;
   let feePayer;
   try { feePayer = new PublicKey(o.feePayer); } catch { return null; }
   return { feePayer, to: String(o.withdraw.to), fee, newAccountFee };

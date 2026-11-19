@@ -147,6 +147,9 @@ export function unpaidSheet(v, { money, go }) {
   const usd = money(Math.max(v.owes || 0, 0) / 1e6);
   const base = { art: v.art ?? null, seed: name, title: `${name} has paused your listening until you've paid ${usd}` };
   const already = v.partial ? " Part of it has been paid already." : "";
+  // Their number beside this device's own, when they differ by much.
+  const mine = v.mine != null && v.owes > 0 && v.mine < v.owes * 0.9
+    ? ` This device counted ${money(v.mine / 1e6)} of listening.` : "";
   switch (v.state) {
     case "paying": return { ...base, body: `Paying ${usd} to ${name}…`, secondaryLabel: "Hide" };
     case "funds": return {
@@ -180,12 +183,12 @@ export function unpaidSheet(v, { money, go }) {
     };
     case "daily": return {
       ...base,
-      body: `That's for listening you've already done, and goes straight to them. It's more than Amply pays without asking in a day, so it waits for your OK.${already}`,
+      body: `That's for listening you've already done, and goes straight to them. It's more than Amply pays without asking in a day, so it waits for your OK.${mine}${already}`,
       primaryLabel: `Pay ${usd}`, primary: go.pay,
     };
     default: return {
       ...base,
-      body: `That's for listening you've already done, and goes straight to them. Their music plays again as soon as it's paid.${already}`,
+      body: `Their server says that's for listening you've already done. It goes straight to them, and their music plays again once it's paid.${mine}${already}`,
       primaryLabel: `Pay ${usd}`, primary: go.pay,
     };
   }
